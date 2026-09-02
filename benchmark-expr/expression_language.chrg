@@ -1,0 +1,3924 @@
+// A small expression language: tokenizer, Pratt parser, tree-walking
+// interpreter, a constant folder and a pretty printer that round-trips the
+// abstract syntax tree back to source text.
+//
+// The language accepted here looks like this:
+//
+//     let radius = 12;
+//     let area = 3141 * radius ** 2 / 1000;
+//     if area > 100 then "large" else "small"
+//     points[0].x + offset(dx: 4, dy: 5)
+//
+// Numbers are stored as a scaled integer mantissa plus a decimal exponent,
+// because the charge lexer only accepts plain decimal integer literals. The
+// value of a literal is  mantissa * 10^exponent, so the source text `12.5`
+// lexes into the pair (125, -1) and prints back out as `12.5`.
+//
+// The parser is a precedence climbing (Pratt) parser: a single table maps a
+// token kind to a binding power, and `parse_expression` calls itself through
+// the prefix, infix and postfix rules. Those functions are mutually
+// recursive, which is the whole point of the design - the grammar is data,
+// not control flow.
+
+// --- Character constants -------------------------------------------------
+//
+// The tokenizer compares raw characters on nearly every line, so each one
+// that matters gets a name up here rather than being spelled inline.
+
+// --- Spellings -----------------------------------------------------------
+//
+// Both the tokenizer and the printer need the surface text of every
+// operator. Keeping them in one place is what makes the round trip exact.
+
+// Decimal scaling. A number is mantissa * 10^exponent; the tokenizer refuses
+// to keep more than MAX_DIGITS significant digits so the mantissa cannot run
+// away on input like 0.0000000000000000001.
+
+// --- Token kinds ---------------------------------------------------------
+//
+// One entry per distinct spelling. The tokenizer does maximal munch, so
+// `<<=` has to be tried before `<<` and `<<` before `<`.
+
+// --- Node kinds ----------------------------------------------------------
+
+// --- Value kinds ---------------------------------------------------------
+
+// --- Associativity -------------------------------------------------------
+
+// --- Diagnostics ---------------------------------------------------------
+
+    code == ErrorCode_None;
+        "no error";
+
+    code == ErrorCode_UnexpectedCharacter;
+        "unexpected character in the input";
+
+    code == ErrorCode_UnterminatedText;
+        "unterminated string literal, expected a closing quote";
+
+    code == ErrorCode_UnterminatedComment;
+        "unterminated block comment, expected a closing marker";
+
+    code == ErrorCode_BadEscape;
+        "invalid escape sequence after a backslash";
+
+    code == ErrorCode_TooManyDigits;
+        "number has more significant digits than can be represented";
+
+    code == ErrorCode_ExponentRange;
+        "decimal exponent is out of range";
+
+    code == ErrorCode_ExpectedExpression;
+        "expected an expression";
+
+    code == ErrorCode_ExpectedToken;
+        "expected a different token here";
+
+    code == ErrorCode_ExpectedIdentifier;
+        "expected an identifier";
+
+    code == ErrorCode_UnbalancedParen;
+        "expected a closing parenthesis";
+
+    code == ErrorCode_UnbalancedBracket;
+        "expected a closing bracket";
+
+    code == ErrorCode_DepthExceeded;
+        "expression nests too deeply";
+
+    code == ErrorCode_TooManyArguments;
+        "call has too many arguments";
+
+    code == ErrorCode_NotAssignable;
+        "left hand side of the assignment is not assignable";
+
+    code == ErrorCode_UnknownName;
+        "name is not bound in any enclosing scope";
+
+    code == ErrorCode_NotCallable;
+        "value is not callable";
+
+    code == ErrorCode_NotIndexable;
+        "value cannot be indexed";
+
+    code == ErrorCode_WrongArity;
+        "builtin called with the wrong number of arguments";
+
+    code == ErrorCode_DivideByZero;
+        "division by zero";
+
+    code == ErrorCode_TypeMismatch;
+        "operand types do not match the operator";
+
+    "unknown error";
+
+// --- Source positions ----------------------------------------------------
+
+// Every token carries the position it started at so that a diagnostic can
+// point at a line and a column rather than a bare byte offset.
+
+        offset++;
+        c == CHAR_NEWLINE;
+            ++line;
+            column = 1;
+
+            ++column;
+
+        out = "line ";
+        out_append , to_string , line;
+        out_append , ", column ";
+        out_append , to_string , column;
+        out;
+
+// A half open range of the source text. The printer never uses spans, but the
+// interpreter quotes them back when a runtime error happens.
+
+        end_offset - begin_offset;
+
+        length <= 0;
+
+        empty;
+            TEXT_EMPTY;
+
+        source_substr , begin_offset , length;
+
+        out = begin_describe;
+        end_line != begin_line;
+            out_append , " through ";
+            out_append , end_describe;
+
+        out;
+
+        code == ErrorCode_None;
+
+        out = where_describe;
+        out_append , ": ";
+        out_append , error_text , code;
+        detail_size > 0;
+            out_append , " (";
+            out_append , detail;
+            out_append , ")";
+
+        out;
+
+        // --- Tokens --------------------------------------------------------------
+
+        kind == TokenKind_End;
+
+        kind == TokenKind_Number;
+            true;
+
+        kind == TokenKind_Text;
+            true;
+
+        kind == TokenKind_KeywordTrue;
+            true;
+
+        kind == TokenKind_KeywordFalse;
+            true;
+
+        kind == TokenKind_KeywordNull;
+            true;
+
+        false;
+
+        out = token_name , kind;
+        text_size > 0;
+            out_append , " '";
+            out_append , text;
+            out_append , "'";
+
+        out_append , " at ";
+        out_append , span_begin_describe;
+        out;
+
+    // Numeric payload, only meaningful when kind is Number. The literal
+    // value is mantissa * 10^exponent.
+
+// --- Character classification --------------------------------------------
+
+c == CHAR_SPACE || c == CHAR_TAB || c == CHAR_NEWLINE || c == CHAR_RETURN;
+
+c >= '0' && c <= '9';
+
+c >= 'a' && c <= 'z';
+
+c >= 'A' && c <= 'Z';
+
+    is_lower , c;
+        true;
+
+    is_upper , c;
+        true;
+
+    c == CHAR_UNDERSCORE;
+
+    is_letter , c;
+
+    is_letter , c;
+        true;
+
+    is_digit , c;
+
+    int , c - int , CHAR_ZERO;
+
+    is_upper , c;
+        char , int , c + 32;
+
+    c;
+
+    is_lower , c;
+        char , int , c - 32;
+
+    c;
+
+// True when the character can begin an operator token. Anything that is not
+// a letter, a digit, whitespace or a quote has to be one of these.
+
+    c == CHAR_PLUS || c == CHAR_MINUS || c == CHAR_STAR || c == CHAR_SLASH;
+        true;
+
+    c == CHAR_PERCENT || c == CHAR_AMP || c == CHAR_PIPE || c == CHAR_CARET;
+        true;
+
+    c == CHAR_TILDE || c == CHAR_BANG || c == CHAR_LESS || c == CHAR_GREATER;
+        true;
+
+    c == CHAR_EQUAL || c == CHAR_QUESTION || c == CHAR_COLON || c == CHAR_COMMA;
+        true;
+
+    c == CHAR_SEMICOLON || c == CHAR_DOT;
+        true;
+
+    is_bracket , c;
+
+    c == CHAR_LPAREN || c == CHAR_RPAREN;
+        true;
+
+    c == CHAR_LBRACKET || c == CHAR_RBRACKET;
+        true;
+
+    c == CHAR_LBRACE || c == CHAR_RBRACE;
+        true;
+
+    false;
+
+// --- Token spellings -----------------------------------------------------
+//
+// charge has no switch, so the dispatch tables in this file are written as
+// long if / else cascades over the token kind. They are ordered the same way
+// as the enum so that the two stay easy to compare by eye.
+
+    kind == TokenKind_Plus; "+";
+    kind == TokenKind_Minus; "-";
+    kind == TokenKind_Star; "*";
+    kind == TokenKind_Slash; "/";
+    kind == TokenKind_Percent; "%";
+    kind == TokenKind_StarStar; "**";
+    kind == TokenKind_Amp; "&";
+    kind == TokenKind_Pipe; "|";
+    kind == TokenKind_Caret; "^";
+    kind == TokenKind_Tilde; "~";
+    kind == TokenKind_LessLess; "<<";
+    kind == TokenKind_GreaterGreater; ">>";
+    kind == TokenKind_Bang; "!";
+    kind == TokenKind_AmpAmp; "&&";
+    kind == TokenKind_PipePipe; "||";
+    kind == TokenKind_Less; "<";
+    kind == TokenKind_LessEqual; "<=";
+    kind == TokenKind_Greater; ">";
+    kind == TokenKind_GreaterEqual; ">=";
+    kind == TokenKind_EqualEqual; "==";
+    kind == TokenKind_BangEqual; "!=";
+    kind == TokenKind_Equal; "=";
+    kind == TokenKind_PlusEqual; "+=";
+    kind == TokenKind_MinusEqual; "-=";
+    kind == TokenKind_StarEqual; "*=";
+    kind == TokenKind_SlashEqual; "/=";
+    kind == TokenKind_PercentEqual; "%=";
+    kind == TokenKind_AmpEqual; "&=";
+    kind == TokenKind_PipeEqual; "|=";
+    kind == TokenKind_CaretEqual; "^=";
+    kind == TokenKind_LessLessEqual; "<<=";
+    kind == TokenKind_GreaterGreaterEqual; ">>=";
+    kind == TokenKind_PlusPlus; "++";
+    kind == TokenKind_MinusMinus; "--";
+    kind == TokenKind_Question; "?";
+    kind == TokenKind_Colon; ":";
+    kind == TokenKind_Comma; ",";
+    kind == TokenKind_Semicolon; ";";
+    kind == TokenKind_Dot; ".";
+    kind == TokenKind_Arrow; "->";
+    kind == TokenKind_LParen; "(";
+    kind == TokenKind_RParen; ")";
+    kind == TokenKind_LBracket; "[";
+    kind == TokenKind_RBracket; "]";
+    kind == TokenKind_LBrace; "{";
+    kind == TokenKind_RBrace; "}";
+    kind == TokenKind_KeywordLet; "let";
+    kind == TokenKind_KeywordIf; "if";
+    kind == TokenKind_KeywordThen; "then";
+    kind == TokenKind_KeywordElse; "else";
+    kind == TokenKind_KeywordWhile; "while";
+    kind == TokenKind_KeywordFn; "fn";
+    kind == TokenKind_KeywordReturn; "return";
+    kind == TokenKind_KeywordTrue; "true";
+    kind == TokenKind_KeywordFalse; "false";
+    kind == TokenKind_KeywordNull; "null";
+    kind == TokenKind_KeywordAnd; "and";
+    kind == TokenKind_KeywordOr; "or";
+    kind == TokenKind_KeywordNot; "not";
+    TEXT_EMPTY;
+
+// The human readable name, used in diagnostics like "expected ')', found
+// end of input".
+
+    kind == TokenKind_End; "end of input";
+    kind == TokenKind_Invalid; "invalid token";
+    kind == TokenKind_Identifier; "identifier";
+    kind == TokenKind_Number; "number";
+    kind == TokenKind_Text; "string";
+    kind == TokenKind_Comment; "comment";
+    spelling = token_spelling , kind;
+    spelling_size > 0;
+        spelling;
+
+    "token";
+
+// Keyword recognition happens after an identifier has been scanned, so the
+// tokenizer never needs to back up.
+
+    *word == WORD_LET; TokenKind_KeywordLet;
+    *word == WORD_IF; TokenKind_KeywordIf;
+    *word == WORD_THEN; TokenKind_KeywordThen;
+    *word == WORD_ELSE; TokenKind_KeywordElse;
+    *word == WORD_WHILE; TokenKind_KeywordWhile;
+    *word == WORD_FN; TokenKind_KeywordFn;
+    *word == WORD_RETURN; TokenKind_KeywordReturn;
+    *word == WORD_TRUE; TokenKind_KeywordTrue;
+    *word == WORD_FALSE; TokenKind_KeywordFalse;
+    *word == WORD_NULL; TokenKind_KeywordNull;
+    *word == WORD_AND; TokenKind_KeywordAnd;
+    *word == WORD_OR; TokenKind_KeywordOr;
+    *word == WORD_NOT; TokenKind_KeywordNot;
+    TokenKind_Identifier;
+
+    keyword_kind , word != TokenKind_Identifier;
+
+// --- The precedence table ------------------------------------------------
+//
+// Binding powers, lowest first. Every infix operator gets one number; a right
+// associative operator is parsed by recursing with the same power instead of
+// power + 1, which is what `infix_associativity` below decides.
+//
+//      10  = += -= *= /= %= &= |= ^= <<= >>=       (right)
+//      20  ?:                                       (right)
+//      30  || or                                    (left)
+//      40  && and                                   (left)
+//      50  |                                        (left)
+//      60  ^                                        (left)
+//      70  &                                        (left)
+//      80  == !=                                    (left)
+//      90  < <= > >=                                (left)
+//     100  << >>                                    (left)
+//     110  + -                                      (left)
+//     120  * / %                                    (left)
+//     130  **                                       (right)
+//     140  prefix - + ! ~ not ++ --
+//     150  postfix ++ -- and the call, index and member suffixes
+
+// One row of the operator table. The parser does not actually walk a vector
+// of these - the cascades below are faster and easier to read - but the
+// printer and the test harness both want the table as data.
+
+        out = spelling;
+        out_append , " [";
+        out_append , to_string , precedence;
+        associativity == Associativity_Right;
+            out_append , ", right";
+
+        associativity == Associativity_Left;
+            out_append , ", left";
+
+        out_append , "]";
+        out;
+
+    // True when the operator writes through its left operand, which the
+    // constant folder uses to decide whether a subtree is pure.
+
+    rows ;
+    rows_push_back , OperatorRow , TokenKind_Equal , "=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_PlusEqual , "+=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_MinusEqual , "-=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_StarEqual , "*=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_SlashEqual , "/=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_PercentEqual , "%=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_AmpEqual , "&=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_PipeEqual , "|=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_CaretEqual , "^=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_LessLessEqual , "<<=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_GreaterGreaterEqual , ">>=" , PRECEDENCE_ASSIGN , Associativity_Right , true;
+    rows_push_back , OperatorRow , TokenKind_PipePipe , "||" , PRECEDENCE_LOGICAL_OR , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_KeywordOr , "or" , PRECEDENCE_LOGICAL_OR , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_AmpAmp , "&&" , PRECEDENCE_LOGICAL_AND , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_KeywordAnd , "and" , PRECEDENCE_LOGICAL_AND , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Pipe , "|" , PRECEDENCE_BIT_OR , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Caret , "^" , PRECEDENCE_BIT_XOR , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Amp , "&" , PRECEDENCE_BIT_AND , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_EqualEqual , "==" , PRECEDENCE_EQUALITY , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_BangEqual , "!=" , PRECEDENCE_EQUALITY , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Less , "<" , PRECEDENCE_RELATIONAL , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_LessEqual , "<=" , PRECEDENCE_RELATIONAL , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Greater , ">" , PRECEDENCE_RELATIONAL , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_GreaterEqual , ">=" , PRECEDENCE_RELATIONAL , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_LessLess , "<<" , PRECEDENCE_SHIFT , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_GreaterGreater , ">>" , PRECEDENCE_SHIFT , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Plus , "+" , PRECEDENCE_ADDITIVE , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Minus , "-" , PRECEDENCE_ADDITIVE , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Star , "*" , PRECEDENCE_MULTIPLICATIVE , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Slash , "/" , PRECEDENCE_MULTIPLICATIVE , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_Percent , "%" , PRECEDENCE_MULTIPLICATIVE , Associativity_Left;
+    rows_push_back , OperatorRow , TokenKind_StarStar , "**" , PRECEDENCE_POWER , Associativity_Right;
+    rows;
+
+// The binding power of `kind` when it appears between two operands. Zero
+// means "not an infix operator", which is how `parse_expression` knows to
+// stop climbing.
+
+    kind == TokenKind_Equal; PRECEDENCE_ASSIGN;
+    kind == TokenKind_PlusEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_MinusEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_StarEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_SlashEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_PercentEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_AmpEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_PipeEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_CaretEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_LessLessEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_GreaterGreaterEqual; PRECEDENCE_ASSIGN;
+    kind == TokenKind_Question; PRECEDENCE_CONDITIONAL;
+    kind == TokenKind_PipePipe; PRECEDENCE_LOGICAL_OR;
+    kind == TokenKind_KeywordOr; PRECEDENCE_LOGICAL_OR;
+    kind == TokenKind_AmpAmp; PRECEDENCE_LOGICAL_AND;
+    kind == TokenKind_KeywordAnd; PRECEDENCE_LOGICAL_AND;
+    kind == TokenKind_Pipe; PRECEDENCE_BIT_OR;
+    kind == TokenKind_Caret; PRECEDENCE_BIT_XOR;
+    kind == TokenKind_Amp; PRECEDENCE_BIT_AND;
+    kind == TokenKind_EqualEqual; PRECEDENCE_EQUALITY;
+    kind == TokenKind_BangEqual; PRECEDENCE_EQUALITY;
+    kind == TokenKind_Less; PRECEDENCE_RELATIONAL;
+    kind == TokenKind_LessEqual; PRECEDENCE_RELATIONAL;
+    kind == TokenKind_Greater; PRECEDENCE_RELATIONAL;
+    kind == TokenKind_GreaterEqual; PRECEDENCE_RELATIONAL;
+    kind == TokenKind_LessLess; PRECEDENCE_SHIFT;
+    kind == TokenKind_GreaterGreater; PRECEDENCE_SHIFT;
+    kind == TokenKind_Plus; PRECEDENCE_ADDITIVE;
+    kind == TokenKind_Minus; PRECEDENCE_ADDITIVE;
+    kind == TokenKind_Star; PRECEDENCE_MULTIPLICATIVE;
+    kind == TokenKind_Slash; PRECEDENCE_MULTIPLICATIVE;
+    kind == TokenKind_Percent; PRECEDENCE_MULTIPLICATIVE;
+    kind == TokenKind_StarStar; PRECEDENCE_POWER;
+    PRECEDENCE_NONE;
+
+    is_assignment_operator , kind;
+        Associativity_Right;
+
+    kind == TokenKind_Question;
+        Associativity_Right;
+
+    kind == TokenKind_StarStar;
+        Associativity_Right;
+
+    infix_precedence , kind == PRECEDENCE_NONE;
+        Associativity_None;
+
+    Associativity_Left;
+
+// The power a prefix operator binds its single operand with. Prefix
+// operators are always right associative, so `- - x` parses as `-(-x)`.
+
+    kind == TokenKind_Minus; PRECEDENCE_PREFIX;
+    kind == TokenKind_Plus; PRECEDENCE_PREFIX;
+    kind == TokenKind_Bang; PRECEDENCE_PREFIX;
+    kind == TokenKind_KeywordNot; PRECEDENCE_PREFIX;
+    kind == TokenKind_Tilde; PRECEDENCE_PREFIX;
+    kind == TokenKind_PlusPlus; PRECEDENCE_PREFIX;
+    kind == TokenKind_MinusMinus; PRECEDENCE_PREFIX;
+    PRECEDENCE_NONE;
+
+    kind == TokenKind_PlusPlus; PRECEDENCE_POSTFIX;
+    kind == TokenKind_MinusMinus; PRECEDENCE_POSTFIX;
+    kind == TokenKind_Bang; PRECEDENCE_POSTFIX;
+    kind == TokenKind_LParen; PRECEDENCE_POSTFIX;
+    kind == TokenKind_LBracket; PRECEDENCE_POSTFIX;
+    kind == TokenKind_Dot; PRECEDENCE_POSTFIX;
+    PRECEDENCE_NONE;
+
+    kind == TokenKind_Equal; true;
+    kind == TokenKind_PlusEqual; true;
+    kind == TokenKind_MinusEqual; true;
+    kind == TokenKind_StarEqual; true;
+    kind == TokenKind_SlashEqual; true;
+    kind == TokenKind_PercentEqual; true;
+    kind == TokenKind_AmpEqual; true;
+    kind == TokenKind_PipeEqual; true;
+    kind == TokenKind_CaretEqual; true;
+    kind == TokenKind_LessLessEqual; true;
+    kind == TokenKind_GreaterGreaterEqual; true;
+    false;
+
+// A compound assignment such as `a += b` desugars to `a = a + b`, so the
+// evaluator needs the plain operator that hides inside it.
+
+    kind == TokenKind_PlusEqual; TokenKind_Plus;
+    kind == TokenKind_MinusEqual; TokenKind_Minus;
+    kind == TokenKind_StarEqual; TokenKind_Star;
+    kind == TokenKind_SlashEqual; TokenKind_Slash;
+    kind == TokenKind_PercentEqual; TokenKind_Percent;
+    kind == TokenKind_AmpEqual; TokenKind_Amp;
+    kind == TokenKind_PipeEqual; TokenKind_Pipe;
+    kind == TokenKind_CaretEqual; TokenKind_Caret;
+    kind == TokenKind_LessLessEqual; TokenKind_LessLess;
+    kind == TokenKind_GreaterGreaterEqual; TokenKind_GreaterGreater;
+    TokenKind_Invalid;
+
+    // Operators whose right hand side may be skipped entirely.
+
+    kind == TokenKind_AmpAmp || kind == TokenKind_KeywordAnd;
+        true;
+
+    kind == TokenKind_PipePipe || kind == TokenKind_KeywordOr;
+        true;
+
+    false;
+
+    power = infix_precedence , kind;
+    power == PRECEDENCE_EQUALITY;
+        true;
+
+    power == PRECEDENCE_RELATIONAL;
+
+    power = infix_precedence , kind;
+    power == PRECEDENCE_ADDITIVE;
+        true;
+
+    power == PRECEDENCE_MULTIPLICATIVE;
+        true;
+
+    power == PRECEDENCE_POWER;
+
+    power = infix_precedence , kind;
+    power == PRECEDENCE_BIT_OR || power == PRECEDENCE_BIT_XOR;
+        true;
+
+    power == PRECEDENCE_BIT_AND;
+        true;
+
+    power == PRECEDENCE_SHIFT;
+
+// --- The tokenizer -------------------------------------------------------
+//
+// A hand written scanner over a string. It never allocates for a token that
+// it is going to throw away, and every token records the span it covers so
+// that the printer can reproduce the original spacing if it wants to.
+
+        cursor_offset >= source_size;
+
+        source_size - cursor_offset;
+
+        at_end;
+            CHAR_NUL;
+
+        source_at , cursor_offset;
+
+        index = cursor_offset + ahead;
+        index >= source_size;
+            CHAR_NUL;
+
+        source_at , index;
+
+        c = peek;
+        cursor_advance_over , c;
+        c;
+
+    // Consume `c` if it is the next character. Returns whether it was there,
+    // which is what makes the maximal munch cascade below read well.
+
+        peek == c;
+            advance;
+            true;
+
+        false;
+
+        problem_ok;
+            problem_code = code;
+            problem_where = cursor;
+            problem_detail = *detail;
+
+        bad = Token , TokenKind_Invalid , *detail;
+        bad_span_begin = cursor;
+        bad_span_end = cursor;
+        bad;
+
+        out = Token , kind;
+        out_span_begin = *begin;
+        out_span_end = cursor;
+        out_text = source_substr , begin_offset , cursor_offset - begin_offset;
+        out;
+
+    // --- Trivia ----------------------------------------------------------
+
+    // Whitespace, line comments and nestable block comments. When
+    // `keep_comments` is set the caller gets the comment back as a token
+    // instead, which is what the formatter mode wants.
+
+            !at_end && is_space , peek;
+                advance;
+
+            at_line_comment;
+                skip_line_comment;
+
+                at_block_comment;
+                    skip_block_comment;
+
+        peek != CHAR_SLASH;
+            false;
+
+        peek_at , 1 == CHAR_SLASH;
+
+        peek != CHAR_SLASH;
+            false;
+
+        peek_at , 1 == CHAR_STAR;
+
+        advance;
+        advance;
+        !at_end && peek != CHAR_NEWLINE;
+            advance;
+
+    // Block comments nest, so a commented out region that already contains a
+    // comment still ends where the reader expects it to.
+
+        advance;
+        advance;
+        depth = 1;
+        depth > 0;
+            at_end;
+                problem_code = ErrorCode_UnterminatedComment;
+                problem_where = cursor;
+
+            at_block_comment;
+                advance;
+                advance;
+                depth++;
+
+                peek == CHAR_STAR && peek_at , 1 == CHAR_SLASH;
+                    advance;
+                    advance;
+                    depth--;
+
+                    advance;
+
+        begin = cursor;
+        at_line_comment;
+            skip_line_comment;
+
+            skip_block_comment;
+
+        make , TokenKind_Comment , begin;
+
+        // --- Words -----------------------------------------------------------
+
+        begin = cursor;
+        advance;
+        !at_end && is_identifier_body , peek;
+            advance;
+
+        word = make , TokenKind_Identifier , begin;
+        word_kind = keyword_kind , word_text;
+        word;
+
+    // --- Numbers ---------------------------------------------------------
+    //
+    // The literal grammar is
+    //
+    //     digits [ '.' digits ] [ ('e'|'E') ['+'|'-'] digits ]
+    //
+    // and the result is the pair (mantissa, exponent) such that the value is
+    // mantissa * 10^exponent. Digits past MAX_DIGITS are dropped and the
+    // exponent is bumped instead, so `123456789012345678901` still lexes.
+
+        begin = cursor;
+        mantissa = 0;
+        exponent = 0;
+        digits = 0;
+        seen_any = false;
+
+        !at_end && is_digit , peek;
+            d = digit_value , advance;
+            seen_any = true;
+            digits < MAX_DIGITS;
+                mantissa = mantissa * NUMBER_BASE + d;
+                mantissa != 0;
+                    digits++;
+
+                ++exponent;
+
+        peek == CHAR_DOT && is_digit , peek_at , 1;
+            advance;
+            !at_end && is_digit , peek;
+                d = digit_value , advance;
+                seen_any = true;
+                digits < MAX_DIGITS;
+                    mantissa = mantissa * NUMBER_BASE + d;
+                    --exponent;
+                    digits++;
+
+        !seen_any;
+            fail , ErrorCode_UnexpectedCharacter , "expected at least one digit";
+
+        peek == 'e' || peek == 'E';
+            saved = cursor;
+            advance;
+            sign = 1;
+            eat , CHAR_MINUS;
+                sign = -1;
+
+                eat , CHAR_PLUS;
+
+            is_digit , peek;
+                written = 0;
+                !at_end && is_digit , peek;
+                    written = written * NUMBER_BASE + digit_value , advance;
+                    written > MAX_EXPONENT * NUMBER_BASE;
+                        fail , ErrorCode_ExponentRange , "exponent is too large";
+
+                exponent += sign * written;
+
+                // Not an exponent after all, `2eggs` is `2` then a word.
+                cursor = saved;
+
+        exponent > MAX_EXPONENT || exponent < MIN_EXPONENT;
+            fail , ErrorCode_ExponentRange , "decimal exponent leaves the supported range";
+
+        number = make , TokenKind_Number , begin;
+        number_mantissa = mantissa;
+        number_exponent = exponent;
+        number;
+
+        // --- Strings ---------------------------------------------------------
+
+        begin = cursor;
+        advance;
+        decoded = "";
+
+            at_end;
+                fail , ErrorCode_UnterminatedText , "reached end of input inside a string";
+
+            c = advance;
+            c == CHAR_QUOTE;
+
+            c != CHAR_BACKSLASH;
+                decoded_push_back , c;
+
+                at_end;
+                    fail , ErrorCode_UnterminatedText , "trailing backslash";
+
+                marker = advance;
+                plain = decode_escape , marker;
+                plain != CHAR_NUL;
+                    decoded_push_back , plain;
+
+                    detail = "unknown escape marker ";
+                    detail_push_back , marker;
+                    fail , ErrorCode_BadEscape , detail;
+
+        out = make , TokenKind_Text , begin;
+        out_text = decoded;
+        out;
+
+    // --- Operators -------------------------------------------------------
+    //
+    // Maximal munch: three character operators are tried before two and two
+    // before one. This is the densest cascade in the file and it is the part
+    // the parser leans on hardest.
+
+        begin = cursor;
+        c = advance;
+
+        c == CHAR_PLUS;
+            eat , CHAR_EQUAL; make , TokenKind_PlusEqual , begin;
+            eat , CHAR_PLUS; make , TokenKind_PlusPlus , begin;
+            make , TokenKind_Plus , begin;
+
+        c == CHAR_MINUS;
+            eat , CHAR_EQUAL; make , TokenKind_MinusEqual , begin;
+            eat , CHAR_MINUS; make , TokenKind_MinusMinus , begin;
+            eat , CHAR_GREATER; make , TokenKind_Arrow , begin;
+            make , TokenKind_Minus , begin;
+
+        c == CHAR_STAR;
+            eat , CHAR_STAR; make , TokenKind_StarStar , begin;
+            eat , CHAR_EQUAL; make , TokenKind_StarEqual , begin;
+            make , TokenKind_Star , begin;
+
+        c == CHAR_SLASH;
+            eat , CHAR_EQUAL; make , TokenKind_SlashEqual , begin;
+            make , TokenKind_Slash , begin;
+
+        c == CHAR_PERCENT;
+            eat , CHAR_EQUAL; make , TokenKind_PercentEqual , begin;
+            make , TokenKind_Percent , begin;
+
+        c == CHAR_AMP;
+            eat , CHAR_AMP; make , TokenKind_AmpAmp , begin;
+            eat , CHAR_EQUAL; make , TokenKind_AmpEqual , begin;
+            make , TokenKind_Amp , begin;
+
+        c == CHAR_PIPE;
+            eat , CHAR_PIPE; make , TokenKind_PipePipe , begin;
+            eat , CHAR_EQUAL; make , TokenKind_PipeEqual , begin;
+            make , TokenKind_Pipe , begin;
+
+        c == CHAR_CARET;
+            eat , CHAR_EQUAL; make , TokenKind_CaretEqual , begin;
+            make , TokenKind_Caret , begin;
+
+        c == CHAR_TILDE;
+            make , TokenKind_Tilde , begin;
+
+        c == CHAR_BANG;
+            eat , CHAR_EQUAL; make , TokenKind_BangEqual , begin;
+            make , TokenKind_Bang , begin;
+
+        c == CHAR_LESS;
+            eat , CHAR_LESS;
+                eat , CHAR_EQUAL; make , TokenKind_LessLessEqual , begin;
+                make , TokenKind_LessLess , begin;
+
+            eat , CHAR_EQUAL; make , TokenKind_LessEqual , begin;
+            make , TokenKind_Less , begin;
+
+        c == CHAR_GREATER;
+            eat , CHAR_GREATER;
+                eat , CHAR_EQUAL; make , TokenKind_GreaterGreaterEqual , begin;
+                make , TokenKind_GreaterGreater , begin;
+
+            eat , CHAR_EQUAL; make , TokenKind_GreaterEqual , begin;
+            make , TokenKind_Greater , begin;
+
+        c == CHAR_EQUAL;
+            eat , CHAR_EQUAL; make , TokenKind_EqualEqual , begin;
+            make , TokenKind_Equal , begin;
+
+        c == CHAR_QUESTION;
+            make , TokenKind_Question , begin;
+
+        c == CHAR_COLON;
+            make , TokenKind_Colon , begin;
+
+        c == CHAR_COMMA;
+            make , TokenKind_Comma , begin;
+
+        c == CHAR_SEMICOLON;
+            make , TokenKind_Semicolon , begin;
+
+        c == CHAR_DOT;
+            make , TokenKind_Dot , begin;
+
+        c == CHAR_LPAREN; make , TokenKind_LParen , begin;
+        c == CHAR_RPAREN; make , TokenKind_RParen , begin;
+        c == CHAR_LBRACKET; make , TokenKind_LBracket , begin;
+        c == CHAR_RBRACKET; make , TokenKind_RBracket , begin;
+        c == CHAR_LBRACE; make , TokenKind_LBrace , begin;
+        c == CHAR_RBRACE; make , TokenKind_RBrace , begin;
+
+        detail = "stray byte ";
+        detail_append , to_string , int , c;
+        fail , ErrorCode_UnexpectedCharacter , detail;
+
+        // --- The driver ------------------------------------------------------
+
+        keep_comments;
+            !at_end && is_space , peek;
+                advance;
+
+            at_line_comment || at_block_comment;
+                scan_comment;
+
+            skip_trivia;
+
+        begin = cursor;
+        at_end;
+            done = Token , TokenKind_End;
+            done_span_begin = begin;
+            done_span_end = begin;
+            done;
+
+        c = peek;
+        is_identifier_start , c;
+            scan_identifier;
+
+        is_digit , c;
+            scan_number;
+
+        c == CHAR_DOT && is_digit , peek_at , 1;
+            scan_number;
+
+        c == CHAR_QUOTE;
+            scan_text;
+
+        is_operator_start , c;
+            scan_operator;
+
+        advance;
+        detail = "character ";
+        detail_push_back , c;
+        fail , ErrorCode_UnexpectedCharacter , detail;
+
+// The eight single character escapes the string scanner understands. NUL is
+// the "not an escape" answer, which is fine because a source file may not
+// contain a raw NUL anyway.
+
+    marker == 'n'; CHAR_NEWLINE;
+    marker == 't'; CHAR_TAB;
+    marker == 'r'; CHAR_RETURN;
+    marker == CHAR_QUOTE; CHAR_QUOTE;
+    marker == CHAR_BACKSLASH; CHAR_BACKSLASH;
+    marker == '0'; CHAR_SPACE;
+    marker == 'e'; CHAR_SPACE;
+    CHAR_NUL;
+
+    c == CHAR_QUOTE; "\\\"";
+    c == CHAR_BACKSLASH; "\\\\";
+    c == CHAR_NEWLINE; "\\n";
+    c == CHAR_TAB; "\\t";
+    c == CHAR_RETURN; "\\r";
+    TEXT_EMPTY;
+
+// Run the tokenizer to completion. Used by the test harness and by the
+// formatter, both of which want the whole stream up front.
+
+    scanner = Tokenizer , *source;
+    out ;
+
+        token = scanner_next_token;
+        out_push_back , token;
+        token_kind == TokenKind_End;
+
+        token_kind == TokenKind_Invalid;
+
+    out;
+
+// --- The syntax tree -----------------------------------------------------
+//
+// Nodes live in one flat arena and refer to each other by index. That keeps
+// every node the same size, makes the constant folder able to rewrite a
+// subtree in place, and sidesteps the ownership question that a tree of
+// unique pointers would raise.
+//
+// Index 0 is always the invalid node, so a zero child means "absent".
+
+        kind == NodeKind_NumberLiteral; true;
+        kind == NodeKind_TextLiteral; true;
+        kind == NodeKind_BoolLiteral; true;
+        kind == NodeKind_NullLiteral; true;
+        false;
+
+        is_literal;
+            true;
+
+        kind == NodeKind_Variable; true;
+        kind == NodeKind_Empty; true;
+        false;
+
+        // An lvalue is anything an assignment may be written through.
+
+        kind == NodeKind_Variable; true;
+        kind == NodeKind_Index; true;
+        kind == NodeKind_Member; true;
+        false;
+
+        total = 0;
+        lhs != NO_NODE; total++;
+        rhs != NO_NODE; ++total;
+        extra != NO_NODE; total++;
+        total + parts_size;
+
+        node_kind_name , kind;
+
+    // The operator for Unary, Binary, Postfix and Assign nodes.
+
+    // Up to three positional children: the operand or condition, the second
+    // operand or the then branch, and the else branch.
+
+    // Variable width children: call arguments and block statements.
+
+    // Literal payloads.
+
+    kind == NodeKind_Invalid; "invalid";
+    kind == NodeKind_NumberLiteral; "number";
+    kind == NodeKind_TextLiteral; "string";
+    kind == NodeKind_BoolLiteral; "bool";
+    kind == NodeKind_NullLiteral; "null";
+    kind == NodeKind_Variable; "variable";
+    kind == NodeKind_Unary; "unary";
+    kind == NodeKind_Binary; "binary";
+    kind == NodeKind_Postfix; "postfix";
+    kind == NodeKind_Assign; "assign";
+    kind == NodeKind_Call; "call";
+    kind == NodeKind_Index; "index";
+    kind == NodeKind_Member; "member";
+    kind == NodeKind_Conditional; "conditional";
+    kind == NodeKind_Let; "let";
+    kind == NodeKind_Block; "block";
+    kind == NodeKind_Loop; "loop";
+    kind == NodeKind_Return; "return";
+    kind == NodeKind_Empty; "empty";
+    "unknown";
+
+// The arena. Every function that builds or walks a tree takes one of these
+// by reference; nothing else owns a node.
+
+        nodes_size;
+
+        index <= NO_NODE;
+            false;
+
+        index < nodes_size;
+
+        index >= 0;
+        !valid , index;
+            nodes , 0;
+
+        nodes , index;
+
+        !valid , index;
+            NodeKind_Invalid;
+
+        nodes , index_kind;
+
+        !valid , index;
+            TokenKind_Invalid;
+
+        nodes , index_op;
+
+        nodes_push_back , move , node;
+        nodes_size - 1;
+
+        add , Node , NodeKind_NumberLiteral , mantissa , exponent;
+
+        add , Node , NodeKind_TextLiteral , *text;
+
+        add , Node , NodeKind_BoolLiteral , value;
+
+        add , Node , NodeKind_NullLiteral;
+
+        add , Node , NodeKind_Variable , *name;
+
+        add , Node , NodeKind_Unary , op , operand;
+
+        add , Node , NodeKind_Binary , op , left , right;
+
+        add , Node , NodeKind_Conditional , condition , whenever , otherwise;
+
+    // Replace a node in place. The folder uses this so that every parent
+    // that already points at `index` sees the rewritten value.
+
+        !valid , index;
+
+        slot = nodes , index;
+        slot_kind = node_kind;
+        slot_op = node_op;
+        slot_lhs = node_lhs;
+        slot_rhs = node_rhs;
+        slot_extra = node_extra;
+        slot_mantissa = node_mantissa;
+        slot_exponent = node_exponent;
+        slot_text = node_text;
+        slot_flag = node_flag;
+
+        !valid , index;
+
+        slot = nodes , index;
+        slot_kind = NodeKind_NumberLiteral;
+        slot_op = TokenKind_Invalid;
+        slot_lhs = NO_NODE;
+        slot_rhs = NO_NODE;
+        slot_extra = NO_NODE;
+        slot_mantissa = mantissa;
+        slot_exponent = exponent;
+        slot_parts_clear;
+
+        !valid , index;
+
+        slot = nodes , index;
+        slot_kind = NodeKind_BoolLiteral;
+        slot_op = TokenKind_Invalid;
+        slot_lhs = NO_NODE;
+        slot_rhs = NO_NODE;
+        slot_extra = NO_NODE;
+        slot_flag = value;
+        slot_parts_clear;
+
+    // Splice `source` into this arena, returning the index of the copy. Used
+    // when a fold turns `if true then a else b` into just `a`: the surviving
+    // branch has to keep its own children.
+
+        !valid , index;
+            NO_NODE;
+
+        copy = Node , nodes , index_kind , nodes , index_op;
+        copy_mantissa = nodes , index_mantissa;
+        copy_exponent = nodes , index_exponent;
+        copy_text = nodes , index_text;
+        copy_flag = nodes , index_flag;
+        copy_lhs = nodes , index_lhs;
+        copy_rhs = nodes , index_rhs;
+        copy_extra = nodes , index_extra;
+        child , nodes , index_parts;
+            copy_parts_push_back , child;
+
+        add , move , copy;
+
+        nodes_clear;
+        nodes_push_back , Node , NodeKind_Invalid;
+
+    arena ;
+    arena_clear;
+    arena;
+
+// --- The parser ----------------------------------------------------------
+//
+// Precedence climbing. `parse_expression(power)` parses a prefix form and
+// then keeps absorbing infix and postfix operators for as long as their
+// binding power is at least `power`. The prefix, infix and postfix helpers
+// all call back into `parse_expression`, so the whole family is mutually
+// recursive and the shape of the grammar lives in the precedence table
+// rather than in the control flow.
+
+// --- Token access ----------------------------------------------------
+
+        lookahead;
+
+        lookahead_kind;
+
+        lookahead_kind == kind;
+
+        lookahead_kind == TokenKind_End;
+
+        previous = lookahead;
+        lookahead = scanner_next_token;
+        lookahead_kind == TokenKind_Invalid;
+            adopt_scanner_error;
+
+        previous;
+
+        at , kind;
+            advance;
+            true;
+
+        false;
+
+        eat , kind;
+            true;
+
+        detail = "expected ";
+        detail_append , token_name , kind;
+        detail_append , ", found ";
+        detail_append , token_name , lookahead_kind;
+        report , ErrorCode_ExpectedToken , detail;
+        false;
+
+        problem_ok;
+            problem = scanner_problem;
+
+        problem_ok;
+            problem_code = code;
+            problem_where = lookahead_span_begin;
+            problem_detail = *detail;
+
+        !problem_ok;
+
+    // Recover by skipping to the next statement boundary. Without this a
+    // single bad token would produce one error per remaining token.
+
+        !at_end;
+            at , TokenKind_Semicolon;
+                advance;
+
+            at , TokenKind_RBrace;
+
+            advance;
+
+            // --- Depth guard -----------------------------------------------------
+
+        ++depth;
+        depth > MAX_DEPTH;
+            report , ErrorCode_DepthExceeded , "nesting limit reached";
+            false;
+
+        true;
+
+        depth--;
+
+        // --- Entry points ----------------------------------------------------
+
+        scanner = Tokenizer , *source;
+        tree_clear;
+        problem = Diagnostic;
+        depth = 0;
+        lookahead = scanner_next_token;
+
+        // A whole program is a sequence of statements, gathered into one block.
+
+        start , source;
+        block = Node , NodeKind_Block;
+        block_span_begin = lookahead_span_begin;
+        !at_end && !failed;
+            statement = parse_statement;
+            statement != NO_NODE;
+                block_parts_push_back , statement;
+
+                recover;
+
+        block_span_end = lookahead_span_end;
+        tree_add , move , block;
+
+    // The convenience entry point for a single expression, which is what the
+    // read eval print loop and most of the tests use.
+
+        start , source;
+        root = parse_expression , PRECEDENCE_NONE;
+        !at_end && !failed;
+            report , ErrorCode_ExpectedToken , "trailing content after the expression";
+
+        root;
+
+        // --- Statements ------------------------------------------------------
+
+        at , TokenKind_Semicolon;
+            advance;
+            tree_add , Node , NodeKind_Empty;
+
+        at , TokenKind_KeywordLet;
+            parse_let;
+
+        at , TokenKind_KeywordWhile;
+            parse_loop;
+
+        at , TokenKind_KeywordReturn;
+            parse_return;
+
+        at , TokenKind_LBrace;
+            parse_block;
+
+        value = parse_expression , PRECEDENCE_NONE;
+        eat , TokenKind_Semicolon;
+        value;
+
+        // `let name = expression ;`
+
+        keyword = advance;
+        !at , TokenKind_Identifier;
+            report , ErrorCode_ExpectedIdentifier , "a binding needs a name";
+            NO_NODE;
+
+        name = advance;
+        binding = Node , NodeKind_Let , name_text;
+        binding_span_begin = keyword_span_begin;
+        eat , TokenKind_Equal;
+            binding_lhs = parse_expression , PRECEDENCE_NONE;
+
+            binding_lhs = tree_add_null;
+
+        eat , TokenKind_Semicolon;
+        binding_span_end = lookahead_span_begin;
+        tree_add , move , binding;
+
+        // `while condition { body }`
+
+        keyword = advance;
+        node = Node , NodeKind_Loop;
+        node_span_begin = keyword_span_begin;
+        node_lhs = parse_expression , PRECEDENCE_NONE;
+        at , TokenKind_LBrace;
+            node_rhs = parse_block;
+
+            node_rhs = parse_statement;
+
+        node_span_end = lookahead_span_begin;
+        tree_add , move , node;
+
+        keyword = advance;
+        node = Node , NodeKind_Return;
+        node_span_begin = keyword_span_begin;
+        at , TokenKind_Semicolon;
+            node_lhs = tree_add_null;
+
+            node_lhs = parse_expression , PRECEDENCE_NONE;
+
+        eat , TokenKind_Semicolon;
+        tree_add , move , node;
+
+        // `{ statement* }`
+
+        !enter;
+            NO_NODE;
+
+        open = advance;
+        block = Node , NodeKind_Block;
+        block_span_begin = open_span_begin;
+        !at , TokenKind_RBrace && !at_end && !failed;
+            statement = parse_statement;
+            statement == NO_NODE;
+                recover;
+
+                block_parts_push_back , statement;
+
+        !expect , TokenKind_RBrace;
+            leave;
+            NO_NODE;
+
+        block_span_end = lookahead_span_begin;
+        leave;
+        tree_add , move , block;
+
+    // --- The climbing loop -----------------------------------------------
+    //
+    // This is the heart of the parser. Everything else in this struct exists
+    // to be called from here or to call back into here.
+
+        !enter;
+            NO_NODE;
+
+        left = parse_prefix;
+        left == NO_NODE;
+            leave;
+            NO_NODE;
+
+            failed;
+
+            kind = peek_kind;
+
+            // Postfix binds tighter than any infix operator, so it is tried
+            // first and it never consults `minimum`.
+            postfix = postfix_precedence , kind;
+            postfix != PRECEDENCE_NONE && postfix >= minimum;
+                extended = parse_postfix , left;
+                extended == NO_NODE;
+
+                extended != left;
+                    left = extended;
+
+            power = infix_precedence , kind;
+            power == PRECEDENCE_NONE;
+
+            power < minimum;
+
+            left = parse_infix , left , power;
+            left == NO_NODE;
+
+        leave;
+        left;
+
+    // --- Prefix rules ----------------------------------------------------
+    //
+    // One arm per token kind that may begin an expression.
+
+        kind = peek_kind;
+
+        kind == TokenKind_Number;
+            token = advance;
+            literal = Node , NodeKind_NumberLiteral;
+            literal_mantissa = token_mantissa;
+            literal_exponent = token_exponent;
+            literal_text = token_text;
+            literal_span = token_span;
+            tree_add , move , literal;
+
+        kind == TokenKind_Text;
+            token = advance;
+            literal = Node , NodeKind_TextLiteral , token_text;
+            literal_span = token_span;
+            tree_add , move , literal;
+
+        kind == TokenKind_KeywordTrue;
+            token = advance;
+            literal = Node , NodeKind_BoolLiteral , true;
+            literal_span = token_span;
+            tree_add , move , literal;
+
+        kind == TokenKind_KeywordFalse;
+            token = advance;
+            literal = Node , NodeKind_BoolLiteral , false;
+            literal_span = token_span;
+            tree_add , move , literal;
+
+        kind == TokenKind_KeywordNull;
+            token = advance;
+            literal = Node , NodeKind_NullLiteral;
+            literal_span = token_span;
+            tree_add , move , literal;
+
+        kind == TokenKind_Identifier;
+            token = advance;
+            name = Node , NodeKind_Variable , token_text;
+            name_span = token_span;
+            tree_add , move , name;
+
+        kind == TokenKind_LParen;
+            parse_group;
+
+        kind == TokenKind_LBracket;
+            parse_list;
+
+        kind == TokenKind_KeywordIf;
+            parse_if;
+
+        prefix_precedence , kind != PRECEDENCE_NONE;
+            parse_unary;
+
+        detail = "found ";
+        detail_append , token_name , kind;
+        detail_append , " where an operand was required";
+        report , ErrorCode_ExpectedExpression , detail;
+        NO_NODE;
+
+        token = advance;
+        node = Node , NodeKind_Unary , token_kind;
+        node_span_begin = token_span_begin;
+        node_lhs = parse_expression , prefix_precedence , token_kind;
+        node_lhs == NO_NODE;
+            NO_NODE;
+
+        node_span_end = lookahead_span_begin;
+        tree_add , move , node;
+
+    // A parenthesised expression carries no node of its own; the printer
+    // reinserts the parentheses from the precedence table instead, which is
+    // what makes the round trip minimal rather than literal.
+
+        advance;
+        inner = parse_expression , PRECEDENCE_NONE;
+        inner == NO_NODE;
+            NO_NODE;
+
+        !at , TokenKind_RParen;
+            report , ErrorCode_UnbalancedParen , "the group opened earlier is never closed";
+            NO_NODE;
+
+        advance;
+        inner;
+
+    // `[ a, b, c ]` builds a Call to the builtin list constructor, which
+    // keeps the evaluator from needing a separate node kind.
+
+        open = advance;
+        call = Node , NodeKind_Call;
+        call_span_begin = open_span_begin;
+        call_lhs = tree_add_variable , "list";
+        !at , TokenKind_RBracket;
+
+                element = parse_expression , PRECEDENCE_ASSIGN;
+                element == NO_NODE;
+                    NO_NODE;
+
+                call_parts_push_back , element;
+                !eat , TokenKind_Comma;
+
+                at , TokenKind_RBracket;
+
+        !expect , TokenKind_RBracket;
+            NO_NODE;
+
+        call_span_end = lookahead_span_begin;
+        tree_add , move , call;
+
+    // The keyword form of a conditional: `if c then a else b`. The operator
+    // form is handled by `parse_infix` when it sees a question mark.
+
+        keyword = advance;
+        node = Node , NodeKind_Conditional;
+        node_span_begin = keyword_span_begin;
+        node_lhs = parse_expression , PRECEDENCE_CONDITIONAL;
+        node_lhs == NO_NODE;
+            NO_NODE;
+
+        !expect , TokenKind_KeywordThen;
+            NO_NODE;
+
+        node_rhs = parse_expression , PRECEDENCE_CONDITIONAL;
+        node_rhs == NO_NODE;
+            NO_NODE;
+
+        eat , TokenKind_KeywordElse;
+            node_extra = parse_expression , PRECEDENCE_CONDITIONAL;
+            node_extra == NO_NODE;
+                NO_NODE;
+
+            node_extra = tree_add_null;
+
+        node_span_end = lookahead_span_begin;
+        tree_add , move , node;
+
+        // --- Infix rules -----------------------------------------------------
+
+        token = advance;
+        kind = token_kind;
+
+        kind == TokenKind_Question;
+            parse_conditional_tail , left;
+
+        is_assignment_operator , kind;
+            parse_assignment_tail , left , kind;
+
+        next_power = power + 1;
+        infix_associativity , kind == Associativity_Right;
+            next_power = power;
+
+        right = parse_expression , next_power;
+        right == NO_NODE;
+            NO_NODE;
+
+        node = Node , NodeKind_Binary , kind , left , right;
+        node_span_begin = tree_at , left_span_begin;
+        node_span_end = tree_at , right_span_end;
+        tree_add , move , node;
+
+    // The question mark has already been consumed; the branches parse at the
+    // conditional level so that a nested conditional groups to the right.
+
+        node = Node , NodeKind_Conditional , condition;
+        node_span_begin = tree_at , condition_span_begin;
+        node_rhs = parse_expression , PRECEDENCE_NONE;
+        node_rhs == NO_NODE;
+            NO_NODE;
+
+        !expect , TokenKind_Colon;
+            NO_NODE;
+
+        node_extra = parse_expression , PRECEDENCE_CONDITIONAL;
+        node_extra == NO_NODE;
+            NO_NODE;
+
+        node_flag = true;
+        node_span_end = lookahead_span_begin;
+        tree_add , move , node;
+
+        !tree_at , target_is_assignable;
+            detail = "cannot assign to a ";
+            detail_append , node_kind_name , tree_kind_of , target;
+            detail_append , " expression";
+            report , ErrorCode_NotAssignable , detail;
+            NO_NODE;
+
+        value = parse_expression , PRECEDENCE_ASSIGN;
+        value == NO_NODE;
+            NO_NODE;
+
+        node = Node , NodeKind_Assign , op , target , value;
+        node_span_begin = tree_at , target_span_begin;
+        node_span_end = tree_at , value_span_end;
+        tree_add , move , node;
+
+    // --- Postfix rules ---------------------------------------------------
+    //
+    // Returns `left` unchanged when the next token turns out not to start a
+    // suffix after all, which the climbing loop reads as "stop trying".
+
+        kind = peek_kind;
+        kind == TokenKind_LParen;
+            parse_call , left;
+
+        kind == TokenKind_LBracket;
+            parse_index , left;
+
+        kind == TokenKind_Dot;
+            parse_member , left;
+
+        kind == TokenKind_PlusPlus || kind == TokenKind_MinusMinus;
+            token = advance;
+            node = Node , NodeKind_Postfix , token_kind , left;
+            node_span_begin = tree_at , left_span_begin;
+            node_span_end = token_span_end;
+            tree_add , move , node;
+
+        kind == TokenKind_Bang;
+            // Postfix `!` is factorial, but only after something that can
+            // actually produce a number.
+            tree_kind_of , left == NodeKind_NumberLiteral || tree_kind_of , left == NodeKind_Variable;
+                token = advance;
+                node = Node , NodeKind_Postfix , token_kind , left;
+                node_span_begin = tree_at , left_span_begin;
+                node_span_end = token_span_end;
+                tree_add , move , node;
+
+        left;
+
+        // `callee ( argument, name: argument )`
+
+        open = advance;
+        node = Node , NodeKind_Call , callee;
+        node_span_begin = tree_at , callee_span_begin;
+        !at , TokenKind_RParen;
+
+                node_parts_size >= MAX_ARGUMENTS;
+                    report , ErrorCode_TooManyArguments , "argument limit reached";
+                    NO_NODE;
+
+                argument = parse_argument;
+                argument == NO_NODE;
+                    NO_NODE;
+
+                node_parts_push_back , argument;
+                !eat , TokenKind_Comma;
+
+        !expect , TokenKind_RParen;
+            NO_NODE;
+
+        node_span_end = lookahead_span_begin;
+        open;
+        tree_add , move , node;
+
+    // An argument is either a bare expression or `name: expression`. The
+    // label is stored on a Let node wrapping the value, which the evaluator
+    // unwraps when it binds parameters.
+
+        at , TokenKind_Identifier;
+            saved = lookahead;
+            name = advance;
+            eat , TokenKind_Colon;
+                labelled = Node , NodeKind_Let , name_text , true;
+                labelled_span_begin = name_span_begin;
+                labelled_lhs = parse_expression , PRECEDENCE_ASSIGN;
+                labelled_lhs == NO_NODE;
+                    NO_NODE;
+
+                labelled_span_end = lookahead_span_begin;
+                tree_add , move , labelled;
+
+            // Not a label: rebuild the variable the lookahead already ate and
+            // keep parsing from there.
+            variable = Node , NodeKind_Variable , name_text;
+            variable_span = saved_span;
+            base = tree_add , move , variable;
+            continue_expression , base , PRECEDENCE_ASSIGN;
+
+        parse_expression , PRECEDENCE_ASSIGN;
+
+    // Resume the climbing loop with an operand that has already been built.
+    // This is what lets `parse_argument` back out of a mistaken label.
+
+        current = left;
+
+            failed;
+
+            kind = peek_kind;
+            postfix = postfix_precedence , kind;
+            postfix != PRECEDENCE_NONE;
+                extended = parse_postfix , current;
+                extended == NO_NODE;
+                    NO_NODE;
+
+                extended != current;
+                    current = extended;
+
+            power = infix_precedence , kind;
+            power == PRECEDENCE_NONE || power < minimum;
+
+            current = parse_infix , current , power;
+            current == NO_NODE;
+                NO_NODE;
+
+        current;
+
+        advance;
+        node = Node , NodeKind_Index , target;
+        node_span_begin = tree_at , target_span_begin;
+        node_rhs = parse_expression , PRECEDENCE_NONE;
+        node_rhs == NO_NODE;
+            NO_NODE;
+
+        !at , TokenKind_RBracket;
+            report , ErrorCode_UnbalancedBracket , "the subscript opened earlier is never closed";
+            NO_NODE;
+
+        advance;
+        node_span_end = lookahead_span_begin;
+        tree_add , move , node;
+
+        advance;
+        !at , TokenKind_Identifier;
+            report , ErrorCode_ExpectedIdentifier , "a member access needs a field name";
+            NO_NODE;
+
+        name = advance;
+        node = Node , NodeKind_Member , target , name_text;
+        node_span_begin = tree_at , target_span_begin;
+        node_span_end = name_span_end;
+        tree_add , move , node;
+
+        tree;
+
+// One shot helper: parse a source string and hand back both the arena and
+// the root, so callers do not have to keep the parser alive.
+
+        root == NO_NODE;
+            false;
+
+        problem_ok;
+
+        ok;
+            "parsed";
+
+        problem_describe;
+
+    parser ;
+    root = parser_parse_source , source;
+    out ;
+    out_root = root;
+    out_problem = parser_problem;
+    out_tree = move , parser_tree;
+    out;
+
+    parser ;
+    root = parser_parse_program , source;
+    out ;
+    out_root = root;
+    out_problem = parser_problem;
+    out_tree = move , parser_tree;
+    out;
+
+// --- Scaled decimal arithmetic -------------------------------------------
+//
+// Every number in this language is a pair (mantissa, exponent) standing for
+// mantissa * 10^exponent. Addition has to line the exponents up first;
+// multiplication just adds them. Nothing here rounds to nearest, it
+// truncates, which is documented behaviour rather than an accident.
+
+    out = 1;
+    left = n;
+    left > 0;
+        out *= NUMBER_BASE;
+        left--;
+
+    out;
+
+    left = abs , value;
+    count = 0;
+    left > 0;
+        left /= NUMBER_BASE;
+        ++count;
+
+    count == 0;
+        1;
+
+    count;
+
+// Strip trailing zeros from the mantissa so that 1500 * 10^-2 and 15 * 10^0
+// compare and print the same way.
+
+        mantissa == 0;
+
+        mantissa < 0;
+
+        exponent >= 0;
+            true;
+
+        copy = *self;
+        copy_normalize;
+        copy_exponent >= 0;
+
+        mantissa == 0;
+            exponent = 0;
+
+        exponent < 0 && mantissa % NUMBER_BASE == 0;
+            mantissa /= NUMBER_BASE;
+            exponent++;
+
+        target >= exponent;
+            mantissa / power_of_ten , target - exponent;
+
+        mantissa * power_of_ten , exponent - target;
+
+        scaled_to , 0;
+
+    // The printed form. Integral values print without a point; fractional
+    // ones get exactly as many digits as the exponent calls for.
+
+        copy = *self;
+        copy_normalize;
+        copy_exponent >= 0;
+            whole = to_string , copy_mantissa;
+            zeros = copy_exponent;
+            zeros > 0;
+                whole_push_back , CHAR_ZERO;
+                --zeros;
+
+            whole;
+
+        out = "";
+        copy_mantissa < 0;
+            out_push_back , CHAR_MINUS;
+
+        magnitude = abs , copy_mantissa;
+        places = -copy_exponent;
+        divisor = power_of_ten , places;
+        out_append , to_string , magnitude / divisor;
+        out_push_back , CHAR_DOT;
+        fraction = to_string , magnitude % divisor;
+        pad = places - fraction_size;
+        pad > 0;
+            out_push_back , CHAR_ZERO;
+            --pad;
+
+        out_append , fraction;
+        out;
+
+    out = Decimal , mantissa , exponent;
+    out_normalize;
+    out;
+
+    Decimal , value , 0;
+
+// The common exponent two operands have to be brought to before they can be
+// added or compared. Always the smaller of the two, so no digits are lost.
+
+    a_exponent < b_exponent;
+        a_exponent;
+
+    b_exponent;
+
+    e = common_exponent , a , b;
+    make_decimal , a_scaled_to , e + b_scaled_to , e , e;
+
+    e = common_exponent , a , b;
+    make_decimal , a_scaled_to , e - b_scaled_to , e , e;
+
+    make_decimal , a_mantissa * b_mantissa , a_exponent + b_exponent;
+
+// Division keeps DIVISION_DIGITS extra digits of the quotient and lowers the
+// exponent to match, which is how 1 / 3 comes out as 0.333333.
+
+    b_mantissa == 0;
+        Decimal , 0 , 0;
+
+    lifted = a_mantissa * power_of_ten , DIVISION_DIGITS;
+    exponent = a_exponent - b_exponent - DIVISION_DIGITS;
+    make_decimal , lifted / b_mantissa , exponent;
+
+    b_mantissa == 0;
+        Decimal , 0 , 0;
+
+    e = common_exponent , a , b;
+    make_decimal , a_scaled_to , e % b_scaled_to , e , e;
+
+    make_decimal , -a_mantissa , a_exponent;
+
+    // Only integral exponents are supported, which is all the language exposes.
+
+    count = exponent_to_int;
+    count < 0;
+        one = decimal_from_int , 1;
+        positive = *exponent;
+        positive_mantissa = -positive_mantissa;
+        decimal_divide , one , decimal_power , base , positive;
+
+    out = decimal_from_int , 1;
+    count > 0;
+        out = decimal_multiply , out , *base;
+        count--;
+
+    out;
+
+    // Returns -1, 0 or 1.
+
+    e = common_exponent , a , b;
+    left = a_scaled_to , e;
+    right = b_scaled_to , e;
+    left < right;
+        -1;
+
+    left > right;
+        1;
+
+    0;
+
+    decimal_compare , a , b == 0;
+
+// --- Values --------------------------------------------------------------
+//
+// A tagged union. charge has no variant type yet, so each payload gets its
+// own field and `kind` says which one is live.
+
+        kind == ValueKind_Nil;
+
+        kind == ValueKind_Number;
+
+        kind == ValueKind_Text;
+
+        kind == ValueKind_Bool;
+
+        kind == ValueKind_List;
+
+        kind == ValueKind_Failure;
+
+    // Every value has a truth value; only nil, false, zero, the empty string
+    // and the empty list are falsy.
+
+        kind == ValueKind_Nil;
+            false;
+
+        kind == ValueKind_Bool;
+            flag;
+
+        kind == ValueKind_Number;
+            !number_is_zero;
+
+        kind == ValueKind_Text;
+            text_size > 0;
+
+        kind == ValueKind_List;
+            items_size > 0;
+
+        kind == ValueKind_Failure;
+            false;
+
+        true;
+
+        kind == ValueKind_Nil; "null";
+        kind == ValueKind_Bool; "bool";
+        kind == ValueKind_Number; "number";
+        kind == ValueKind_Text; "string";
+        kind == ValueKind_List; "list";
+        kind == ValueKind_Builtin; "builtin";
+        kind == ValueKind_Failure; "error";
+        "unknown";
+
+        kind == ValueKind_List;
+            items_size;
+
+        kind == ValueKind_Text;
+            text_size;
+
+        0;
+
+        // The display form, used by `print` and by the test harness.
+
+        kind == ValueKind_Nil;
+            WORD_NULL;
+
+        kind == ValueKind_Bool;
+            flag;
+                WORD_TRUE;
+
+            WORD_FALSE;
+
+        kind == ValueKind_Number;
+            number_to_text;
+
+        kind == ValueKind_Text;
+            text;
+
+        kind == ValueKind_Builtin;
+            out = "<builtin ";
+            out_append , text;
+            out_append , ">";
+            out;
+
+        kind == ValueKind_Failure;
+            out = "<error: ";
+            out_append , text;
+            out_append , ">";
+            out;
+
+        out = "[";
+        first = true;
+        element , items;
+            !first;
+                out_append , TEXT_COMMA_SPACE;
+
+            out_append , element_to_text;
+            first = false;
+
+        out_append , "]";
+        out;
+
+    // For builtins: the arity the dispatcher checks before calling.
+
+    Value , ValueKind_Nil;
+
+    Value , ValueKind_Bool , flag;
+
+    Value , ValueKind_Number , number;
+
+    number_value , decimal_from_int , n;
+
+    Value , ValueKind_Text , *text;
+
+    Value , ValueKind_List , move , items;
+
+    Value , ValueKind_Failure , *detail;
+
+// Structural equality across kinds. Numbers compare by value, so 1.50 equals
+// 1.5, and lists compare element by element.
+
+    a_kind != b_kind;
+        false;
+
+    a_kind == ValueKind_Nil;
+        true;
+
+    a_kind == ValueKind_Bool;
+        a_flag == b_flag;
+
+    a_kind == ValueKind_Number;
+        decimal_equal , a_number , b_number;
+
+    a_kind == ValueKind_Text;
+        a_text == b_text;
+
+    a_kind == ValueKind_List;
+        a_items_size != b_items_size;
+            false;
+
+        i , range , 0 , a_items_size;
+            !values_equal , a_items , i , b_items , i;
+                false;
+
+        true;
+
+    a_text == b_text;
+
+    // Ordering, defined only for numbers and strings.
+
+    a_kind == ValueKind_Number && b_kind == ValueKind_Number;
+        decimal_compare , a_number , b_number;
+
+    a_kind == ValueKind_Text && b_kind == ValueKind_Text;
+        a_text_compare , b_text;
+
+    values_equal , a , b;
+        0;
+
+    -1;
+
+// --- Scopes and environments ---------------------------------------------
+//
+// Lexical scoping with a flat vector of frames. A lookup walks outwards from
+// the innermost frame, so an inner binding shadows an outer one, and a
+// frame boundary is just an index into the same two parallel vectors.
+
+        names_size;
+
+        i = names_size - 1;
+        i >= 0;
+            names , i == *name;
+                i;
+
+            i--;
+
+        -1;
+
+        index_of , name >= 0;
+
+        existing = index_of , name;
+        existing >= 0;
+            values , existing = move , value;
+
+        names_push_back , *name;
+        values_push_back , move , value;
+
+        values , index;
+
+        names_clear;
+        values_clear;
+
+        // Purely informational, but it makes a dumped environment readable.
+
+        frames_size;
+
+        frames , 0;
+
+        frames , frames_size - 1;
+
+        frames_push_back , Scope , *label;
+
+        frames_size > 1;
+            frames_pop_back;
+
+        frame = frames , frames_size - 1;
+        frame_define , name , move , value;
+
+        frame = frames , 0;
+        frame_define , name , move , value;
+
+        i = frames_size - 1;
+        i >= 0;
+            frames , i_contains , name;
+                true;
+
+            --i;
+
+        false;
+
+    // Look a name up from the innermost frame outwards. Returns the missing
+    // sentinel when nothing matches, which the evaluator turns into an
+    // UnknownName failure.
+
+        i = frames_size - 1;
+        i >= 0;
+            frame = frames , i;
+            slot = frame_index_of , name;
+            slot >= 0;
+                frame_at , slot;
+
+            --i;
+
+        missing;
+
+    // Assignment writes through to the frame the name was found in, rather
+    // than shadowing it in the current one.
+
+        i = frames_size - 1;
+        i >= 0;
+            frame = frames , i;
+            slot = frame_index_of , name;
+            slot >= 0;
+                frame_values , slot = move , value;
+                true;
+
+            i--;
+
+        false;
+
+        out = "";
+        frame , frames;
+            out_append , frame_label;
+            out_append , " {";
+            i , range , 0 , frame_names_size;
+                i > 0;
+                    out_append , TEXT_COMMA_SPACE;
+
+                out_append , frame_names , i;
+
+            out_append , "}\n";
+
+        out;
+
+    env ;
+    env_frames_push_back , Scope , "global";
+    env;
+
+// --- Builtins ------------------------------------------------------------
+//
+// Builtins are dispatched by name from one cascade. Registering a name in
+// the environment only records its arity; the body lives in `call_builtin`.
+
+    *name == "abs"; 1;
+    *name == "min"; 2;
+    *name == "max"; 2;
+    *name == "floor"; 1;
+    *name == "ceil"; 1;
+    *name == "round"; 1;
+    *name == "sqrt"; 1;
+    *name == "len"; 1;
+    *name == "upper"; 1;
+    *name == "lower"; 1;
+    *name == "trim"; 1;
+    *name == "concat"; 2;
+    *name == "at"; 2;
+    *name == "slice"; 3;
+    *name == "push"; 2;
+    *name == "sum"; 1;
+    *name == "type"; 1;
+    *name == "number"; 1;
+    *name == "string"; 1;
+    *name == "print"; 1;
+    // A negative arity means "any number of arguments".
+    *name == "list"; -1;
+    -2;
+
+    builtin_arity , name != -2;
+
+    names ;
+    names_push_back , "abs";
+    names_push_back , "min";
+    names_push_back , "max";
+    names_push_back , "floor";
+    names_push_back , "ceil";
+    names_push_back , "round";
+    names_push_back , "sqrt";
+    names_push_back , "len";
+    names_push_back , "upper";
+    names_push_back , "lower";
+    names_push_back , "trim";
+    names_push_back , "concat";
+    names_push_back , "at";
+    names_push_back , "slice";
+    names_push_back , "push";
+    names_push_back , "sum";
+    names_push_back , "type";
+    names_push_back , "number";
+    names_push_back , "string";
+    names_push_back , "print";
+    names_push_back , "list";
+    names;
+
+// Builtins the folder is allowed to evaluate at compile time. Anything that
+// prints or mutates is deliberately absent.
+
+    *name == "print";
+        false;
+
+    *name == "push";
+        false;
+
+    is_builtin , name;
+
+    // Integer square root by bisection, on the scaled representation.
+
+    target = value_scaled_to , -2;
+    target <= 0;
+        decimal_from_int , 0;
+
+    low = 0;
+    high = target;
+    low < high;
+        middle = low + high + 1 / 2;
+        middle * middle <= target * 100;
+            low = middle;
+
+            high = middle - 1;
+
+    make_decimal , low , -2;
+
+    whole = value_scaled_to , 0;
+    out = decimal_from_int , whole;
+    value_is_negative && decimal_compare , out , *value != 0;
+        out = decimal_from_int , whole - 1;
+
+    out;
+
+    floored = decimal_floor , value;
+    decimal_equal , floored , *value;
+        floored;
+
+    decimal_add , floored , decimal_from_int , 1;
+
+    half = make_decimal , 5 , -1;
+    decimal_floor , decimal_add , *value , half;
+
+    out = "";
+    i , range , 0 , text_size;
+        out_push_back , to_upper , text_at , i;
+
+    out;
+
+    out = "";
+    i , range , 0 , text_size;
+        out_push_back , to_lower , text_at , i;
+
+    out;
+
+    begin = 0;
+    end = text_size;
+    begin < end && is_space , text_at , begin;
+        begin++;
+
+    end > begin && is_space , text_at , end - 1;
+        end--;
+
+    text_substr , begin , end - begin;
+
+// --- The interpreter -----------------------------------------------------
+//
+// A straight tree walk. `evaluate` dispatches on the node kind and every arm
+// calls back into `evaluate`, so this family is as mutually recursive as the
+// parser above it.
+
+        problem_ok;
+            problem_code = code;
+            problem_detail = *detail;
+
+        message = error_text , code;
+        message_append , ": ";
+        message_append , *detail;
+        failure_value , message;
+
+        tree_kind_of , index;
+
+        // --- Dispatch --------------------------------------------------------
+
+        !tree_valid , index;
+            nil_value;
+
+        steps++;
+        kind = tree_kind_of , index;
+
+        kind == NodeKind_NumberLiteral;
+            number_value , make_decimal , tree_at , index_mantissa , tree_at , index_exponent;
+
+        kind == NodeKind_TextLiteral;
+            text_value , tree_at , index_text;
+
+        kind == NodeKind_BoolLiteral;
+            bool_value , tree_at , index_flag;
+
+        kind == NodeKind_NullLiteral;
+            nil_value;
+
+        kind == NodeKind_Empty;
+            nil_value;
+
+        kind == NodeKind_Variable;
+            evaluate_variable , index;
+
+        kind == NodeKind_Unary;
+            evaluate_unary , index;
+
+        kind == NodeKind_Postfix;
+            evaluate_postfix , index;
+
+        kind == NodeKind_Binary;
+            evaluate_binary , index;
+
+        kind == NodeKind_Assign;
+            evaluate_assign , index;
+
+        kind == NodeKind_Conditional;
+            evaluate_conditional , index;
+
+        kind == NodeKind_Call;
+            evaluate_call , index;
+
+        kind == NodeKind_Index;
+            evaluate_index , index;
+
+        kind == NodeKind_Member;
+            evaluate_member , index;
+
+        kind == NodeKind_Let;
+            evaluate_let , index;
+
+        kind == NodeKind_Block;
+            evaluate_block , index;
+
+        kind == NodeKind_Loop;
+            evaluate_loop , index;
+
+        kind == NodeKind_Return;
+            out = evaluate , tree_at , index_lhs;
+            returning = true;
+            out;
+
+        fail , ErrorCode_ExpectedExpression , "cannot evaluate this node";
+
+        name = tree_at , index_text;
+        environment_bound , name;
+            environment_lookup , name;
+
+        is_builtin , name;
+            Value , ValueKind_Builtin , name , builtin_arity , name;
+
+        detail = "no binding named '";
+        detail_append , name;
+        detail_append , "'";
+        fail , ErrorCode_UnknownName , detail;
+
+        // --- Operators -------------------------------------------------------
+
+        op = tree_at , index_op;
+        operand = evaluate , tree_at , index_lhs;
+        operand_is_failure;
+            operand;
+
+        op == TokenKind_Minus;
+            !operand_is_number;
+                fail , ErrorCode_TypeMismatch , "unary minus needs a number";
+
+            number_value , decimal_negate , operand_number;
+
+        op == TokenKind_Plus;
+            !operand_is_number;
+                fail , ErrorCode_TypeMismatch , "unary plus needs a number";
+
+            operand;
+
+        op == TokenKind_Bang || op == TokenKind_KeywordNot;
+            bool_value , !operand_truthy;
+
+        op == TokenKind_Tilde;
+            !operand_is_number;
+                fail , ErrorCode_TypeMismatch , "bitwise complement needs a number";
+
+            int_value , ~operand_number_to_int;
+
+        op == TokenKind_PlusPlus || op == TokenKind_MinusMinus;
+            apply_step , tree_at , index_lhs , op , false;
+
+        fail , ErrorCode_TypeMismatch , "unknown prefix operator";
+
+        op = tree_at , index_op;
+        op == TokenKind_PlusPlus || op == TokenKind_MinusMinus;
+            apply_step , tree_at , index_lhs , op , true;
+
+        op == TokenKind_Bang;
+            operand = evaluate , tree_at , index_lhs;
+            !operand_is_number;
+                fail , ErrorCode_TypeMismatch , "factorial needs a number";
+
+            count = operand_number_to_int;
+            out = 1;
+            count > 1;
+                out *= count;
+                count--;
+
+            int_value , out;
+
+        fail , ErrorCode_TypeMismatch , "unknown postfix operator";
+
+    // Shared by both the prefix and the postfix increment. `after` decides
+    // which of the two values the expression itself produces.
+
+        tree_kind_of , target != NodeKind_Variable;
+            fail , ErrorCode_NotAssignable , "increment needs a variable";
+
+        name = tree_at , target_text;
+        current = environment_lookup , name;
+        !current_is_number;
+            fail , ErrorCode_TypeMismatch , "increment needs a number";
+
+        stepped = current_number;
+        op == TokenKind_PlusPlus;
+            stepped = decimal_add , stepped , decimal_from_int , 1;
+
+            stepped = decimal_subtract , stepped , decimal_from_int , 1;
+
+        environment_assign , name , number_value , stepped;
+        after;
+            number_value , current_number;
+
+        number_value , stepped;
+
+        op = tree_at , index_op;
+
+        // The short circuit operators must not evaluate their right side.
+        is_short_circuit , op;
+            left = evaluate , tree_at , index_lhs;
+            left_is_failure;
+                left;
+
+            op == TokenKind_AmpAmp || op == TokenKind_KeywordAnd;
+                !left_truthy;
+                    bool_value , false;
+
+                right = evaluate , tree_at , index_rhs;
+                right_is_failure;
+                    right;
+
+                bool_value , right_truthy;
+
+            left_truthy;
+                bool_value , true;
+
+            right = evaluate , tree_at , index_rhs;
+            right_is_failure;
+                right;
+
+            bool_value , right_truthy;
+
+        left = evaluate , tree_at , index_lhs;
+        left_is_failure;
+            left;
+
+        right = evaluate , tree_at , index_rhs;
+        right_is_failure;
+            right;
+
+        apply_binary , op , left , right;
+
+        op == TokenKind_EqualEqual;
+            bool_value , values_equal , left , right;
+
+        op == TokenKind_BangEqual;
+            bool_value , !values_equal , left , right;
+
+        is_comparison , op;
+            order = compare_values , left , right;
+            op == TokenKind_Less; bool_value , order < 0;
+            op == TokenKind_LessEqual; bool_value , order <= 0;
+            op == TokenKind_Greater; bool_value , order > 0;
+            op == TokenKind_GreaterEqual; bool_value , order >= 0;
+
+        // `+` is overloaded on strings and lists as concatenation.
+        op == TokenKind_Plus;
+            left_is_text || right_is_text;
+                joined = left_to_text;
+                joined_append , right_to_text;
+                text_value , joined;
+
+            left_is_list;
+                items = left_items;
+                right_is_list;
+                    element , right_items;
+                        items_push_back , *element;
+
+                    items_push_back , *right;
+
+                list_value , move , items;
+
+        !left_is_number || !right_is_number;
+            detail = "operator ";
+            detail_append , token_spelling , op;
+            detail_append , " does not accept ";
+            detail_append , left_kind_name;
+            detail_append , " and ";
+            detail_append , right_kind_name;
+            fail , ErrorCode_TypeMismatch , detail;
+
+        op == TokenKind_Plus;
+            number_value , decimal_add , left_number , right_number;
+
+        op == TokenKind_Minus;
+            number_value , decimal_subtract , left_number , right_number;
+
+        op == TokenKind_Star;
+            number_value , decimal_multiply , left_number , right_number;
+
+        op == TokenKind_Slash;
+            right_number_is_zero;
+                fail , ErrorCode_DivideByZero , "the divisor evaluates to zero";
+
+            number_value , decimal_divide , left_number , right_number;
+
+        op == TokenKind_Percent;
+            right_number_is_zero;
+                fail , ErrorCode_DivideByZero , "the modulus evaluates to zero";
+
+            number_value , decimal_remainder , left_number , right_number;
+
+        op == TokenKind_StarStar;
+            number_value , decimal_power , left_number , right_number;
+
+        // The bitwise family works on the truncated integer value.
+        a = left_number_to_int;
+        b = right_number_to_int;
+        op == TokenKind_Amp; int_value , a & b;
+        op == TokenKind_Pipe; int_value , a | b;
+        op == TokenKind_Caret; int_value , a ^ b;
+        op == TokenKind_LessLess; int_value , a << b;
+        op == TokenKind_GreaterGreater; int_value , a >> b;
+
+        detail = "unknown operator ";
+        detail_append , token_spelling , op;
+        fail , ErrorCode_TypeMismatch , detail;
+
+        op = tree_at , index_op;
+        target = tree_at , index_lhs;
+        tree_kind_of , target != NodeKind_Variable;
+            fail , ErrorCode_NotAssignable , "only plain names may be assigned to";
+
+        name = tree_at , target_text;
+        value = evaluate , tree_at , index_rhs;
+        value_is_failure;
+            value;
+
+        op != TokenKind_Equal;
+            base = compound_base_operator , op;
+            current = environment_lookup , name;
+            value = apply_binary , base , current , value;
+            value_is_failure;
+                value;
+
+        !environment_assign , name , value;
+            environment_define , name , value;
+
+        value;
+
+        condition = evaluate , tree_at , index_lhs;
+        condition_is_failure;
+            condition;
+
+        condition_truthy;
+            evaluate , tree_at , index_rhs;
+
+        evaluate , tree_at , index_extra;
+
+        value = evaluate , tree_at , index_lhs;
+        value_is_failure;
+            value;
+
+        environment_define , tree_at , index_text , value;
+        value;
+
+        environment_push_scope , "block";
+        last = nil_value;
+        statement , tree_at , index_parts;
+            last = evaluate , statement;
+            last_is_failure;
+
+            returning;
+
+        environment_pop_scope;
+        last;
+
+        last = nil_value;
+        rounds = 0;
+
+            condition = evaluate , tree_at , index_lhs;
+            condition_is_failure;
+                condition;
+
+            !condition_truthy;
+
+            last = evaluate , tree_at , index_rhs;
+            last_is_failure;
+                last;
+
+            returning;
+
+            rounds++;
+            rounds > step_limit;
+                fail , ErrorCode_DepthExceeded , "loop ran past the step limit";
+
+        last;
+
+        target = evaluate , tree_at , index_lhs;
+        target_is_failure;
+            target;
+
+        subscript = evaluate , tree_at , index_rhs;
+        subscript_is_failure;
+            subscript;
+
+        !subscript_is_number;
+            fail , ErrorCode_TypeMismatch , "a subscript has to be a number";
+
+        position = subscript_number_to_int;
+        target_is_list;
+            position < 0 || position >= target_items_size;
+                nil_value;
+
+            target_items , position;
+
+        target_is_text;
+            position < 0 || position >= target_text_size;
+                nil_value;
+
+            text_value , target_text_substr , position , 1;
+
+        fail , ErrorCode_NotIndexable , target_kind_name;
+
+    // Member access is limited to a fixed set of pseudo fields, since the
+    // language has no user defined records yet.
+
+        target = evaluate , tree_at , index_lhs;
+        target_is_failure;
+            target;
+
+        field = tree_at , index_text;
+        field == "length" || field == "size";
+            int_value , target_size;
+
+        field == "kind";
+            text_value , target_kind_name;
+
+        field == "first";
+            target_is_list && target_items_size > 0;
+                target_items , 0;
+
+            nil_value;
+
+        field == "last";
+            target_is_list && target_items_size > 0;
+                target_items , target_items_size - 1;
+
+            nil_value;
+
+        field == "text";
+            text_value , target_to_text;
+
+        detail = "no member named '";
+        detail_append , field;
+        detail_append , "'";
+        fail , ErrorCode_UnknownName , detail;
+
+        callee = tree_at , index_lhs;
+        tree_kind_of , callee != NodeKind_Variable;
+            fail , ErrorCode_NotCallable , "only named builtins may be called";
+
+        name = tree_at , callee_text;
+        arguments ;
+        child , tree_at , index_parts;
+            argument = child;
+            // Unwrap a labelled argument; the label is only documentation.
+            tree_kind_of , argument == NodeKind_Let;
+                argument = tree_at , argument_lhs;
+
+            value = evaluate , argument;
+            value_is_failure;
+                value;
+
+            arguments_push_back , value;
+
+        call_builtin , name , arguments;
+
+        wanted = builtin_arity , name;
+        wanted == -2;
+            unknown = "no builtin named '";
+            unknown_append , *name;
+            unknown_append , "'";
+            fail , ErrorCode_NotCallable , unknown;
+
+        wanted >= 0 && arguments_size != wanted;
+            detail = *name;
+            detail_append , " expects ";
+            detail_append , to_string , wanted;
+            detail_append , " arguments, got ";
+            detail_append , to_string , arguments_size;
+            fail , ErrorCode_WrongArity , detail;
+
+        *name == "list";
+            items ;
+            element , *arguments;
+                items_push_back , *element;
+
+            list_value , move , items;
+
+        *name == "print";
+            println , arguments , 0 , to_text;
+            output_push_back , arguments , 0 , to_text;
+            arguments , 0;
+
+        *name == "type";
+            text_value , arguments , 0 , kind_name;
+
+        *name == "len";
+            int_value , arguments , 0 , size;
+
+        *name == "string";
+            text_value , arguments , 0 , to_text;
+
+        *name == "upper";
+            text_value , text_upper , arguments , 0 , to_text;
+
+        *name == "lower";
+            text_value , text_lower , arguments , 0 , to_text;
+
+        *name == "trim";
+            text_value , text_trim , arguments , 0 , to_text;
+
+        *name == "concat";
+            joined = arguments , 0 , to_text;
+            joined_append , arguments , 1 , to_text;
+            text_value , joined;
+
+        *name == "at";
+            container = arguments , 0;
+            position = arguments , 1 , number_to_int;
+            container_is_list;
+                position < 0 || position >= container_items_size;
+                    nil_value;
+
+                container_items , position;
+
+            container_is_text;
+                position < 0 || position >= container_text_size;
+                    nil_value;
+
+                text_value , container_text_substr , position , 1;
+
+            fail , ErrorCode_NotIndexable , container_kind_name;
+
+        *name == "slice";
+            container = arguments , 0;
+            begin = arguments , 1 , number_to_int;
+            count = arguments , 2 , number_to_int;
+            container_is_text;
+                text_value , container_text_substr , begin , count;
+
+            items ;
+            i , range , begin , begin + count;
+                i >= 0 && i < container_items_size;
+                    items_push_back , container_items , i;
+
+            list_value , move , items;
+
+        *name == "push";
+            items = arguments , 0 , items;
+            items_push_back , arguments , 1;
+            list_value , move , items;
+
+        *name == "sum";
+            total = decimal_from_int , 0;
+            element , arguments , 0 , items;
+                element_is_number;
+                    total = decimal_add , total , element_number;
+
+            number_value , total;
+
+        // The numeric family, all of which want a number argument.
+        !arguments , 0 , is_number;
+            detail = *name;
+            detail_append , " expects a number";
+            fail , ErrorCode_TypeMismatch , detail;
+
+        *name == "abs";
+            arguments , 0 , number_is_negative;
+                number_value , decimal_negate , arguments , 0 , number;
+
+            arguments , 0;
+
+        *name == "floor";
+            number_value , decimal_floor , arguments , 0 , number;
+
+        *name == "ceil";
+            number_value , decimal_ceil , arguments , 0 , number;
+
+        *name == "round";
+            number_value , decimal_round , arguments , 0 , number;
+
+        *name == "sqrt";
+            number_value , decimal_sqrt , arguments , 0 , number;
+
+        *name == "number";
+            arguments , 0;
+
+        *name == "min";
+            decimal_compare , arguments , 0 , number , arguments , 1 , number <= 0;
+                arguments , 0;
+
+            arguments , 1;
+
+        *name == "max";
+            decimal_compare , arguments , 0 , number , arguments , 1 , number >= 0;
+                arguments , 0;
+
+            arguments , 1;
+
+        fail , ErrorCode_NotCallable , *name;
+
+        environment = make_environment;
+        problem = Diagnostic;
+        output_clear;
+        steps = 0;
+        returning = false;
+
+// --- Constant folding ----------------------------------------------------
+//
+// A bottom up rewrite over the arena. Every fold rewrites a node in place so
+// that parents keep pointing at the same index, and the pass reports how
+// many nodes it changed so that a caller can iterate to a fixed point.
+
+        rewrites;
+
+    // A subtree is pure when evaluating it twice has the same effect as
+    // evaluating it once and nothing outside it can observe the difference.
+
+        !tree_valid , index;
+            true;
+
+        kind = tree_kind_of , index;
+        kind == NodeKind_Assign;
+            false;
+
+        kind == NodeKind_Postfix;
+            false;
+
+        kind == NodeKind_Let;
+            false;
+
+        kind == NodeKind_Loop;
+            false;
+
+        kind == NodeKind_Return;
+            false;
+
+        kind == NodeKind_Unary;
+            op = tree_operator_of , index;
+            op == TokenKind_PlusPlus || op == TokenKind_MinusMinus;
+                false;
+
+            pure , tree_at , index_lhs;
+
+        kind == NodeKind_Call;
+            callee = tree_at , index_lhs;
+            tree_kind_of , callee != NodeKind_Variable;
+                false;
+
+            !builtin_is_pure , tree_at , callee_text;
+                false;
+
+            child , tree_at , index_parts;
+                !pure , child;
+                    false;
+
+            true;
+
+        kind == NodeKind_Variable;
+            // A free variable is pure to read but its value is unknown, so
+            // the folder treats it as pure and simply cannot fold it.
+            true;
+
+        tree_at , index_lhs != NO_NODE && !pure , tree_at , index_lhs;
+            false;
+
+        tree_at , index_rhs != NO_NODE && !pure , tree_at , index_rhs;
+            false;
+
+        tree_at , index_extra != NO_NODE && !pure , tree_at , index_extra;
+            false;
+
+        true;
+
+        !tree_valid , index;
+            false;
+
+        tree_at , index_is_literal;
+
+        kind = tree_kind_of , index;
+        kind == NodeKind_NumberLiteral;
+            number_value , make_decimal , tree_at , index_mantissa , tree_at , index_exponent;
+
+        kind == NodeKind_TextLiteral;
+            text_value , tree_at , index_text;
+
+        kind == NodeKind_BoolLiteral;
+            bool_value , tree_at , index_flag;
+
+        nil_value;
+
+        value_is_number;
+            tree_replace_with_number , index , value_number_mantissa , value_number_exponent;
+            rewrites++;
+
+        value_is_bool;
+            tree_replace_with_bool , index , value_flag;
+            rewrites++;
+
+        value_is_text;
+            literal = Node , NodeKind_TextLiteral , value_text;
+            tree_replace , index , move , literal;
+            rewrites++;
+
+        value_is_nil;
+            tree_replace , index , Node , NodeKind_NullLiteral;
+            rewrites++;
+
+            // --- The pass --------------------------------------------------------
+
+        !tree_valid , index;
+            index;
+
+        kind = tree_kind_of , index;
+
+        kind == NodeKind_Unary;
+            fold_unary , index;
+
+        kind == NodeKind_Binary;
+            fold_binary , index;
+
+        kind == NodeKind_Conditional;
+            fold_conditional , index;
+
+        kind == NodeKind_Call;
+            fold_call , index;
+
+        kind == NodeKind_Block;
+            fold_block , index;
+
+        kind == NodeKind_Index;
+            fold , tree_at , index_lhs;
+            fold , tree_at , index_rhs;
+            index;
+
+        kind == NodeKind_Member;
+            fold , tree_at , index_lhs;
+            index;
+
+        kind == NodeKind_Assign;
+            fold , tree_at , index_rhs;
+            index;
+
+        kind == NodeKind_Let;
+            fold , tree_at , index_lhs;
+            index;
+
+        kind == NodeKind_Loop;
+            fold_loop , index;
+
+        kind == NodeKind_Return;
+            fold , tree_at , index_lhs;
+            index;
+
+        index;
+
+        operand = fold , tree_at , index_lhs;
+        op = tree_operator_of , index;
+
+        // Double negation cancels, which shows up constantly in generated
+        // input like `-(-x)`.
+        op == TokenKind_Minus && tree_kind_of , operand == NodeKind_Unary;
+            tree_operator_of , operand == TokenKind_Minus;
+                inner = tree_at , operand_lhs;
+                copy = tree_adopt , inner;
+                replacement = Node , tree_kind_of , copy;
+                replacement_op = tree_operator_of , copy;
+                replacement_lhs = tree_at , copy_lhs;
+                replacement_rhs = tree_at , copy_rhs;
+                replacement_extra = tree_at , copy_extra;
+                replacement_mantissa = tree_at , copy_mantissa;
+                replacement_exponent = tree_at , copy_exponent;
+                replacement_text = tree_at , copy_text;
+                replacement_flag = tree_at , copy_flag;
+                tree_replace , index , move , replacement;
+                rewrites++;
+                index;
+
+        !is_constant , operand;
+            index;
+
+        machine = Interpreter;
+        machine_tree = tree;
+        value = machine_evaluate , index;
+        value_is_failure;
+            index;
+
+        write_value , index , value;
+        index;
+
+        left = fold , tree_at , index_lhs;
+        right = fold , tree_at , index_rhs;
+        op = tree_operator_of , index;
+
+        is_constant , left && is_constant , right;
+            a = constant_value , left;
+            b = constant_value , right;
+            op == TokenKind_Slash && b_is_number && b_number_is_zero;
+                index;
+
+            op == TokenKind_Percent && b_is_number && b_number_is_zero;
+                index;
+
+            machine = Interpreter;
+            machine_tree = tree;
+            value = machine_evaluate , index;
+            !value_is_failure;
+                write_value , index , value;
+
+            index;
+
+        // Algebraic identities, which fire far more often than full folds.
+        is_zero_literal , right && op == TokenKind_Plus || op == TokenKind_Minus;
+            splice , index , left;
+            index;
+
+        is_zero_literal , left && op == TokenKind_Plus;
+            splice , index , right;
+            index;
+
+        is_one_literal , right && op == TokenKind_Star || op == TokenKind_Slash;
+            splice , index , left;
+            index;
+
+        is_one_literal , left && op == TokenKind_Star;
+            splice , index , right;
+            index;
+
+        is_zero_literal , right && op == TokenKind_Star && pure , left;
+            tree_replace_with_number , index , 0 , 0;
+            rewrites++;
+            index;
+
+        op == TokenKind_AmpAmp && is_false_literal , left;
+            tree_replace_with_bool , index , false;
+            rewrites++;
+            index;
+
+        op == TokenKind_PipePipe && is_true_literal , left;
+            tree_replace_with_bool , index , true;
+            ++rewrites;
+            index;
+
+        index;
+
+        condition = fold , tree_at , index_lhs;
+        whenever = fold , tree_at , index_rhs;
+        otherwise = fold , tree_at , index_extra;
+        !is_constant , condition;
+            index;
+
+        // Dead branch elimination: a constant condition means one of the two
+        // arms can never run, so the surviving arm replaces the whole node.
+        decided = constant_value , condition;
+        decided_truthy;
+            splice , index , whenever;
+
+            splice , index , otherwise;
+
+        index;
+
+        all_constant = true;
+        child , tree_at , index_parts;
+            folded = fold , child;
+            !is_constant , folded;
+                all_constant = false;
+
+        callee = tree_at , index_lhs;
+        tree_kind_of , callee != NodeKind_Variable;
+            index;
+
+        !builtin_is_pure , tree_at , callee_text;
+            index;
+
+        !all_constant;
+            index;
+
+        machine = Interpreter;
+        machine_tree = tree;
+        value = machine_evaluate , index;
+        value_is_failure;
+            index;
+
+        value_is_list;
+            index;
+
+        write_value , index , value;
+        index;
+
+        // `while false { ... }` never runs at all.
+
+        condition = fold , tree_at , index_lhs;
+        fold , tree_at , index_rhs;
+        is_false_literal , condition;
+            tree_replace , index , Node , NodeKind_Empty;
+            ++rewrites;
+
+        index;
+
+    // Dead code within a block: statements after a `return` can never run,
+    // and pure statements whose value is discarded can be dropped outright.
+
+        kept ;
+        terminated = false;
+        total = tree_at , index_parts_size;
+        position = 0;
+        child , tree_at , index_parts;
+            ++position;
+            terminated;
+                removed++;
+
+            folded = fold , child;
+            kind = tree_kind_of , folded;
+            kind == NodeKind_Empty;
+                ++removed;
+
+            // The final statement is the value of the block, so it stays
+            // even when it is pure.
+            position < total && pure , folded && droppable , folded;
+                ++removed;
+
+            kept_push_back , folded;
+            kind == NodeKind_Return;
+                terminated = true;
+
+        slot = tree_at , index;
+        slot_parts_clear;
+        survivor , kept;
+            slot_parts_push_back , survivor;
+
+        index;
+
+    // Statements worth removing when their value is unused. A bare variable
+    // or literal qualifies; a call never does, even a pure one, because the
+    // author probably meant it.
+
+        kind = tree_kind_of , index;
+        kind == NodeKind_Variable; true;
+        kind == NodeKind_NumberLiteral; true;
+        kind == NodeKind_TextLiteral; true;
+        kind == NodeKind_BoolLiteral; true;
+        kind == NodeKind_NullLiteral; true;
+        kind == NodeKind_Empty; true;
+        false;
+
+        // Copy `source` over `target` so that the parent keeps its index.
+
+        !tree_valid , source;
+
+        replacement = Node , tree_kind_of , source;
+        replacement_op = tree_operator_of , source;
+        replacement_lhs = tree_at , source_lhs;
+        replacement_rhs = tree_at , source_rhs;
+        replacement_extra = tree_at , source_extra;
+        replacement_mantissa = tree_at , source_mantissa;
+        replacement_exponent = tree_at , source_exponent;
+        replacement_text = tree_at , source_text;
+        replacement_flag = tree_at , source_flag;
+        child , tree_at , source_parts;
+            replacement_parts_push_back , child;
+
+        tree_replace , target , move , replacement;
+        rewrites++;
+
+        tree_kind_of , index != NodeKind_NumberLiteral;
+            false;
+
+        tree_at , index_mantissa == 0;
+
+        tree_kind_of , index != NodeKind_NumberLiteral;
+            false;
+
+        probe = make_decimal , tree_at , index_mantissa , tree_at , index_exponent;
+        decimal_equal , probe , decimal_from_int , 1;
+
+        tree_kind_of , index != NodeKind_BoolLiteral;
+            false;
+
+        tree_at , index_flag;
+
+        tree_kind_of , index != NodeKind_BoolLiteral;
+            false;
+
+        !tree_at , index_flag;
+
+// Run the folder until it stops making progress, or until the round limit is
+// hit. Two rounds are usually enough; the third only confirms the fixed
+// point.
+
+    total = 0;
+    round = 0;
+    round < MAX_FOLD_ROUNDS;
+        pass = Folder;
+        pass_tree = *tree;
+        pass_fold , root;
+        *tree = move , pass_tree;
+        total += pass_rewrites;
+        pass_rewrites == 0;
+
+        round++;
+
+    total;
+
+// --- The printer ---------------------------------------------------------
+//
+// Turns a tree back into source text. The output is not the original text -
+// spacing is normalised and redundant parentheses are dropped - but it is
+// guaranteed to reparse into the same tree, which is what the round trip
+// test in this file checks.
+//
+// Parentheses are reinserted from the same precedence table the parser used:
+// a child is wrapped when its own binding power is lower than the level it
+// appears in, or when it sits on the wrong side of a left associative
+// operator.
+
+        print_at , index , PRECEDENCE_NONE;
+
+        !tree_valid , index;
+            TEXT_EMPTY;
+
+        kind = tree_kind_of , index;
+
+        kind == NodeKind_NumberLiteral;
+            print_number , index;
+
+        kind == NodeKind_TextLiteral;
+            quote_text , tree_at , index_text;
+
+        kind == NodeKind_BoolLiteral;
+            tree_at , index_flag;
+                WORD_TRUE;
+
+            WORD_FALSE;
+
+        kind == NodeKind_NullLiteral;
+            WORD_NULL;
+
+        kind == NodeKind_Empty;
+            TEXT_SEMICOLON;
+
+        kind == NodeKind_Variable;
+            tree_at , index_text;
+
+        kind == NodeKind_Unary;
+            print_unary , index , context_power;
+
+        kind == NodeKind_Postfix;
+            print_postfix , index;
+
+        kind == NodeKind_Binary;
+            print_binary , index , context_power;
+
+        kind == NodeKind_Assign;
+            print_assign , index , context_power;
+
+        kind == NodeKind_Conditional;
+            print_conditional , index , context_power;
+
+        kind == NodeKind_Call;
+            print_call , index;
+
+        kind == NodeKind_Index;
+            print_index , index;
+
+        kind == NodeKind_Member;
+            print_member , index;
+
+        kind == NodeKind_Let;
+            print_let , index;
+
+        kind == NodeKind_Block;
+            print_block , index;
+
+        kind == NodeKind_Loop;
+            print_loop , index;
+
+        kind == NodeKind_Return;
+            out = "return ";
+            out_append , print_at , tree_at , index_lhs , PRECEDENCE_NONE;
+            out;
+
+        "<invalid>";
+
+        value = make_decimal , tree_at , index_mantissa , tree_at , index_exponent;
+        value_to_text;
+
+        out = token_spelling , tree_operator_of , index;
+        // `not x` needs the separating space that `!x` does not.
+        tree_operator_of , index == TokenKind_KeywordNot;
+            out_append , TEXT_SPACE;
+
+        operand = tree_at , index_lhs;
+        // `- -x` must not print as `--x`, which would relex as a decrement.
+        tree_kind_of , operand == NodeKind_Unary;
+            tree_operator_of , operand == tree_operator_of , index;
+                out_append , TEXT_SPACE;
+
+        out_append , print_at , operand , PRECEDENCE_PREFIX;
+        wrap_if , out , PRECEDENCE_PREFIX , context_power;
+
+        out = print_at , tree_at , index_lhs , PRECEDENCE_POSTFIX;
+        out_append , token_spelling , tree_operator_of , index;
+        out;
+
+        op = tree_operator_of , index;
+        power = infix_precedence , op;
+        right_associative = infix_associativity , op == Associativity_Right;
+
+        left_power = power;
+        right_power = power + 1;
+        right_associative;
+            left_power = power + 1;
+            right_power = power;
+
+        out = print_at , tree_at , index_lhs , left_power;
+        spaced_operator , op;
+            out_append , TEXT_SPACE;
+            out_append , token_spelling , op;
+            out_append , TEXT_SPACE;
+
+            out_append , token_spelling , op;
+
+        out_append , print_at , tree_at , index_rhs , right_power;
+        wrap_if , out , power , context_power;
+
+        out = print_at , tree_at , index_lhs , PRECEDENCE_ASSIGN + 1;
+        out_append , TEXT_SPACE;
+        out_append , token_spelling , tree_operator_of , index;
+        out_append , TEXT_SPACE;
+        out_append , print_at , tree_at , index_rhs , PRECEDENCE_ASSIGN;
+        wrap_if , out , PRECEDENCE_ASSIGN , context_power;
+
+    // The `flag` field records which of the two surface forms the input
+    // used, so the round trip preserves the author's choice.
+
+        out = "";
+        tree_at , index_flag;
+            out_append , print_at , tree_at , index_lhs , PRECEDENCE_CONDITIONAL + 1;
+            out_append , TEXT_QUESTION_SPACE;
+            out_append , print_at , tree_at , index_rhs , PRECEDENCE_NONE;
+            out_append , TEXT_SPACE_COLON_SPACE;
+            out_append , print_at , tree_at , index_extra , PRECEDENCE_CONDITIONAL;
+            wrap_if , out , PRECEDENCE_CONDITIONAL , context_power;
+
+        out_append , WORD_IF;
+        out_append , TEXT_SPACE;
+        out_append , print_at , tree_at , index_lhs , PRECEDENCE_CONDITIONAL;
+        out_append , TEXT_SPACE;
+        out_append , WORD_THEN;
+        out_append , TEXT_SPACE;
+        out_append , print_at , tree_at , index_rhs , PRECEDENCE_CONDITIONAL;
+        tree_kind_of , tree_at , index_extra != NodeKind_NullLiteral;
+            out_append , TEXT_SPACE;
+            out_append , WORD_ELSE;
+            out_append , TEXT_SPACE;
+            out_append , print_at , tree_at , index_extra , PRECEDENCE_CONDITIONAL;
+
+        wrap_if , out , PRECEDENCE_CONDITIONAL , context_power;
+
+        out = print_at , tree_at , index_lhs , PRECEDENCE_POSTFIX;
+        out_append , TEXT_LPAREN;
+        first = true;
+        child , tree_at , index_parts;
+            !first;
+                out_append , TEXT_COMMA_SPACE;
+
+            out_append , print_argument , child;
+            first = false;
+
+        out_append , TEXT_RPAREN;
+        out;
+
+        tree_kind_of , index == NodeKind_Let && tree_at , index_flag;
+            out = tree_at , index_text;
+            out_append , TEXT_COLON_SPACE;
+            out_append , print_at , tree_at , index_lhs , PRECEDENCE_ASSIGN;
+            out;
+
+        print_at , index , PRECEDENCE_ASSIGN;
+
+        out = print_at , tree_at , index_lhs , PRECEDENCE_POSTFIX;
+        out_append , TEXT_LBRACKET;
+        out_append , print_at , tree_at , index_rhs , PRECEDENCE_NONE;
+        out_append , TEXT_RBRACKET;
+        out;
+
+        out = print_at , tree_at , index_lhs , PRECEDENCE_POSTFIX;
+        out_append , TEXT_DOT;
+        out_append , tree_at , index_text;
+        out;
+
+        out = WORD_LET;
+        out_append , TEXT_SPACE;
+        out_append , tree_at , index_text;
+        out_append , " = ";
+        out_append , print_at , tree_at , index_lhs , PRECEDENCE_NONE;
+        out;
+
+        out = WORD_WHILE;
+        out_append , TEXT_SPACE;
+        out_append , print_at , tree_at , index_lhs , PRECEDENCE_NONE;
+        out_append , TEXT_SPACE;
+        out_append , print_at , tree_at , index_rhs , PRECEDENCE_NONE;
+        out;
+
+        tree_at , index_parts_empty;
+            "{}";
+
+        out = TEXT_LBRACE;
+        out_append , TEXT_NEWLINE;
+        ++indent;
+        statement , tree_at , index_parts;
+            out_append , padding;
+            out_append , print_at , statement , PRECEDENCE_NONE;
+            out_append , TEXT_SEMICOLON;
+            out_append , TEXT_NEWLINE;
+
+        --indent;
+        out_append , padding;
+        out_append , TEXT_RBRACE;
+        out;
+
+        out = "";
+        i , range , 0 , indent;
+            out_append , TEXT_INDENT;
+            i;
+
+        out;
+
+    // Operators that read better without surrounding spaces at their
+    // precedence level. Multiplication is tight, addition is not.
+
+        !compact;
+            true;
+
+        infix_precedence , op >= PRECEDENCE_MULTIPLICATIVE;
+            false;
+
+        true;
+
+        power >= context_power;
+            *body;
+
+        out = TEXT_LPAREN;
+        out_append , *body;
+        out_append , TEXT_RPAREN;
+        out;
+
+        // Re-escape a string literal so that it lexes back to the same contents.
+
+    out = "";
+    out_push_back , CHAR_QUOTE;
+    i , range , 0 , text_size;
+        c = text_at , i;
+        escaped = encode_escape , c;
+        escaped_size > 0;
+            out_append , escaped;
+
+            out_push_back , c;
+
+    out_push_back , CHAR_QUOTE;
+    out;
+
+    writer = Printer;
+    writer_tree = *tree;
+    writer_print , root;
+
+// --- Structural dumping --------------------------------------------------
+//
+// The other direction: an indented tree dump, used when a test fails and the
+// flat source form is not enough to see what went wrong.
+
+    out = "";
+    i , range , 0 , depth;
+        out_append , TEXT_INDENT;
+        i;
+
+    !tree_valid , index;
+        out_append , "<none>\n";
+        out;
+
+    out_append , node_kind_name , tree_kind_of , index;
+    op = tree_operator_of , index;
+    op != TokenKind_Invalid;
+        out_append , " '";
+        out_append , token_spelling , op;
+        out_append , "'";
+
+    tree_at , index_text_size > 0;
+        out_append , " ";
+        out_append , tree_at , index_text;
+
+    tree_kind_of , index == NodeKind_NumberLiteral;
+        out_append , " ";
+        out_append , to_string , tree_at , index_mantissa;
+        out_append , "e";
+        out_append , to_string , tree_at , index_exponent;
+
+    out_append , TEXT_NEWLINE;
+    tree_at , index_lhs != NO_NODE;
+        out_append , dump_node , tree , tree_at , index_lhs , depth + 1;
+
+    tree_at , index_rhs != NO_NODE;
+        out_append , dump_node , tree , tree_at , index_rhs , depth + 1;
+
+    tree_at , index_extra != NO_NODE;
+        out_append , dump_node , tree , tree_at , index_extra , depth + 1;
+
+    child , tree_at , index_parts;
+        out_append , dump_node , tree , child , depth + 1;
+
+    out;
+
+// Structural comparison, which is what "round trips" actually means: the
+// text may differ, the tree may not.
+
+    !left_valid , a || !right_valid , b;
+        left_valid , a == right_valid , b;
+
+    left_kind_of , a != right_kind_of , b;
+        false;
+
+    left_operator_of , a != right_operator_of , b;
+        false;
+
+    left_at , a_text != right_at , b_text;
+        false;
+
+    left_kind_of , a == NodeKind_NumberLiteral;
+        x = make_decimal , left_at , a_mantissa , left_at , a_exponent;
+        y = make_decimal , right_at , b_mantissa , right_at , b_exponent;
+        !decimal_equal , x , y;
+            false;
+
+    left_at , a_flag != right_at , b_flag;
+        false;
+
+    left_at , a_parts_size != right_at , b_parts_size;
+        false;
+
+    !trees_equal , left , left_at , a_lhs , right , right_at , b_lhs;
+        false;
+
+    !trees_equal , left , left_at , a_rhs , right , right_at , b_rhs;
+        false;
+
+    !trees_equal , left , left_at , a_extra , right , right_at , b_extra;
+        false;
+
+    i , range , 0 , left_at , a_parts_size;
+        !trees_equal , left , left_at , a_parts , i , right , right_at , b_parts , i;
+            false;
+
+    true;
+
+// --- Driving the whole pipeline ------------------------------------------
+//
+// One object that owns a parser, a folder and an interpreter, so that a
+// caller can feed it one line at a time and keep the bindings between calls.
+
+        problem_ok;
+
+        problem_describe;
+
+    // Parse, optionally fold, then evaluate. Returns the value of the last
+    // statement, or a failure value describing the first thing that went
+    // wrong.
+
+        parser ;
+        root = parser_parse_program , source;
+        !parser_problem_ok;
+            problem = parser_problem;
+            failure_value , problem_describe;
+
+        optimize;
+            rewrites += fold_to_fixed_point , parser_tree , root;
+
+        machine_tree = move , parser_tree;
+        machine_returning = false;
+        value = machine_evaluate , root;
+        steps += machine_steps;
+        value_is_failure;
+            problem = machine_problem;
+
+        last = value;
+        value;
+
+        machine_environment_define_global , name , move , value;
+
+        machine_environment_bound , name;
+
+        machine_environment_lookup , name;
+
+        machine_reset;
+        problem = Diagnostic;
+        steps = 0;
+        rewrites = 0;
+        last = nil_value;
+
+    session ;
+    session_machine_environment = make_environment;
+    session;
+
+    // Convenience: evaluate one expression in a throwaway session.
+
+    session = make_session;
+    session_run , source;
+
+// --- The round trip ------------------------------------------------------
+//
+// Parse, print, reparse and compare. This is the property the printer has to
+// satisfy: printing may change the text but it may never change the tree.
+
+    first ;
+    a = first_parse_source , source;
+    !first_problem_ok;
+        false;
+
+    printed = print_tree , first_tree , a;
+
+    second ;
+    b = second_parse_source , printed;
+    !second_problem_ok;
+        false;
+
+    trees_equal , first_tree , a , second_tree , b;
+
+// The stronger version: printing the reprinted text has to be byte identical
+// to the first printing, so the printer is idempotent as well as faithful.
+
+    first ;
+    a = first_parse_source , source;
+    !first_problem_ok;
+        false;
+
+    once = print_tree , first_tree , a;
+
+    second ;
+    b = second_parse_source , once;
+    !second_problem_ok;
+        false;
+
+    twice = print_tree , second_tree , b;
+    once == twice;
+
+// --- Sample programs -----------------------------------------------------
+//
+// Deliberately dense inputs that exercise the whole precedence table at
+// once. They are held as strings, so the operators inside them are data for
+// the tokenizer rather than charge syntax.
+
+    samples ;
+    samples_push_back , "1 + 2 * 3 - 4 / 2";
+    samples_push_back , "2 ** 3 ** 2";
+    samples_push_back , "-x * -y + ~mask";
+    samples_push_back , "a < b && b < c || not done";
+    samples_push_back , "flags & 12 | 3 ^ 5";
+    samples_push_back , "value << 3 >> 1";
+    samples_push_back , "total += count * 2";
+    samples_push_back , "if ready then 1 else 0";
+    samples_push_back , "ready ? first : second";
+    samples_push_back , "points[0].x + points[1].y";
+    samples_push_back , "min(a, b) + max(c, d)";
+    samples_push_back , "offset(dx: 3, dy: 4)";
+    samples_push_back , "\"prefix \" + name + \" suffix\"";
+    samples_push_back , "counter++ + ++counter";
+    samples_push_back , "5! + 3!";
+    samples_push_back , "12.5 * 4 - 0.5";
+    samples_push_back , "list(1, 2, 3).length";
+    samples_push_back , "[1, 2, 3][1]";
+    samples_push_back , "(a + b) * (c - d)";
+    samples_push_back , "a = b = c = 0";
+    samples_push_back , "sum([10, 20, 30]) / 3";
+    samples_push_back , "upper(trim(\"  hello  \"))";
+    samples;
+
+    programs ;
+    programs_push_back , "let x = 3; let y = 4; sqrt(x ** 2 + y ** 2)";
+    programs_push_back , "let total = 0; let i = 0; while i < 10 { total += i; i++; } total";
+    programs_push_back , "let name = \"world\"; concat(\"hello \", name)";
+    programs_push_back , "let items = [1, 2, 3, 4]; sum(items) / len(items)";
+    programs_push_back , "let flag = true; if flag then \"yes\" else \"no\"";
+    programs_push_back , "let scale = 1000; let ratio = 3141 / scale; round(ratio)";
+    // A block whose tail is dead: the folder should drop everything after
+    // the return.
+    programs_push_back , "{ return 1; let unused = 2; unused + 3; }";
+    programs;
+
+// --- Self checks ---------------------------------------------------------
+//
+// These read like unit tests but they are ordinary functions; the benchmark
+// harness calls them and the assertions document the intended behaviour.
+
+    infix_precedence , TokenKind_Star > infix_precedence , TokenKind_Plus;
+    infix_precedence , TokenKind_Plus > infix_precedence , TokenKind_LessLess;
+    infix_precedence , TokenKind_LessLess > infix_precedence , TokenKind_Less;
+    infix_precedence , TokenKind_Less > infix_precedence , TokenKind_EqualEqual;
+    infix_precedence , TokenKind_EqualEqual > infix_precedence , TokenKind_Amp;
+    infix_precedence , TokenKind_Amp > infix_precedence , TokenKind_Caret;
+    infix_precedence , TokenKind_Caret > infix_precedence , TokenKind_Pipe;
+    infix_precedence , TokenKind_Pipe > infix_precedence , TokenKind_AmpAmp;
+    infix_precedence , TokenKind_AmpAmp > infix_precedence , TokenKind_PipePipe;
+    infix_precedence , TokenKind_PipePipe > infix_precedence , TokenKind_Question;
+    infix_precedence , TokenKind_Question > infix_precedence , TokenKind_Equal;
+    infix_precedence , TokenKind_StarStar > infix_precedence , TokenKind_Star;
+    prefix_precedence , TokenKind_Bang > infix_precedence , TokenKind_StarStar;
+    postfix_precedence , TokenKind_LParen > prefix_precedence , TokenKind_Bang;
+    infix_precedence , TokenKind_Identifier == PRECEDENCE_NONE;
+    infix_associativity , TokenKind_StarStar == Associativity_Right;
+    infix_associativity , TokenKind_Minus == Associativity_Left;
+
+    rows = operator_table;
+    row , rows;
+        row_precedence == infix_precedence , row_kind;
+        row_associativity == infix_associativity , row_kind;
+        row_spelling == token_spelling , row_kind;
+        row_mutating;
+            is_assignment_operator , row_kind;
+
+    tokens = tokenize , "a + 12.5 * \"text\" // trailing";
+    tokens_size > 0;
+    tokens , 0 , kind == TokenKind_Identifier;
+    tokens , 1 , kind == TokenKind_Plus;
+    tokens , 2 , kind == TokenKind_Number;
+    tokens , 2 , mantissa == 125;
+    tokens , 2 , exponent == -1;
+    tokens , 3 , kind == TokenKind_Star;
+    tokens , 4 , kind == TokenKind_Text;
+    tokens , tokens_size - 1 , kind == TokenKind_End;
+
+    tokens = tokenize , "a <<= b >>= c ++ d -- e ** f";
+    tokens , 1 , kind == TokenKind_LessLessEqual;
+    tokens , 3 , kind == TokenKind_GreaterGreaterEqual;
+    tokens , 5 , kind == TokenKind_PlusPlus;
+    tokens , 7 , kind == TokenKind_MinusMinus;
+    tokens , 9 , kind == TokenKind_StarStar;
+
+    a = make_decimal , 125 , -1;
+    b = make_decimal , 5 , -1;
+    decimal_add , a , b_to_text == "13";
+    decimal_subtract , a , b_to_text == "12";
+    decimal_multiply , a , decimal_from_int , 2 , to_text == "25";
+    decimal_compare , a , b > 0;
+    decimal_equal , make_decimal , 150 , -2 , make_decimal , 15 , -1;
+    decimal_from_int , 0 , is_zero;
+
+    source , sample_expressions;
+        parser ;
+        root = parser_parse_source , source;
+        root != NO_NODE;
+        parser_problem_ok;
+
+    source , sample_expressions;
+        round_trips , source;
+        printing_is_stable , source;
+
+    // `2 ** 3 ** 2` groups to the right, so the left child is a literal and
+    // the right child is another power node.
+    parser ;
+    root = parser_parse_source , "2 ** 3 ** 2";
+    parser_tree_kind_of , root == NodeKind_Binary;
+    parser_tree_operator_of , root == TokenKind_StarStar;
+    right = parser_tree_at , root_rhs;
+    parser_tree_kind_of , right == NodeKind_Binary;
+    parser_tree_operator_of , right == TokenKind_StarStar;
+
+    // Subtraction groups to the left, so the shape is mirrored.
+    other ;
+    flat = other_parse_source , "1 - 2 - 3";
+    other_tree_kind_of , other_tree_at , flat_lhs == NodeKind_Binary;
+    other_tree_kind_of , other_tree_at , flat_rhs == NodeKind_NumberLiteral;
+
+    parser ;
+    root = parser_parse_source , "1 + 2 * 3";
+    changes = fold_to_fixed_point , parser_tree , root;
+    changes > 0;
+    parser_tree_kind_of , root == NodeKind_NumberLiteral;
+    parser_tree_at , root_mantissa == 7;
+
+    parser ;
+    root = parser_parse_source , "x * 1 + 0";
+    fold_to_fixed_point , parser_tree , root;
+    parser_tree_kind_of , root == NodeKind_Variable;
+    parser_tree_at , root_text == "x";
+
+    parser ;
+    root = parser_parse_source , "if true then 1 else 2";
+    fold_to_fixed_point , parser_tree , root;
+    parser_tree_kind_of , root == NodeKind_NumberLiteral;
+    parser_tree_at , root_mantissa == 1;
+
+    evaluate_text , "1 + 2 * 3" , to_text == "7";
+    evaluate_text , "2 ** 10" , to_text == "1024";
+    evaluate_text , "10 / 4" , to_text == "2.5";
+    evaluate_text , "7 % 3" , to_text == "1";
+    evaluate_text , "\"a\" + \"b\"" , to_text == "ab";
+    evaluate_text , "len([1, 2, 3])" , to_text == "3";
+    evaluate_text , "true && false" , to_text == WORD_FALSE;
+    evaluate_text , "1 < 2 && 2 < 3" , truthy;
+
+    session = make_session;
+    session_run , "let outer = 1;";
+    session_bound , "outer";
+    session_run , "{ let inner = 2; inner + outer; }";
+    // The inner binding died with its block; the outer one survived.
+    session_bound , "outer";
+    !session_bound , "inner";
+
+    parser ;
+    root = parser_parse_source , "1 +";
+    root == NO_NODE || !parser_problem_ok;
+    parser_problem_code == ErrorCode_ExpectedExpression;
+
+    second ;
+    second_parse_source , "(1 + 2";
+    second_problem_code == ErrorCode_UnbalancedParen;
+
+    third ;
+    third_parse_source , "1 = 2";
+    third_problem_code == ErrorCode_NotAssignable;
+
+    source , sample_programs;
+        session = make_session;
+        value = session_run , source;
+        !value_is_failure;
+
+// The entry point the benchmark harness calls. Everything above is reachable
+// from here.
+
+    check_precedence_table;
+    check_table_is_consistent;
+    check_tokenizer;
+    check_maximal_munch;
+    check_decimals;
+    check_parses;
+    check_round_trip;
+    check_associativity_shape;
+    check_folding;
+    check_identity_folding;
+    check_dead_branch;
+    check_evaluation;
+    check_scoping;
+    check_errors;
+    check_programs;
+    println , "expression language: all checks passed";
+
+// A tiny read eval print driver, kept at the bottom so the file ends on the
+// thing a reader is most likely to look for.
+
+    session = make_session;
+    failures = 0;
+    line , *lines;
+        trimmed = text_trim , line;
+        trimmed_empty;
+
+        value = session_run , trimmed;
+        value_is_failure;
+            ++failures;
+            println , session_last_error;
+
+            println , value_to_text;
+
+    failures;

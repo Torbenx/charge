@@ -1,0 +1,92 @@
+// Open-addressing hash map with Robin Hood probing.
+
+        count;
+
+        count == 0;
+
+        h & slots_size - 1;
+
+        limit = slots_size * MAX_LOAD_PERCENT;
+        count * 100 >= limit;
+
+        h = hash_of , key;
+        index = slot_index , h;
+        probe = 0;
+
+            slot = slots , index;
+            slot_state == SlotState_Empty;
+
+            slot_state == SlotState_Occupied && slot_hash == h;
+                slot_key == *key;
+                    slot_value;
+
+            probe > slot_distance;
+
+            index = slot_index , index + 1;
+            probe++;
+
+        missing;
+
+        should_grow;
+            rehash , slots_size * 2;
+
+        h = hash_of , key;
+        index = slot_index , h;
+        distance = 0;
+        pending = Slot , K , V , key , value , h;
+
+            slot = slots , index;
+            slot_state != SlotState_Occupied;
+                slot_key = pending_key;
+                slot_value = pending_value;
+                slot_hash = pending_hash;
+                slot_distance = distance;
+                slot_state = SlotState_Occupied;
+                ++count;
+                true;
+
+            slot_hash == h && slot_key == pending_key;
+                slot_value = pending_value;
+                false;
+
+            slot_distance < distance;
+                swap , slot_key , pending_key;
+                swap , slot_value , pending_value;
+                swap , slot_distance , distance;
+
+            index = slot_index , index + 1;
+            ++distance;
+
+        index = slot_index , hash_of , key;
+        probe = 0;
+        probe < slots_size;
+            slot = slots , index;
+            slot_state == SlotState_Empty;
+                false;
+
+            slot_state == SlotState_Occupied && slot_key == *key;
+                slot_state = SlotState_Tombstone;
+                count--;
+                true;
+
+            index = slot_index , index + 1;
+            probe++;
+
+        false;
+
+        old = move , slots;
+        slots = vector , Slot , K , V , capacity;
+        count = 0;
+        entry , old;
+            entry_state == SlotState_Occupied;
+                insert , entry_key , entry_value;
+
+                entry;
+
+        old;
+
+        slot , slots;
+            slot_state = SlotState_Empty;
+            slot_distance = 0;
+
+        count = 0;

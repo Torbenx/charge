@@ -1,0 +1,4816 @@
+// A deterministic 2D rigid-body physics engine in fixed-point arithmetic.
+//
+// Everything in this file is integer maths. The language accepts no float
+// literals, and a physics engine that has to be replayable across machines
+// does not want them anyway: two runs of the same scene on two machines must
+// produce bit-identical results, which is exactly what fixed point buys.
+//
+// The layout follows the usual pipeline:
+//
+//     integrate forces -> broad phase -> narrow phase -> solve -> integrate
+//     velocities -> position correction
+//
+// Each stage is its own section below. The scalar, vector and matrix types at
+// the top carry a full set of operator impls so that the maths in the later
+// stages reads as ordinary algebra over chained member accesses, for example
+//
+//     body.velocity.x + contact.normal.x * impulse.magnitude
+//
+// rather than as a ladder of named helper calls.
+
+// --- Fixed-point configuration -------------------------------------------
+
+// Number of fractional bits in a Fixed. One unit of the underlying integer is
+// 1 / 65536 of a whole number, which gives roughly 4.5 decimal digits of
+// fraction. That is enough for contact positions measured in metres while
+// leaving 47 bits of integer range in a 64-bit accumulator.
+
+// 2^16. The raw value of the number one. Every conversion in this file is a
+// multiply or divide by this constant.
+
+// 2^15, one half. Used for the round-to-nearest step in multiply and divide.
+
+// 2^14, one quarter.
+
+// 2^16 - 1, the mask that isolates the fractional part of a raw value.
+
+// 2^32, the raw value of 65536.0. Products of two Fixed values are shifted
+// back down by FIXED_SHIFT, so an intermediate may reach this magnitude
+// multiplied by the operand range before the shift happens.
+
+// Largest and smallest representable raw values, leaving generous headroom so
+// that a runaway simulation saturates instead of wrapping.
+
+// pi, tau and half pi in raw fixed-point units:
+//   pi      = 3.14159265 * 65536 = 205887
+//   tau     = 6.28318531 * 65536 = 411775
+//   half pi = 1.57079633 * 65536 = 102944
+
+// 1 / pi and 2 / pi, for range reduction without a division.
+
+// Small epsilons. LINEAR_EPSILON is about 1/1000 of a unit and is the
+// threshold below which a length is treated as zero; ANGULAR_EPSILON is
+// about 1/10000 of a radian.
+
+// Square of LINEAR_EPSILON, kept separately so that length comparisons can
+// avoid the square root entirely.
+
+// Newton iteration budget for the square root and the reciprocal. Both
+// converge quadratically, so six steps is far more than the 16 fractional
+// bits require; the extra steps only cost when the initial guess is poor.
+
+// Instrumentation counters. A profiler run reads these to see which stage of
+// the pipeline dominated a frame.
+
+// The apostrophe, spelled as a string because the character literal form for
+// it is not available.
+
+// --- Small enumerations ---------------------------------------------------
+
+// Three-way comparison, shared by the scalar and the vector types.
+
+// Which of the three shape representations a Shape holds. There is no sum
+// type in the language, so a Shape carries one of each payload and this tag
+// says which payload is live.
+
+// How a body participates in the simulation.
+
+    // Infinite mass, never moved by the solver, but may be teleported.
+
+    // Infinite mass, moved by its own velocity, unaffected by impulses.
+
+    // Full participant.
+
+    // Result of a narrow-phase query.
+
+    // The shapes are apart.
+
+    // The shapes touch but the manifold is empty, which happens for exact
+    // vertex-on-vertex contact.
+
+    // A usable manifold with at least one point.
+
+// Which feature of a polygon produced the deepest separating axis.
+
+// Joint solver status, reported per joint per substep.
+
+// --- The fixed-point scalar ----------------------------------------------
+//
+// A Fixed is a single integer interpreted as a multiple of 1 / FIXED_ONE.
+// Addition and subtraction are exact integer operations on the raw value;
+// multiplication and division need a shift to put the binary point back where
+// it belongs, and that shift is the only place rounding happens.
+//
+// The struct is deliberately one field wide so that it can be passed by value
+// everywhere without anybody worrying about aliasing.
+
+    // --- Construction -----------------------------------------------------
+
+    // Reinterpret a raw integer as a Fixed. This is the identity conversion
+    // and does no scaling at all.
+
+        raw = value;
+
+        // The whole number n.
+
+        raw = n * FIXED_ONE;
+
+    // The exact rational numerator / denominator, rounded to nearest. The
+    // multiply happens before the divide so that the full precision of the
+    // ratio survives into the result.
+
+        denominator == 0;
+            raw = 0;
+
+        scaled = numerator * FIXED_ONE;
+        scaled < 0 != denominator < 0;
+            raw = scaled - denominator / 2 / denominator;
+
+            raw = scaled + denominator / 2 / denominator;
+
+            // --- Queries ----------------------------------------------------------
+
+        raw == 0;
+
+        raw < 0;
+
+        raw > 0;
+
+        // Truncation towards zero, which is what the machine divide already does.
+
+        raw / FIXED_ONE;
+
+    // Largest whole number not greater than self. Integer division rounds
+    // towards zero, so negatives need the extra step.
+
+        raw >= 0;
+            raw / FIXED_ONE;
+
+        - -raw + FIXED_FRACTION_MASK / FIXED_ONE;
+
+        - -raw / FIXED_ONE;
+
+        // Round half away from zero.
+
+        raw >= 0;
+            raw + FIXED_HALF / FIXED_ONE;
+
+        - -raw + FIXED_HALF / FIXED_ONE;
+
+        // The fractional part, always in [0, 1).
+
+        result ;
+        result_raw = raw - floor_int * FIXED_ONE;
+        result;
+
+        result ;
+        raw < 0;
+            result_raw = -raw;
+
+            result_raw = raw;
+
+        result;
+
+        result ;
+        result_raw = -raw;
+        result;
+
+        // -1, 0 or +1 as a whole Fixed.
+
+        result ;
+        raw > 0;
+            result_raw = FIXED_ONE;
+
+            raw < 0;
+                result_raw = -FIXED_ONE;
+
+                result_raw = 0;
+
+        result;
+
+        raw < other_raw;
+            Ordering_Less;
+
+        raw > other_raw;
+            Ordering_Greater;
+
+        Ordering_Equal;
+
+        // --- Core arithmetic --------------------------------------------------
+
+        result ;
+        result_raw = raw + other_raw;
+        result;
+
+        result ;
+        result_raw = raw - other_raw;
+        result;
+
+    // Product with round-to-nearest. The intermediate .raw * other.raw is a
+    // 2 * FIXED_SHIFT fractional-bit number; adding FIXED_HALF before the
+    // shift rounds instead of truncating, which keeps the multiply unbiased
+    // and stops a long chain of multiplies drifting towards zero.
+
+        fixed_multiply_count++;
+        result ;
+        product = raw * other_raw;
+        product < 0;
+            result_raw = - -product + FIXED_HALF >> FIXED_SHIFT;
+
+            result_raw = product + FIXED_HALF >> FIXED_SHIFT;
+
+        result;
+
+    // Quotient with round-to-nearest. The numerator is pre-shifted so that
+    // the fractional bits survive the integer divide.
+
+        ++fixed_divide_count;
+        result ;
+        other_raw == 0;
+            raw >= 0;
+                result_raw = FIXED_MAX_RAW;
+
+                result_raw = FIXED_MIN_RAW;
+
+            result;
+
+        numerator = raw << FIXED_SHIFT;
+        numerator < 0 != other_raw < 0;
+            result_raw = numerator - other_raw / 2 / other_raw;
+
+            result_raw = numerator + other_raw / 2 / other_raw;
+
+        result;
+
+        // Scaling by a whole number, which needs no shift and so no rounding.
+
+        result ;
+        result_raw = raw * n;
+        result;
+
+        result ;
+        n == 0;
+            result_raw = 0;
+            result;
+
+        result_raw = raw / n;
+        result;
+
+    // Self multiplied by itself. Worth a name of its own because squared
+    // lengths appear on nearly every hot path in the narrow phase.
+
+        multiplied , self;
+
+    // --- Roots and reciprocals --------------------------------------------
+
+    // Integer square root of the raw value, by Newton's method on integers.
+    // sqrt(x) in fixed point is sqrt(raw / ONE) = sqrt(raw * ONE) / ONE, so
+    // the raw value is pre-multiplied by FIXED_ONE before the integer root.
+
+        ++fixed_sqrt_count;
+        result ;
+        raw <= 0;
+            result_raw = 0;
+            result;
+
+        target = raw * FIXED_ONE;
+        guess = raw;
+        guess < FIXED_ONE;
+            guess = FIXED_ONE;
+
+        step = 0;
+        step < SQRT_ITERATION_LIMIT;
+            next = guess + target / guess / 2;
+            next == guess;
+                step = SQRT_ITERATION_LIMIT;
+
+                guess = next;
+                step++;
+
+        // One clean-up pass: Newton on integers can leave the estimate one
+        // unit high but never more than one.
+        guess > 1 && guess * guess > target;
+            guess--;
+
+        result_raw = guess;
+        result;
+
+    // 1 / self, by Newton-Raphson on the reciprocal. The iteration is
+    //     next = guess * (2 - self * guess)
+    // which doubles the number of correct bits each pass. The initial guess
+    // comes from the plain divide, so in practice one pass is enough and the
+    // rest only tighten the last bit.
+
+        one ;
+        one_raw = FIXED_ONE;
+        raw == 0;
+            saturated ;
+            saturated_raw = FIXED_MAX_RAW;
+            saturated;
+
+        guess = one_divided , self;
+        two ;
+        two_raw = FIXED_ONE * 2;
+        step = 0;
+        step < RECIPROCAL_ITERATION_LIMIT;
+            correction = two_subtracted , multiplied , guess;
+            guess = guess_multiplied , correction;
+            step++;
+
+        guess;
+
+        // --- Clamping and blending --------------------------------------------
+
+        result ;
+        raw < low_raw;
+            result_raw = low_raw;
+            result;
+
+        raw > high_raw;
+            result_raw = high_raw;
+            result;
+
+        result_raw = raw;
+        result;
+
+    // Linear blend towards other. t is expected in [0, 1] but the formula is
+    // fine outside that range, which is what extrapolating a contact point
+    // between substeps needs.
+
+        delta = other_subtracted , self;
+        added , delta_multiplied , t;
+
+    // Move at most limit towards target. Used by the motor joints so that a
+    // motor cannot overshoot its own set point in a single substep.
+
+        delta = target_subtracted , self;
+        delta_magnitude_raw <= limit_raw;
+            target_added , zero_fixed;
+
+        added , delta_sign_unit_multiplied , limit;
+
+        // The single raw integer, in units of 1 / FIXED_ONE.
+
+// --- Fixed constructors as free functions ---------------------------------
+//
+// Struct literals with designated arguments would work here, but a named
+// constructor keeps the scale conversion visible at the call site, which is
+// the single easiest thing to get wrong in a fixed-point codebase.
+
+    result ;
+    result_raw = value;
+    result;
+
+    result ;
+    result_raw = n * FIXED_ONE;
+    result;
+
+    result ;
+    result_set_ratio , numerator , denominator;
+    result;
+
+    raw_fixed , 0;
+
+    raw_fixed , FIXED_ONE;
+
+    raw_fixed , FIXED_HALF;
+
+    raw_fixed , FIXED_PI_RAW;
+
+    raw_fixed , FIXED_TAU_RAW;
+
+    raw_fixed , LINEAR_EPSILON_RAW;
+
+// --- Fixed operator implementations ---------------------------------------
+//
+// These give the named methods above their infix spelling. Nothing else in
+// this file calls Fixed.added or Fixed.multiplied directly; from here down
+// the physics is written as ordinary algebra, which is the whole point of
+// declaring them.
+
+    l_added , r;
+
+    l_subtracted , r;
+
+    l_multiplied , r;
+
+    l_divided , r;
+
+// Remainder in fixed point: the raw values divide exactly, so the machine
+// remainder is already correctly scaled.
+
+    r_raw == 0;
+        zero_fixed;
+
+    raw_fixed , l_raw % r_raw;
+
+    l_raw < r_raw;
+
+    l_raw <= r_raw;
+
+    l_raw > r_raw;
+
+    l_raw >= r_raw;
+
+    l_raw == r_raw;
+
+    l_raw != r_raw;
+
+    // Unary negation. Exact: no rounding is involved.
+
+    raw_fixed , -l_raw;
+
+// Mixed scalar forms, so that a whole-number coefficient does not have to be
+// wrapped at every call site.
+
+    raw_fixed , l_raw * r;
+
+    l_divided_by_int , r;
+
+    // --- Free-function scalar helpers -----------------------------------------
+
+    a_raw < b_raw;
+        raw_fixed , a_raw;
+
+    raw_fixed , b_raw;
+
+    a_raw > b_raw;
+        raw_fixed , a_raw;
+
+    raw_fixed , b_raw;
+
+    a_magnitude;
+
+    value_clamped , low , high;
+
+    a_square_root;
+
+// True when the two values are within tolerance of each other. Every
+// floating-comparison instinct in a physics engine should route through here.
+
+    a - b_magnitude <= tolerance;
+
+    a_magnitude_raw <= LINEAR_EPSILON_RAW;
+
+// --- Angle handling -------------------------------------------------------
+
+// Fold an angle into (-pi, pi]. The loop runs at most a couple of times for
+// any angle a simulation actually produces; the guard is there for the case
+// where an angular velocity has already exploded.
+
+    result = raw_fixed , angle_raw;
+    guard = 0;
+    result_raw > FIXED_PI_RAW && guard < 64;
+        result_raw -= FIXED_TAU_RAW;
+        ++guard;
+
+    result_raw <= -FIXED_PI_RAW && guard < 64;
+        result_raw += FIXED_TAU_RAW;
+        ++guard;
+
+    result;
+
+    // Signed shortest angular distance from a to b, in (-pi, pi].
+
+    normalise_angle , b - a;
+
+// --- Trigonometry ---------------------------------------------------------
+//
+// sin is approximated by the Bhaskara I rational form on [0, pi]:
+//
+//     sin(x) = 16 x (pi - x) / (5 pi^2 - 4 x (pi - x))
+//
+// which is accurate to about 1 part in 1000 across the whole half period,
+// comfortably better than the 16 fractional bits can express near the peak
+// and far cheaper than a Taylor series. Symmetry handles the other half.
+
+    folded = normalise_angle , angle;
+    x = raw_fixed , folded_raw;
+    negate = false;
+    x_raw < 0;
+        x_raw = -x_raw;
+        negate = true;
+
+    pi = pi_fixed;
+    gap = pi - x;
+    product = x * gap;
+    numerator = product * 16;
+    denominator = pi * pi * 5 - product * 4;
+    result = numerator / denominator;
+    negate;
+        result = -result;
+
+    result;
+
+    fixed_sin , angle + raw_fixed , FIXED_HALF_PI_RAW;
+
+    c = fixed_cos , angle;
+    c_magnitude_raw < LINEAR_EPSILON_RAW;
+        fixed_sin , angle_raw >= 0;
+            raw_fixed , FIXED_MAX_RAW;
+
+        raw_fixed , FIXED_MIN_RAW;
+
+    fixed_sin , angle / c;
+
+// atan on [0, 1], by the standard minimax cubic
+//
+//     atan(x) = x * (pi/4) - x (|x| - 1) (0.2447 + 0.0663 |x|)
+//
+// with the two coefficients written as fixed-point raw values:
+//     0.2447 * 65536 = 16035
+//     0.0663 * 65536 = 4345
+
+    magnitude = x_magnitude;
+    c1 = raw_fixed , 16035;
+    c2 = raw_fixed , 4345;
+    quarter_pi = raw_fixed , FIXED_QUARTER_PI_RAW;
+    x * quarter_pi - x * magnitude - one_fixed * c1 + c2 * magnitude;
+
+// Full-circle arctangent, with the usual quadrant table. Returns a value in
+// (-pi, pi].
+
+    x_raw == 0 && y_raw == 0;
+        zero_fixed;
+
+    ax = x_magnitude;
+    ay = y_magnitude;
+    ax >= ay;
+        base = atan_unit , y / x;
+        x_raw >= 0;
+            base;
+
+        y_raw >= 0;
+            base + pi_fixed;
+
+        base - pi_fixed;
+
+    base = raw_fixed , FIXED_HALF_PI_RAW - atan_unit , x / y;
+    y_raw >= 0;
+        base;
+
+    base - pi_fixed;
+
+// asin on [-1, 1], derived from atan2 so that only one approximation has to
+// be trusted. asin(x) = atan2(x, sqrt(1 - x^2)).
+
+    clamped = x_clamped , -one_fixed , one_fixed;
+    complement = one_fixed - clamped * clamped_square_root;
+    fixed_atan2 , clamped , complement;
+
+    raw_fixed , FIXED_HALF_PI_RAW - fixed_asin , x;
+
+// --- Vec2 -----------------------------------------------------------------
+//
+// The two-dimensional vector. Every component is a Fixed, so a Vec2 is two
+// integers wide and is passed by value throughout.
+//
+// The cross product of two 2D vectors is a scalar (the z component of the 3D
+// cross product) and the cross product of a scalar and a vector is a vector.
+// Both spellings appear constantly in the angular parts of the solver, so
+// both get a name here.
+
+        x = nx + zero_fixed;
+        y = ny + zero_fixed;
+
+        x = zero_fixed;
+        y = zero_fixed;
+
+        x_raw == 0 && y_raw == 0;
+
+    // Dot product. This one line is the workhorse of the entire solver: every
+    // relative velocity along a contact normal is a dot product.
+
+        x * other_x + y * other_y;
+
+        // Scalar cross product, positive when other is counter-clockwise of self.
+
+        x * other_y - y * other_x;
+
+    // Cross of self with a scalar, which rotates self by -90 degrees and
+    // scales it. Equivalent to cross(self, s * z_hat).
+
+        make_vec2 , y * s , -x * s;
+
+        x * x + y * y;
+
+        x * x + y * y_square_root;
+
+    // Manhattan length, used by the broad phase where an exact length would
+    // be wasted work.
+
+        x_magnitude + y_magnitude;
+
+        fixed_max , x_magnitude , y_magnitude;
+
+    // Unit vector in the same direction, or the zero vector when self is too
+    // short to have a direction at all.
+
+        len = length;
+        len_raw <= LINEAR_EPSILON_RAW;
+            make_vec2 , zero_fixed , zero_fixed;
+
+        inverse = len_reciprocal;
+        make_vec2 , x * inverse , y * inverse;
+
+    // Normalise in place and report the length that was removed. The solver
+    // wants both, and computing the length twice is the sort of thing that
+    // shows up in a profile.
+
+        len = length;
+        len_raw <= LINEAR_EPSILON_RAW;
+            x = zero_fixed;
+            y = zero_fixed;
+            zero_fixed;
+
+        inverse = len_reciprocal;
+        x = x * inverse;
+        y = y * inverse;
+        len;
+
+        // Rotated by +90 degrees: (x, y) becomes (-y, x).
+
+        make_vec2 , -y , x;
+
+        // Rotated by -90 degrees.
+
+        make_vec2 , y , -x;
+
+    // Rotate by an arbitrary angle, given its sine and cosine. Passing the
+    // pair in rather than the angle lets a caller hoist the trig out of a
+    // loop over many vertices.
+
+        make_vec2 , x * cosine - y * sine , x * sine + y * cosine;
+
+        rotated_by , fixed_cos , angle , fixed_sin , angle;
+
+        fixed_atan2 , y , x;
+
+        // Componentwise minimum and maximum, which is how an AABB grows.
+
+        make_vec2 , fixed_min , x , other_x , fixed_min , y , other_y;
+
+        make_vec2 , fixed_max , x , other_x , fixed_max , y , other_y;
+
+        make_vec2 , x * other_x , y * other_y;
+
+        make_vec2 , x_magnitude , y_magnitude;
+
+        make_vec2 , -x , -y;
+
+        // Distance and squared distance to another point.
+
+        dx = other_x - x;
+        dy = other_y - y;
+        dx * dx + dy * dy_square_root;
+
+        dx = other_x - x;
+        dy = other_y - y;
+        dx * dx + dy * dy;
+
+        // Linear blend from self to other.
+
+        make_vec2 , x + other_x - x * t , y + other_y - y * t;
+
+        // Reflect across a unit normal: v - 2 (v . n) n.
+
+        scale = dot , normal * 2;
+        make_vec2 , x - normal_x * scale , y - normal_y * scale;
+
+        // Component of self along a unit direction, as a vector.
+
+        amount = dot , direction;
+        make_vec2 , direction_x * amount , direction_y * amount;
+
+        // The part of self that is orthogonal to direction.
+
+        along = projected_onto , direction;
+        make_vec2 , x - along_x , y - along_y;
+
+    // Clamp the length without changing the direction. Used to cap velocity
+    // so that one bad frame cannot fling a body across the world.
+
+        squared = length_squared;
+        squared <= limit * limit;
+            make_vec2 , x , y;
+
+        unit = normalised;
+        make_vec2 , unit_x * limit , unit_y * limit;
+
+        make_vec2 , x * factor , y * factor;
+
+    result ;
+    result_x = x + zero_fixed;
+    result_y = y + zero_fixed;
+    result;
+
+    make_vec2 , whole , x , whole , y;
+
+    make_vec2 , zero_fixed , zero_fixed;
+
+    make_vec2 , one_fixed , zero_fixed;
+
+    make_vec2 , zero_fixed , one_fixed;
+
+    // The unit vector at the given angle.
+
+    make_vec2 , fixed_cos , angle , fixed_sin , angle;
+
+    // --- Vec2 operator implementations ----------------------------------------
+
+    make_vec2 , l_x + r_x , l_y + r_y;
+
+    make_vec2 , l_x - r_x , l_y - r_y;
+
+// Vector times scalar. The reverse order is declared just below so that both
+// `n * s` and `s * n` read naturally in the impulse expressions.
+
+    make_vec2 , l_x * r , l_y * r;
+
+    make_vec2 , r_x * l , r_y * l;
+
+// Vector times integer, for the many places where the coefficient is a small
+// whole number such as the 2 in a reflection.
+
+    make_vec2 , l_x * r , l_y * r;
+
+    make_vec2 , l_x / r , l_y / r;
+
+    make_vec2 , l_x / r , l_y / r;
+
+// Componentwise product. Spelled with % rather than * so that it can never be
+// confused with a scaling; a physics reader seeing v % w knows both operands
+// are vectors.
+
+    make_vec2 , l_x * r_x , l_y * r_y;
+
+    l_x_raw == r_x_raw && l_y_raw == r_y_raw;
+
+    l_x_raw != r_x_raw || l_y_raw != r_y_raw;
+
+// Ordering by length, which gives sort() something to work with when the
+// broad phase wants its pair list in a deterministic order.
+
+    l_length_squared < r_length_squared;
+
+    l_length_squared <= r_length_squared;
+
+    l_length_squared > r_length_squared;
+
+    l_length_squared >= r_length_squared;
+
+    make_vec2 , -l_x , -l_y;
+
+    // --- Vec2 free functions --------------------------------------------------
+
+    a_x * b_x + a_y * b_y;
+
+    a_x * b_y - a_y * b_x;
+
+    // s cross v, the vector form. Rotates v by +90 degrees and scales by s.
+
+    make_vec2 , -s * v_y , s * v_x;
+
+    // v cross s, the other vector form.
+
+    make_vec2 , s * v_y , -s * v_x;
+
+    a + b - a * t;
+
+// The point on segment [a, b] closest to p, and the parameter that produced
+// it. Both the circle-polygon test and the distance joint want this.
+
+    edge = b - a;
+    length_squared = edge_length_squared;
+    length_squared_raw <= LINEAR_EPSILON_RAW;
+        make_vec2 , a_x , a_y;
+
+    t = p - a_dot , edge / length_squared_clamped , zero_fixed , one_fixed;
+    a + edge * t;
+
+    edge = b - a;
+    length_squared = edge_length_squared;
+    length_squared_raw <= LINEAR_EPSILON_RAW;
+        zero_fixed;
+
+    p - a_dot , edge / length_squared_clamped , zero_fixed , one_fixed;
+
+// Signed area of the triangle abc, positive when the winding is
+// counter-clockwise. Used by the polygon builder to reject a bad winding.
+
+    b_x - a_x * c_y - a_y - b_y - a_y * c_x - a_x;
+
+// --- Mat2 -----------------------------------------------------------------
+//
+// A 2x2 matrix stored as two column vectors. Columns rather than rows because
+// the columns of a rotation matrix are the images of the basis vectors, which
+// makes `m * v` a two-term combination of the columns and makes building a
+// rotation from a sine and cosine obvious.
+//
+//     | col_x.x  col_y.x |
+//     | col_x.y  col_y.y |
+
+        col_x = make_vec2 , one_fixed , zero_fixed;
+        col_y = make_vec2 , zero_fixed , one_fixed;
+
+        c = fixed_cos , angle;
+        s = fixed_sin , angle;
+        col_x = make_vec2 , c , s;
+        col_y = make_vec2 , -s , c;
+
+        col_x = make_vec2 , sx , zero_fixed;
+        col_y = make_vec2 , zero_fixed , sy;
+
+        // --- Element access ---------------------------------------------------
+
+        column == 0;
+            row == 0;
+                col_x_x + zero_fixed;
+
+            col_x_y + zero_fixed;
+
+        row == 0;
+            col_y_x + zero_fixed;
+
+        col_y_y + zero_fixed;
+
+        make_vec2 , col_x_x , col_y_x;
+
+        make_vec2 , col_x_y , col_y_y;
+
+    // --- Products ---------------------------------------------------------
+
+    // m * v, written out as a combination of the columns.
+
+        make_vec2 , col_x_x * v_x + col_y_x * v_y , col_x_y * v_x + col_y_y * v_y;
+
+    // m^T * v. For a rotation this is the inverse transform, which is how a
+    // world-space vector is pulled into a body's local frame.
+
+        make_vec2 , col_x_x * v_x + col_x_y * v_y , col_y_x * v_x + col_y_y * v_y;
+
+        make_mat2 , transform , other_col_x , transform , other_col_y;
+
+        make_mat2 , make_vec2 , col_x_x , col_y_x , make_vec2 , col_x_y , col_y_y;
+
+        // --- Invariants -------------------------------------------------------
+
+        col_x_x * col_y_y - col_y_x * col_x_y;
+
+        col_x_x + col_y_y;
+
+    // Inverse by the adjugate over the determinant. A singular matrix returns
+    // the zero matrix rather than saturating, so a caller that forgets to
+    // check gets an obviously wrong answer instead of a plausible one.
+
+        d = determinant;
+        d_magnitude_raw <= LINEAR_EPSILON_RAW;
+            make_mat2 , vec2_zero , vec2_zero;
+
+        inverse = d_reciprocal;
+        make_mat2 , make_vec2 , col_y_y * inverse , -col_x_y * inverse ,
+                         make_vec2 , -col_y_x * inverse , col_x_x * inverse;
+
+    // Solve m * result = b directly by Cramer's rule, which is both cheaper
+    // and better conditioned than forming the inverse. The two-point contact
+    // solver calls this for its block solve.
+
+        d = col_x_x * col_y_y - col_y_x * col_x_y;
+        d_magnitude_raw <= LINEAR_EPSILON_RAW;
+            vec2_zero;
+
+        inverse = d_reciprocal;
+        make_vec2 , col_y_y * b_x - col_y_x * b_y * inverse ,
+                         col_x_x * b_y - col_x_y * b_x * inverse;
+
+                         // The rotation angle this matrix represents, assuming it is a rotation.
+
+        fixed_atan2 , col_x_y , col_x_x;
+
+    // A rotation matrix has orthonormal columns; drift from repeated
+    // composition is removed by re-normalising the first column and
+    // rebuilding the second from it.
+
+        first = col_x_normalised;
+        make_mat2 , first , first_perpendicular;
+
+        col_x_x_raw == FIXED_ONE && col_x_y_raw == 0
+            && col_y_x_raw == 0 && col_y_y_raw == FIXED_ONE;
+
+        make_mat2 , -col_x , -col_y;
+
+        make_mat2 , col_x * factor , col_y * factor;
+
+    result ;
+    result_col_x = col_x + vec2_zero;
+    result_col_y = col_y + vec2_zero;
+    result;
+
+    make_mat2 , vec2_unit_x , vec2_unit_y;
+
+    make_mat2 , vec2_zero , vec2_zero;
+
+    c = fixed_cos , angle;
+    s = fixed_sin , angle;
+    make_mat2 , make_vec2 , c , s , make_vec2 , -s , c;
+
+// The outer product a b^T, which is how a rank-one correction to an inertia
+// tensor is built.
+
+    make_mat2 , make_vec2 , a_x * b_x , a_y * b_x , make_vec2 , a_x * b_y , a_y * b_y;
+
+    // --- Mat2 operator implementations ----------------------------------------
+
+    make_mat2 , l_col_x + r_col_x , l_col_y + r_col_y;
+
+    make_mat2 , l_col_x - r_col_x , l_col_y - r_col_y;
+
+// Matrix times matrix, in the usual right-to-left composition order: the
+// result applies r first and then l.
+
+    make_mat2 , l_transform , r_col_x , l_transform , r_col_y;
+
+    // Matrix times vector.
+
+    make_vec2 , l_col_x_x * r_x + l_col_y_x * r_y , l_col_x_y * r_x + l_col_y_y * r_y;
+
+    // Row vector times matrix, which is the transposed transform.
+
+    make_vec2 , r_col_x_x * l_x + r_col_x_y * l_y , r_col_y_x * l_x + r_col_y_y * l_y;
+
+    make_mat2 , l_col_x * r , l_col_y * r;
+
+    make_mat2 , r_col_x * l , r_col_y * l;
+
+    make_mat2 , l_col_x / r , l_col_y / r;
+
+    l_col_x == r_col_x && l_col_y == r_col_y;
+
+    l_col_x != r_col_x || l_col_y != r_col_y;
+
+// Ordering by determinant, so that a degenerate matrix sorts below a healthy
+// one. Only the debug tooling uses this.
+
+    l_determinant < r_determinant;
+
+    l_determinant > r_determinant;
+
+    make_mat2 , -l_col_x , -l_col_y;
+
+// --- Transform ------------------------------------------------------------
+//
+// A rigid transform: a rotation and a translation, with the rotation cached
+// both as an angle and as the matrix built from it. The matrix is what every
+// vertex transform actually uses; the angle is what the integrator advances.
+
+        position = vec2_zero;
+        angle = zero_fixed;
+        rotation = mat2_identity;
+
+    // Rebuild the cached matrix after the angle has been integrated. This is
+    // the only place the trig functions are called during a step.
+
+        angle = normalise_angle , angle;
+        rotation = mat2_rotation , angle;
+
+        angle = normalise_angle , value;
+        rotation = mat2_rotation , angle;
+
+        // Local point to world point.
+
+        position + rotation * local;
+
+        // World point back to local.
+
+        rotation_transform_transposed , world - position;
+
+        // Local direction to world direction: no translation.
+
+        rotation * local;
+
+        rotation_transform_transposed , world;
+
+        // The transform that undoes self.
+
+        result ;
+        result_angle = -angle;
+        result_rotation = rotation_transposed;
+        result_position = result_rotation * -position;
+        result;
+
+    // self after other, so that applying the result equals applying other and
+    // then applying self.
+
+        result ;
+        result_angle = normalise_angle , angle + other_angle;
+        result_rotation = rotation * other_rotation;
+        result_position = position + rotation * other_position;
+        result;
+
+    result ;
+    result_position = position + vec2_zero;
+    result_angle = normalise_angle , angle;
+    result_rotation = mat2_rotation , result_angle;
+    result;
+
+    make_transform , vec2_zero , zero_fixed;
+
+    // Composition, spelled infix so that a chain of frames reads left to right.
+
+    l_composed , r;
+
+    // Transform applied to a point.
+
+    l_position + l_rotation * r;
+
+    l_position == r_position && l_angle == r_angle;
+
+// --- Axis-aligned bounding box --------------------------------------------
+//
+// Stored as a min and a max corner. An empty box is represented by a min that
+// is greater than its max on at least one axis, which makes the merge of an
+// empty box with anything the identity.
+
+        lower = make_vec2 , raw_fixed , FIXED_MAX_RAW , raw_fixed , FIXED_MAX_RAW;
+        upper = make_vec2 , raw_fixed , FIXED_MIN_RAW , raw_fixed , FIXED_MIN_RAW;
+
+        lower_x > upper_x || lower_y > upper_y;
+
+        upper_x - lower_x;
+
+        upper_y - lower_y;
+
+        upper - lower;
+
+        upper - lower / 2;
+
+        lower + upper / 2;
+
+        upper_x - lower_x * upper_y - lower_y;
+
+        upper_x - lower_x + upper_y - lower_y * 2;
+
+        // Grow to include a point.
+
+        lower = lower_componentwise_min , p;
+        upper = upper_componentwise_max , p;
+
+        lower = lower_componentwise_min , other_lower;
+        upper = upper_componentwise_max , other_upper;
+
+    // Grow outward on every side by margin. The broad phase fattens every
+    // proxy so that a body has to move a real distance before its cell
+    // membership changes.
+
+        make_aabb , make_vec2 , lower_x - margin , lower_y - margin ,
+                         make_vec2 , upper_x + margin , upper_y + margin;
+
+        p_x >= lower_x && p_x <= upper_x && p_y >= lower_y && p_y <= upper_y;
+
+        lower_x <= other_lower_x && lower_y <= other_lower_y
+            && upper_x >= other_upper_x && upper_y >= other_upper_y;
+
+    // The separating-axis test in its simplest form: two boxes overlap unless
+    // one is entirely to one side of the other on some axis.
+
+        upper_x < other_lower_x || other_upper_x < lower_x;
+            false;
+
+        upper_y < other_lower_y || other_upper_y < lower_y;
+            false;
+
+        true;
+
+        // Nearest point inside the box to p, which is p itself when p is inside.
+
+        make_vec2 , p_x_clamped , lower_x , upper_x , p_y_clamped , lower_y , upper_y;
+
+        nearest = closest_point , p;
+        p - nearest_length_squared;
+
+        make_aabb , lower + offset , upper + offset;
+
+    // Sweep the box along a displacement, producing the box that covers the
+    // whole path. Continuous collision detection uses this to decide whether
+    // a fast body needs substepping of its own.
+
+        moved = translated , displacement;
+        make_aabb , lower_componentwise_min , moved_lower , upper_componentwise_max , moved_upper;
+
+    result ;
+    result_lower = lower + vec2_zero;
+    result_upper = upper + vec2_zero;
+    result;
+
+    result ;
+    result_set_empty;
+    result;
+
+    make_aabb , centre - half , centre + half;
+
+// Union of two boxes, spelled with + so that folding a list of proxies into
+// one bound is a single accumulation.
+
+    make_aabb , l_lower_componentwise_min , r_lower , l_upper_componentwise_max , r_upper;
+
+    // Translation of a box by a vector.
+
+    make_aabb , l_lower + r , l_upper + r;
+
+    make_aabb , l_lower - r , l_upper - r;
+
+// Intersection. May produce an empty box, which is exactly the answer when
+// the two do not overlap.
+
+    make_aabb , l_lower_componentwise_max , r_lower , l_upper_componentwise_min , r_upper;
+
+    l_lower == r_lower && l_upper == r_upper;
+
+    l_lower != r_lower || l_upper != r_upper;
+
+    // Ordering by area, so that a sorted proxy list puts the cheap tests first.
+
+    l_area < r_area;
+
+    l_area > r_area;
+
+    // --- Circle ---------------------------------------------------------------
+
+        pi_fixed * radius * radius;
+
+    // Second moment of area about the centre, times the density, gives the
+    // rotational inertia of a disc: m r^2 / 2. The offset term comes from the
+    // parallel axis theorem when the circle is not at the body origin.
+
+        own = mass * radius * radius / 2;
+        own + mass * centre_length_squared;
+
+        world_centre = frame_apply , centre;
+        extent = make_vec2 , radius , radius;
+        make_aabb , world_centre - extent , world_centre + extent;
+
+        local = frame_unapply , p;
+        local - centre_length_squared <= radius * radius;
+
+    // The point on the circle furthest along a world-space direction. This is
+    // the support function that the SAT code and the distance query share.
+
+        unit = direction_normalised;
+        frame_apply , centre + unit * radius;
+
+    result ;
+    result_centre = centre + vec2_zero;
+    result_radius = radius + zero_fixed;
+    result;
+
+    l_centre == r_centre && l_radius == r_radius;
+
+// Scaling a circle scales both its offset and its radius, which is what a
+// uniform scale of the whole body would do.
+
+    make_circle , l_centre * r , l_radius * r;
+
+// --- Convex polygon -------------------------------------------------------
+
+// Above this the polygon builder refuses the shape rather than silently
+// dropping vertices.
+
+// A convex polygon in counter-clockwise winding, stored in body-local space
+// together with its outward edge normals. normals[i] is the outward normal of
+// the edge from vertices[i] to vertices[i + 1].
+
+        vertices_size;
+
+    // Wrapping index access, so that the edge loops never need a modulo at
+    // the call site.
+
+        count = vertices_size;
+        count == 0;
+            vec2_zero;
+
+        wrapped = index % count;
+        wrapped < 0;
+            wrapped += count;
+
+        vertices , wrapped + vec2_zero;
+
+        count = normals_size;
+        count == 0;
+            vec2_zero;
+
+        wrapped = index % count;
+        wrapped < 0;
+            wrapped += count;
+
+        normals , wrapped + vec2_zero;
+
+        frame_apply , vertex , index;
+
+        frame_apply_direction , normal , index;
+
+    // Recompute the outward normals from the vertices. Counter-clockwise
+    // winding means the outward normal of an edge is the edge rotated by -90
+    // degrees, so (dx, dy) becomes (dy, -dx).
+
+        normals_clear;
+        count = vertices_size;
+        index = 0;
+        index < count;
+            current = vertices , index;
+            next = vertices , index + 1 % count;
+            edge = next - current;
+            normals_push_back , edge_perpendicular_cw_normalised;
+            index++;
+
+    // Twice the signed area, by the shoelace formula. Positive means the
+    // winding is counter-clockwise, which every routine below assumes.
+
+        total = zero_fixed;
+        count = vertices_size;
+        index = 0;
+        index < count;
+            current = vertices , index;
+            next = vertices , index + 1 % count;
+            total = total + current_x * next_y - next_x * current_y;
+            index++;
+
+        total;
+
+        signed_area_twice_magnitude / 2;
+
+    // Area centroid, as the area-weighted mean of the fan triangles from the
+    // origin. Each triangle contributes its own centroid, which is one third
+    // of the sum of its corners, weighted by twice its signed area.
+
+        accumulated = vec2_zero;
+        total_area = zero_fixed;
+        count = vertices_size;
+        index = 0;
+        index < count;
+            current = vertices , index;
+            next = vertices , index + 1 % count;
+            cross_term = current_x * next_y - next_x * current_y;
+            accumulated = accumulated + current + next * cross_term;
+            total_area = total_area + cross_term;
+            ++index;
+
+        total_area_magnitude_raw <= LINEAR_EPSILON_RAW;
+            vec2_zero;
+
+        accumulated / total_area * 3;
+
+    // Second moment of area about the origin, by the standard polygon
+    // formula. Multiplying by density gives the rotational inertia.
+
+        numerator = zero_fixed;
+        denominator = zero_fixed;
+        count = vertices_size;
+        index = 0;
+        index < count;
+            current = vertices , index;
+            next = vertices , index + 1 % count;
+            cross_term = current_x * next_y - next_x * current_y_magnitude;
+            spread = current_dot , current + current_dot , next + next_dot , next;
+            numerator = numerator + cross_term * spread;
+            denominator = denominator + cross_term;
+            index++;
+
+        denominator_raw == 0;
+            zero_fixed;
+
+        numerator / denominator * 6 * denominator;
+
+        a = area;
+        a_raw <= 0;
+            zero_fixed;
+
+        second_moment * mass / a;
+
+    // The vertex furthest along a local-space direction, returned as an
+    // index so that the SAT code can also reach its neighbours.
+
+        count = vertices_size;
+        count == 0;
+            0;
+
+        best = 0;
+        best_projection = vertices , 0 , dot , direction;
+        index = 1;
+        index < count;
+            projection = vertices , index_dot , direction;
+            projection > best_projection;
+                best_projection = projection;
+                best = index;
+
+            ++index;
+
+        best;
+
+        local_direction = frame_unapply_direction , direction;
+        frame_apply , vertex , support_index , local_direction;
+
+        // Interval of the polygon's projection on a local-space axis.
+
+        count = vertices_size;
+        count == 0;
+            vec2_zero;
+
+        low = vertices , 0 , dot , axis;
+        high = low + zero_fixed;
+        index = 1;
+        index < count;
+            projection = vertices , index_dot , axis;
+            low = fixed_min , low , projection;
+            high = fixed_max , high , projection;
+            index++;
+
+        make_vec2 , low , high;
+
+        box = aabb_empty;
+        count = vertices_size;
+        index = 0;
+        index < count;
+            box_include_point , frame_apply , vertices , index;
+            index++;
+
+        box;
+
+    // A point is inside a convex counter-clockwise polygon exactly when it is
+    // behind every edge plane.
+
+        local = frame_unapply , p;
+        count = vertices_size;
+        index = 0;
+        index < count;
+            offset = local - vertices , index;
+            normals , index_dot , offset > zero_fixed;
+                false;
+
+            ++index;
+
+        true;
+
+    // Convexity check, used only by the builder and the debug validator. A
+    // convex counter-clockwise polygon turns left at every vertex.
+
+        count = vertices_size;
+        count < 3;
+            false;
+
+        index = 0;
+        index < count;
+            a = vertex , index;
+            b = vertex , index + 1;
+            c = vertex , index + 2;
+            triangle_area_twice , a , b , c < zero_fixed;
+                false;
+
+            index++;
+
+        true;
+
+    // Shift every vertex so that the centroid lands on the origin, which is
+    // what lets the body treat its own origin as its centre of mass.
+
+        offset = centroid;
+        index = 0;
+        index < vertices_size;
+            vertices , index = vertices , index - offset;
+            ++index;
+
+        rebuild_normals;
+
+// Build a polygon from a vertex list, rebuilding the normals and pushing the
+// centroid to the origin. The caller is expected to supply a convex
+// counter-clockwise loop; is_convex reports when it did not.
+
+    result ;
+    result_vertices = move , vertices;
+    result_radius = raw_fixed , LINEAR_EPSILON_RAW;
+    result_rebuild_normals;
+    result;
+
+// The axis-aligned box of half width hx and half height hy, centred on the
+// body origin, in counter-clockwise winding starting from the lower left.
+
+    corners ;
+    corners_push_back , make_vec2 , -hx , -hy;
+    corners_push_back , make_vec2 , hx , -hy;
+    corners_push_back , make_vec2 , hx , hy;
+    corners_push_back , make_vec2 , -hx , hy;
+    make_polygon , move , corners;
+
+// A regular n-gon of the given circumradius, with the first vertex on the
+// positive x axis.
+
+    corners ;
+    index = 0;
+    index < sides && index < MAX_POLYGON_VERTICES;
+        angle = tau_fixed * index / sides;
+        corners_push_back , vec2_from_angle , angle * circumradius;
+        ++index;
+
+    make_polygon , move , corners;
+
+    l_vertices_size != r_vertices_size;
+        false;
+
+    index = 0;
+    index < l_vertices_size;
+        l_vertices , index != r_vertices , index;
+            false;
+
+        index++;
+
+    true;
+
+// --- Shape ----------------------------------------------------------------
+//
+// One of each payload plus a tag. A real implementation would use a sum type;
+// this shape is a struct with both payloads because the language has none,
+// and the unused payload costs four Fixed values.
+
+        kind == ShapeKind_Circle;
+
+        kind == ShapeKind_Polygon || kind == ShapeKind_Box;
+
+        kind == ShapeKind_Circle;
+            circle_area;
+
+        polygon_area;
+
+        area * density;
+
+        kind == ShapeKind_Circle;
+            circle_inertia_for_mass , mass;
+
+        polygon_inertia_for_mass , mass;
+
+        kind == ShapeKind_Circle;
+            circle_centre + vec2_zero;
+
+        polygon_centroid;
+
+        kind == ShapeKind_Circle;
+            circle_bounds , frame;
+
+        polygon_bounds , frame;
+
+        kind == ShapeKind_Circle;
+            circle_contains_point , frame , p;
+
+        polygon_contains_point , frame , p;
+
+        kind == ShapeKind_Circle;
+            circle_support , frame , direction;
+
+        polygon_support , frame , direction;
+
+    result ;
+    result_kind = ShapeKind_Circle;
+    result_circle = move , circle;
+    result;
+
+    result ;
+    result_kind = ShapeKind_Polygon;
+    result_polygon = move , polygon;
+    result;
+
+    result = shape_from_polygon , make_box_polygon , hx , hy;
+    result_kind = ShapeKind_Box;
+    result;
+
+// --- Material -------------------------------------------------------------
+//
+// Density, restitution and the two friction coefficients. Restitution is the
+// fraction of approach speed returned as separation speed: 0 is a dead stop,
+// FIXED_ONE is a perfectly elastic bounce.
+
+        restitution_raw > FIXED_QUARTER;
+
+        dynamic_friction_raw < raw_fixed , 6553 , raw;
+
+    result ;
+    result_density = density + zero_fixed;
+    result_restitution = restitution + zero_fixed;
+    result_static_friction = static_friction + zero_fixed;
+    result_dynamic_friction = dynamic_friction + zero_fixed;
+    result;
+
+// Standard mixing rules. Restitution takes the larger of the pair, because a
+// bouncy ball on dead concrete should still bounce; friction takes the
+// geometric mean, which is the usual compromise.
+
+    fixed_max , a_restitution , b_restitution;
+
+    a_static_friction * b_static_friction_square_root;
+
+    a_dynamic_friction * b_dynamic_friction_square_root;
+
+// A few presets so that the scene builder does not have to spell out four
+// coefficients for every body. Values are raw fixed-point:
+//   0.2 * 65536 = 13107, 0.3 * 65536 = 19660, 0.4 * 65536 = 26214,
+//   0.6 * 65536 = 39321, 0.9 * 65536 = 58982.
+
+    make_material , ratio , 600 , 1000 , raw_fixed , 19660 , raw_fixed , 39321 , raw_fixed , 26214;
+
+    make_material , whole , 8 , raw_fixed , 13107 , raw_fixed , 26214 , raw_fixed , 13107;
+
+    make_material , ratio , 1200 , 1000 , raw_fixed , 58982 , raw_fixed , 58982 , raw_fixed , 39321;
+
+    make_material , ratio , 900 , 1000 , raw_fixed , 6553 , raw_fixed , 6553 , raw_fixed , 3276;
+
+// --- Rigid body -----------------------------------------------------------
+//
+// The body owns its shape, its frame and its momentum state. Mass and inertia
+// are stored both directly and as reciprocals, because the solver only ever
+// wants the reciprocals and a static body is spelled by an inverse mass of
+// zero rather than by a branch.
+
+// --- Mass properties --------------------------------------------------
+
+        kind == BodyKind_Static;
+
+        kind == BodyKind_Dynamic;
+
+        kind != BodyKind_Static && inverse_mass_raw > 0;
+
+    // Recompute mass, centre of mass and inertia from the shape and the
+    // material. A static or kinematic body gets zero inverse mass, which is
+    // what makes every impulse applied to it a no-op.
+
+        kind != BodyKind_Dynamic;
+            mass = zero_fixed;
+            inverse_mass = zero_fixed;
+            inertia = zero_fixed;
+            inverse_inertia = zero_fixed;
+
+        mass = shape_mass_for_density , material_density;
+        mass_raw <= 0;
+            mass = one_fixed;
+
+        inverse_mass = mass_reciprocal;
+        inertia = shape_inertia_for_mass , mass;
+        inertia_raw <= 0;
+            inverse_inertia = zero_fixed;
+
+            inverse_inertia = inertia_reciprocal;
+
+        local_centre = shape_centroid;
+
+    // Force a body to behave as if it were nailed down, without discarding
+    // its stored mass, so that it can be released again later.
+
+        inverse_mass = zero_fixed;
+        inverse_inertia = zero_fixed;
+        velocity = vec2_zero;
+        angular_velocity = zero_fixed;
+
+        mass_raw > 0;
+            inverse_mass = mass_reciprocal;
+
+        inertia_raw > 0;
+            inverse_inertia = inertia_reciprocal;
+
+            // --- Frame ------------------------------------------------------------
+
+        frame_position + vec2_zero;
+
+        frame_angle + zero_fixed;
+
+        // Centre of mass in world space, which is where every impulse pivots.
+
+        frame_position + frame_rotation * local_centre;
+
+        frame_position = p + vec2_zero;
+        bounds_dirty = true;
+
+        frame_set_angle , angle;
+        bounds_dirty = true;
+
+        frame_apply , local;
+
+        frame_unapply , world;
+
+    // --- Velocity ---------------------------------------------------------
+
+    // Velocity of the material point currently at the given world position.
+    // The angular term is omega cross r, which in 2D is a 90 degree rotation
+    // of the offset scaled by the angular speed.
+
+        offset = world_point - world_centre;
+        make_vec2 , velocity_x - angular_velocity * offset_y ,
+                         velocity_y + angular_velocity * offset_x;
+
+        velocity = v + vec2_zero;
+        sleep_timer = zero_fixed;
+        awake = true;
+
+        velocity = velocity + delta;
+        awake = true;
+
+        // --- Forces and impulses ----------------------------------------------
+
+        force = vec2_zero;
+        torque = zero_fixed;
+
+        force = force + f;
+        awake = true;
+
+    // A force applied off the centre of mass also produces a torque equal to
+    // the cross product of the lever arm with the force.
+
+        offset = world_point - world_centre;
+        force = force + f;
+        torque = torque + offset_x * f_y - offset_y * f_x;
+        awake = true;
+
+        torque = torque + t;
+        awake = true;
+
+    // The two workhorses of the solver. An impulse changes velocity directly
+    // rather than through an integration step, so it is scaled by the inverse
+    // mass and not by the timestep.
+
+        velocity = velocity + impulse * inverse_mass;
+
+        offset = world_point - world_centre;
+        velocity_x = velocity_x + impulse_x * inverse_mass;
+        velocity_y = velocity_y + impulse_y * inverse_mass;
+        angular_velocity = angular_velocity
+            + inverse_inertia * offset_x * impulse_y - offset_y * impulse_x;
+
+        angular_velocity = angular_velocity + amount * inverse_inertia;
+
+    // --- Integration ------------------------------------------------------
+
+    // Semi-implicit Euler on the velocity. Gravity is added as an
+    // acceleration rather than as a force so that a body's mass does not
+    // change how fast it falls, and damping is applied as a multiplicative
+    // decay so that it is stable at any timestep.
+
+        inverse_mass_raw == 0;
+
+        velocity = velocity
+            + gravity * gravity_scale + force * inverse_mass * dt;
+        angular_velocity = angular_velocity + torque * inverse_inertia * dt;
+        velocity = velocity * one_fixed / one_fixed + linear_damping * dt;
+        angular_velocity = angular_velocity
+            / one_fixed + angular_damping * dt;
+        velocity = velocity_clamped_length , max_linear_speed;
+        angular_velocity = angular_velocity_clamped , -max_angular_speed , max_angular_speed;
+
+        kind == BodyKind_Static;
+
+        frame_position = frame_position + velocity * dt;
+        frame_angle = frame_angle + angular_velocity * dt;
+        frame_refresh;
+        bounds_dirty = true;
+
+    // --- Energy -----------------------------------------------------------
+
+    // Translational plus rotational kinetic energy: m v^2 / 2 + I w^2 / 2.
+
+        linear = mass * velocity_length_squared / 2;
+        angular = inertia * angular_velocity * angular_velocity / 2;
+        linear + angular;
+
+    // Potential energy relative to a datum height, measured against the
+    // world's gravity direction.
+
+        -mass * gravity_x * world_centre_x
+                       + gravity_y * world_centre_y - datum;
+
+        velocity * mass;
+
+        offset = world_centre - pivot;
+        inertia * angular_velocity
+            + mass * offset_x * velocity_y - offset_y * velocity_x;
+
+    // --- Sleeping ---------------------------------------------------------
+
+    // A body that has been slow for long enough stops being simulated. The
+    // thresholds are squared so that the test avoids a square root.
+
+        kind == BodyKind_Static;
+
+        never_sleeps;
+            sleep_timer = zero_fixed;
+
+        moving = velocity_length_squared > linear_threshold * linear_threshold
+            || angular_velocity_magnitude > angular_threshold;
+        moving;
+            sleep_timer = zero_fixed;
+            awake = true;
+
+            sleep_timer = sleep_timer + dt;
+            sleep_timer >= time_to_sleep;
+                awake = false;
+                velocity = vec2_zero;
+                angular_velocity = zero_fixed;
+
+        awake = true;
+        sleep_timer = zero_fixed;
+
+        // --- Bounds -----------------------------------------------------------
+
+        shape_bounds , frame;
+
+    // The proxy box the broad phase indexes: the tight bounds, fattened by a
+    // margin and swept along the current velocity so that a body cannot
+    // tunnel out of its own cell within one step.
+
+        shape_bounds , frame_swept , velocity * dt_expanded , margin;
+
+        // --- Identity ---------------------------------------------------------
+
+// Two bodies collide only when their layer and mask bits agree in both
+// directions, and never when both are immovable.
+
+    a_inverse_mass_raw == 0 && b_inverse_mass_raw == 0;
+        false;
+
+    !a_awake && !b_awake;
+        false;
+
+    a_layer & b_mask != 0 && b_layer & a_mask != 0;
+
+// Ordering by identifier, so that the contact list is deterministic no matter
+// what order the broad phase happened to visit its cells in.
+
+    l_identifier < r_identifier;
+
+    l_identifier == r_identifier;
+
+// --- Broad phase: uniform spatial hash ------------------------------------
+//
+// Every proxy box is rasterised into the cells of an infinite uniform grid,
+// and each cell index is folded into a bucket by a pair of large primes. The
+// grid is infinite because the hash wraps; the cost is that two distant cells
+// can share a bucket, which the pair filter removes at the end.
+//
+// The cell size wants to be about twice the average proxy diameter: too small
+// and a body lands in many cells, too large and every cell holds everything.
+
+// Multiplicative hash constants. Both are primes far from any power of two.
+
+// Default bucket count. A power of two so that the fold to a bucket index is
+// a mask rather than a remainder.
+
+// A body whose proxy covers more cells than this is put on the oversized list
+// and tested against everything instead of being rasterised.
+
+// One entry in a bucket: which body, and which cell it was hashed from. The
+// cell is kept so that a query can reject the far half of a collision without
+// touching the body.
+
+// An unordered pair of body indices, normalised so that low is always the
+// smaller. Normalising at construction is what makes the duplicate filter a
+// plain equality test.
+
+        low > high;
+            swap , low , high;
+
+        low * 1000003 + high;
+
+    result ;
+    a < b;
+        result_low = a;
+        result_high = b;
+
+        result_low = b;
+        result_high = a;
+
+    result;
+
+    l_low == r_low && l_high == r_high;
+
+    l_low != r_low || l_high != r_high;
+
+    // Lexicographic order on (low, high), which is what the duplicate sweep wants.
+
+    l_low != r_low;
+        l_low < r_low;
+
+    l_high < r_high;
+
+    l_low != r_low;
+        l_low > r_low;
+
+    l_high > r_high;
+
+    // --- Configuration ----------------------------------------------------
+
+        cell_size = cell_size + zero_fixed;
+        inverse_cell_size = cell_size_reciprocal;
+        bucket_count = buckets;
+        bucket_mask = buckets - 1;
+        buckets_clear;
+        buckets_resize , buckets;
+        generation = 0;
+
+    // --- Cell arithmetic --------------------------------------------------
+
+    // World coordinate to cell coordinate, flooring so that the cell boundary
+    // at zero does not get counted twice.
+
+        value * inverse_cell_size_floor_int;
+
+        p_x * inverse_cell_size_floor_int;
+
+        p_y * inverse_cell_size_floor_int;
+
+    // Fold a cell coordinate pair into a bucket. The multiply-and-xor is the
+    // classic Teschner spatial hash; the final mask is valid only because the
+    // bucket count is a power of two.
+
+        mixed = cx * HASH_PRIME_X ^ cy * HASH_PRIME_Y ^ HASH_PRIME_MIX;
+        index = mixed & bucket_mask;
+        index < 0;
+            index += bucket_count;
+
+        index;
+
+    // How many cells a box would occupy, used to decide whether a proxy goes
+    // on the oversized list instead.
+
+        low_x = cell_of , box_lower_x;
+        low_y = cell_of , box_lower_y;
+        high_x = cell_of , box_upper_x;
+        high_y = cell_of , box_upper_y;
+        high_x - low_x + 1 * high_y - low_y + 1;
+
+        // --- Population -------------------------------------------------------
+
+        index = 0;
+        index < buckets_size;
+            buckets , index_clear;
+            index++;
+
+        oversized_clear;
+        proxy_bounds_clear;
+        entry_count = 0;
+        ++generation;
+
+        // Rasterise one proxy box into every cell it touches.
+
+        proxy_bounds_push_back , box + vec2_zero;
+        cell_span , box > MAX_CELLS_PER_PROXY;
+            oversized_push_back , body_index;
+
+        low_x = cell_of , box_lower_x;
+        low_y = cell_of , box_lower_y;
+        high_x = cell_of , box_upper_x;
+        high_y = cell_of , box_upper_y;
+        cy = low_y;
+        cy <= high_y;
+            cx = low_x;
+            cx <= high_x;
+                entry ;
+                entry_body_index = body_index;
+                entry_cell_x = cx;
+                entry_cell_y = cy;
+                entry_generation = generation;
+                buckets , bucket_of , cx , cy_push_back , entry;
+                ++entry_count;
+                cx++;
+
+            cy++;
+
+    // Rebuild the whole grid from a body list. Rebuilding beats incremental
+    // update for a scene where most bodies move every step, which is the case
+    // this engine is tuned for.
+
+        clear;
+        index = 0;
+        index < bodies_size;
+            body = bodies , index;
+            body_awake || body_kind == BodyKind_Static;
+                insert , index , body_proxy_bounds , margin , dt;
+
+                proxy_bounds_push_back , body_bounds;
+
+            index++;
+
+    // --- Queries ----------------------------------------------------------
+
+    // Every body whose proxy shares a cell with the query box. Duplicates are
+    // possible when a body spans several of the queried cells; the caller
+    // filters them.
+
+        low_x = cell_of , box_lower_x;
+        low_y = cell_of , box_lower_y;
+        high_x = cell_of , box_upper_x;
+        high_y = cell_of , box_upper_y;
+        cy = low_y;
+        cy <= high_y;
+            cx = low_x;
+            cx <= high_x;
+                bucket = buckets , bucket_of , cx , cy;
+                slot = 0;
+                slot < bucket_size;
+                    entry = bucket , slot;
+                    // Reject the far half of a hash collision by checking the
+                    // cell coordinates the entry was actually filed under.
+                    entry_cell_x == cx && entry_cell_y == cy;
+                        out_push_back , entry_body_index;
+
+                    slot++;
+
+                cx++;
+
+            cy++;
+
+        extra = 0;
+        extra < oversized_size;
+            out_push_back , oversized , extra;
+            extra++;
+
+        query_box , make_aabb , p , p , out;
+
+        extent = make_vec2 , radius , radius;
+        query_box , make_aabb , centre - extent , centre + extent , out;
+
+    // --- Pair generation --------------------------------------------------
+
+    // Collect every candidate pair by walking each bucket and emitting the
+    // upper triangle of the entries that share a cell. Only entries whose
+    // cell coordinates match are considered, so a hash collision costs a
+    // comparison rather than a false pair.
+
+        bucket_index = 0;
+        bucket_index < buckets_size;
+            bucket = buckets , bucket_index;
+            first = 0;
+            first < bucket_size;
+                second = first + 1;
+                second < bucket_size;
+                    a = bucket , first;
+                    b = bucket , second;
+                    a_cell_x == b_cell_x && a_cell_y == b_cell_y
+                        && a_body_index != b_body_index;
+                        left = bodies , a_body_index;
+                        right = bodies , b_body_index;
+                        should_collide , left , right
+                            && proxy_bounds , a_body_index_overlaps , proxy_bounds , b_body_index;
+                            out_push_back , make_pair , a_body_index , b_body_index;
+                            broad_phase_pair_count++;
+
+                    second++;
+
+                first++;
+
+            bucket_index++;
+
+        // Oversized proxies never made it into a bucket, so they are tested
+        // against every body directly.
+        big = 0;
+        big < oversized_size;
+            subject = oversized , big;
+            other = 0;
+            other < bodies_size;
+                other != subject;
+                    left = bodies , subject;
+                    right = bodies , other;
+                    should_collide , left , right
+                        && proxy_bounds , subject_overlaps , proxy_bounds , other;
+                        out_push_back , make_pair , subject , other;
+                        broad_phase_pair_count++;
+
+                other++;
+
+            ++big;
+
+            // --- Statistics -------------------------------------------------------
+
+        count = 0;
+        index = 0;
+        index < buckets_size;
+            buckets , index_size > 0;
+                ++count;
+
+            ++index;
+
+        count;
+
+        longest = 0;
+        index = 0;
+        index < buckets_size;
+            buckets , index_size > longest;
+                longest = buckets , index_size;
+
+            index++;
+
+        longest;
+
+    // Average entries per occupied bucket, in fixed point. A load much above
+    // four says the cell size is too large for the scene.
+
+        occupied = occupied_buckets;
+        occupied == 0;
+            zero_fixed;
+
+        whole , entry_count / whole , occupied;
+
+    result ;
+    result_configure , cell_size , DEFAULT_BUCKET_COUNT;
+    result;
+
+// Remove duplicate pairs from a list that has already been sorted. The list
+// arrives sorted because make_pair normalises the order and the caller sorts
+// on the lexicographic operator declared above.
+
+    pairs_size < 2;
+
+    write = 1;
+    read = 1;
+    read < pairs_size;
+        pairs , read != pairs , write - 1;
+            pairs , write = pairs , read;
+            ++write;
+
+        ++read;
+
+    pairs_size > write;
+        pairs_pop_back;
+
+// Insertion sort on the pair list. The list is nearly sorted from one step to
+// the next because the bucket walk order barely changes, so insertion sort is
+// close to linear here and is stable, which keeps the simulation replayable.
+
+    index = 1;
+    index < pairs_size;
+        slot = index;
+        slot > 0 && pairs , slot < pairs , slot - 1;
+            swap , pairs , slot , pairs , slot - 1;
+            slot--;
+
+        index++;
+
+// --- Narrow phase ---------------------------------------------------------
+//
+// Every test in this section produces a Manifold: a shared normal pointing
+// from A towards B, and up to two contact points, each with its own
+// penetration depth and its own accumulated impulses.
+//
+// Two points is enough in 2D. A face-face contact between convex polygons
+// clips to a segment, and a segment has two ends.
+
+// The most contact points a single manifold can hold.
+
+// Contacts closer than this are treated as the same point when matching a new
+// manifold against the previous step's manifold for warm starting.
+
+// Penetration below this is left alone: trying to remove the last fraction of
+// a unit of overlap is what makes a stack jitter.
+
+// Relative normal speed below this is treated as a resting contact and gets no
+// restitution, which is what stops a stack of boxes buzzing forever.
+
+// A single point of contact.
+
+    // Recompute the two lever arms after the bodies have moved. The solver
+    // does this once per substep rather than once per iteration.
+
+        anchor_a = position - centre_a;
+        anchor_b = position - centre_b;
+
+        match_count == 0;
+
+    // World position of the contact.
+
+    // Lever arm from each body's centre of mass to the contact.
+
+    // Local-space anchors, kept so that position correction can recompute the
+    // world positions after the bodies have been pushed apart.
+
+    // Overlap along the manifold normal, positive when penetrating.
+
+    // Accumulated impulses, carried across steps for warm starting.
+
+    // Effective masses along the normal and the tangent, computed once per
+    // substep because they only depend on the geometry.
+
+    // The target separation speed produced by restitution.
+
+    // Which feature pair produced this point, used to match across steps.
+
+    result ;
+    result_position = position + vec2_zero;
+    result_separation = separation + zero_fixed;
+    result_feature_id = feature;
+    result;
+
+    // A contact manifold between two bodies.
+
+        points_size;
+
+        state != ContactState_Separated && points_size > 0;
+
+        points_clear;
+        state = ContactState_Separated;
+
+    // The unit tangent, which is the normal rotated by 90 degrees. Friction
+    // acts along this direction.
+
+        make_vec2 , -normal_y , normal_x;
+
+    // Deepest penetration across all points, which the position solver uses
+    // to decide whether this manifold still needs work.
+
+        deepest = zero_fixed;
+        index = 0;
+        index < points_size;
+            deepest = fixed_min , deepest , points , index_separation;
+            ++index;
+
+        deepest;
+
+    // Total normal impulse applied last step, which is what a breakable joint
+    // or a sound trigger reads.
+
+        total = zero_fixed;
+        index = 0;
+        index < points_size;
+            total = total + points , index_normal_impulse;
+            ++index;
+
+        total;
+
+        total = total_normal_impulse;
+        total_raw == 0;
+            points_size == 0;
+                vec2_zero;
+
+            points , 0 , position + vec2_zero;
+
+        weighted = vec2_zero;
+        index = 0;
+        index < points_size;
+            weighted = weighted + points , index_position * points , index_normal_impulse;
+            ++index;
+
+        weighted / total;
+
+    // Carry the accumulated impulses from the previous step's manifold onto
+    // the matching points of this one. Warm starting is the single change
+    // that turns a jittery stack into a stable one, and it costs one pass
+    // over at most four point pairs.
+
+        index = 0;
+        index < points_size;
+            found = false;
+            other = 0;
+            other < previous_points_size && !found;
+                old = previous_points , other;
+                same_feature = old_feature_id == points , index_feature_id;
+                close = old_position - points , index_position_manhattan_length
+                    <= raw_fixed , CONTACT_MATCH_TOLERANCE_RAW;
+                same_feature || close;
+                    points , index_normal_impulse = old_normal_impulse + zero_fixed;
+                    points , index_tangent_impulse = old_tangent_impulse + zero_fixed;
+                    points , index_match_count = old_match_count + 1;
+                    found = true;
+
+                other++;
+
+            !found;
+                points , index_normal_impulse = zero_fixed;
+                points , index_tangent_impulse = zero_fixed;
+                points , index_match_count = 0;
+
+            ++index;
+
+    // Unit normal, pointing from body A towards body B.
+
+    result ;
+    result_body_a = body_a;
+    result_body_b = body_b;
+    result_normal = vec2_unit_y;
+    result;
+
+// --- Circle against circle ------------------------------------------------
+//
+// The simplest test there is: compare the centre distance against the sum of
+// the radii. The only subtlety is the coincident-centres case, where there is
+// no direction to separate along and an arbitrary one has to be picked.
+
+    ++narrow_phase_test_count;
+    manifold_clear;
+    centre_a = frame_a_apply , circle_a_centre;
+    centre_b = frame_b_apply , circle_b_centre;
+    offset = centre_b - centre_a;
+    distance_squared = offset_length_squared;
+    combined = circle_a_radius + circle_b_radius;
+    distance_squared > combined * combined;
+        manifold_state = ContactState_Separated;
+
+    distance = distance_squared_square_root;
+    distance_raw <= LINEAR_EPSILON_RAW;
+        // Concentric circles: separate straight up, which at least keeps the
+        // result deterministic.
+        manifold_normal = vec2_unit_y;
+        manifold_points_push_back , make_contact_point , centre_a , -combined , 0;
+        manifold_state = ContactState_Penetrating;
+
+    manifold_normal = offset / distance;
+    surface_a = centre_a + manifold_normal * circle_a_radius;
+    surface_b = centre_b - manifold_normal * circle_b_radius;
+    midpoint = surface_a + surface_b / 2;
+    manifold_points_push_back , make_contact_point , midpoint , distance - combined , 0;
+    manifold_state = ContactState_Penetrating;
+
+// --- Circle against convex polygon ----------------------------------------
+//
+// Work in the polygon's local frame so that the edge normals are already the
+// right ones. Find the edge with the greatest signed separation; if that
+// separation exceeds the radius there is no contact. Otherwise the contact is
+// either against the face, when the circle centre projects inside the edge,
+// or against one of the two endpoints.
+
+    narrow_phase_test_count++;
+    manifold_clear;
+    world_centre = circle_frame_apply , circle_centre;
+    local_centre = polygon_frame_unapply , world_centre;
+    count = polygon_vertices_size;
+    count == 0;
+        manifold_state = ContactState_Separated;
+
+    best_edge = 0;
+    best_separation = raw_fixed , FIXED_MIN_RAW;
+    index = 0;
+    index < count;
+        separation = polygon_normals , index_dot , local_centre - polygon_vertices , index;
+        separation > circle_radius;
+            manifold_state = ContactState_Separated;
+
+        separation > best_separation;
+            best_separation = separation;
+            best_edge = index;
+
+        ++index;
+
+    vertex_a = polygon_vertex , best_edge;
+    vertex_b = polygon_vertex , best_edge + 1;
+
+    // Deeply inside: the centre is behind every edge plane, so the face with
+    // the least negative separation is the one to push out of.
+    best_separation_raw < LINEAR_EPSILON_RAW && best_separation_raw <= 0;
+        face_normal = polygon_normals , best_edge;
+        world_normal = polygon_frame_apply_direction , face_normal;
+        contact = world_centre - world_normal * circle_radius;
+        flip_normal;
+            manifold_normal = -world_normal;
+
+            manifold_normal = world_normal + vec2_zero;
+
+        manifold_points_push_back , make_contact_point , contact , best_separation - circle_radius , best_edge;
+        manifold_state = ContactState_Penetrating;
+
+    // Otherwise decide between the face region and the two vertex regions by
+    // the sign of the projection onto the edge.
+    edge = vertex_b - vertex_a;
+    projection_a = local_centre - vertex_a_dot , edge;
+    projection_b = local_centre - vertex_b_dot , edge;
+    local_normal = vec2_zero;
+    local_contact = vec2_zero;
+    feature = best_edge;
+    projection_a <= zero_fixed;
+        local_centre - vertex_a_length_squared > circle_radius * circle_radius;
+            manifold_state = ContactState_Separated;
+
+        local_normal = local_centre - vertex_a_normalised;
+        local_contact = vertex_a + vec2_zero;
+        feature = best_edge * 4 + 1;
+
+        projection_b >= zero_fixed;
+            local_centre - vertex_b_length_squared > circle_radius * circle_radius;
+                manifold_state = ContactState_Separated;
+
+            local_normal = local_centre - vertex_b_normalised;
+            local_contact = vertex_b + vec2_zero;
+            feature = best_edge * 4 + 2;
+
+            local_normal = polygon_normals , best_edge + vec2_zero;
+            local_contact = closest_point_on_segment , vertex_a , vertex_b , local_centre;
+            feature = best_edge * 4;
+
+    world_normal = polygon_frame_apply_direction , local_normal;
+    world_contact = polygon_frame_apply , local_contact;
+    separation = local_centre - local_contact_dot , local_normal - circle_radius;
+    flip_normal;
+        manifold_normal = -world_normal;
+
+        manifold_normal = world_normal + vec2_zero;
+
+    manifold_points_push_back , make_contact_point , world_contact , separation , feature;
+    manifold_state = ContactState_Penetrating;
+
+// --- Polygon against polygon: separating axis test ------------------------
+
+// The result of scanning one polygon's faces against the other polygon.
+
+// Greatest separation of polygon b from any face plane of polygon a. A
+// positive result means a separating axis exists and the shapes are apart.
+//
+// The support point is taken along the inward normal, which is the vertex of
+// b that is deepest into a's face plane.
+
+    result ;
+    result_separation = raw_fixed , FIXED_MIN_RAW;
+    count = a_vertices_size;
+    index = 0;
+    index < count;
+        world_normal = frame_a_apply_direction , a_normals , index;
+        local_normal = frame_b_unapply_direction , world_normal;
+        support = b_vertex , b_support_index , -local_normal;
+        world_support = frame_b_apply , support;
+        world_vertex = frame_a_apply , a_vertices , index;
+        separation = world_normal_dot , world_support - world_vertex;
+        separation > result_separation;
+            result_separation = separation;
+            result_edge_index = index;
+
+        ++index;
+
+    result;
+
+// One end of a clipped edge, carrying the identifier of the feature pair that
+// produced it so that warm starting can match it next step.
+
+    result ;
+    result_position = position + vec2_zero;
+    result_identifier = identifier;
+    result;
+
+// The edge of polygon b that is most anti-parallel to the reference normal,
+// which is the edge that will be clipped against the reference face.
+
+    out_clear;
+    local_normal = incident_frame_unapply_direction , reference_normal;
+    count = incident_normals_size;
+    count == 0;
+
+    best = 0;
+    best_dot = incident_normals , 0 , dot , local_normal;
+    index = 1;
+    index < count;
+        value = incident_normals , index_dot , local_normal;
+        value < best_dot;
+            best_dot = value;
+            best = index;
+
+        ++index;
+
+    out_push_back , make_clip_vertex , incident_frame_apply , incident_vertex , best , best * 4;
+    out_push_back , make_clip_vertex , incident_frame_apply , incident_vertex , best + 1 , best * 4 + 1;
+
+// Clip a segment against a half plane, keeping the part with signed distance
+// at most offset. Returns the number of surviving points, which is zero, one
+// or two; a single crossing produces the intersection point.
+
+    output_clear;
+    input_size < 2;
+        0;
+
+    distance_0 = normal_dot , input , 0 , position - offset;
+    distance_1 = normal_dot , input , 1 , position - offset;
+    distance_0 <= zero_fixed;
+        output_push_back , make_clip_vertex , input , 0 , position , input , 0 , identifier;
+
+    distance_1 <= zero_fixed;
+        output_push_back , make_clip_vertex , input , 1 , position , input , 1 , identifier;
+
+    distance_0 * distance_1 < zero_fixed;
+        t = distance_0 / distance_0 - distance_1;
+        crossing = input , 0 , position + input , 1 , position - input , 0 , position * t;
+        output_push_back , make_clip_vertex , crossing , identifier;
+
+    output_size;
+
+// Full polygon against polygon test.
+//
+// Scan both polygons' faces, keep the axis of greatest separation, and use the
+// owner of that axis as the reference polygon. Clip the other polygon's most
+// anti-parallel edge against the reference face's two side planes, and keep
+// the clipped points that are behind the reference face.
+
+    ++narrow_phase_test_count;
+    manifold_clear;
+    query_a = greatest_separation , a , frame_a , b , frame_b;
+    query_a_separation > zero_fixed;
+        manifold_state = ContactState_Separated;
+
+    query_b = greatest_separation , b , frame_b , a , frame_a;
+    query_b_separation > zero_fixed;
+        manifold_state = ContactState_Separated;
+
+    // Prefer face A unless face B is clearly deeper, which stops the choice
+    // of reference face flickering between steps for a near-symmetric contact
+    // and so keeps warm starting effective.
+    reference_is_a = true;
+    reference_edge = query_a_edge_index;
+    bias = raw_fixed , PENETRATION_SLOP_RAW;
+    query_b_separation > query_a_separation + bias;
+        reference_is_a = false;
+        reference_edge = query_b_edge_index;
+        manifold_feature = FeatureKind_FaceB;
+
+        manifold_feature = FeatureKind_FaceA;
+
+    incident_points ;
+    clipped_once ;
+    clipped_twice ;
+
+    reference_is_a;
+        reference_normal = frame_a_apply_direction , a_normals , reference_edge;
+        reference_v0 = frame_a_apply , a_vertex , reference_edge;
+        reference_v1 = frame_a_apply , a_vertex , reference_edge + 1;
+        side = reference_v1 - reference_v0_normalised;
+        find_incident_edge , reference_normal , b , frame_b , incident_points;
+        survived_once = clip_segment_to_plane , incident_points , clipped_once ,
+                                                  -side , -side_dot , reference_v0 ,
+                                                  reference_edge * 4 + 2;
+        survived_once < 2;
+            manifold_state = ContactState_Touching;
+
+        survived_twice = clip_segment_to_plane , clipped_once , clipped_twice ,
+                                                   side , side_dot , reference_v1 ,
+                                                   reference_edge * 4 + 3;
+        survived_twice < 2;
+            manifold_state = ContactState_Touching;
+
+        manifold_normal = reference_normal + vec2_zero;
+        face_offset = reference_normal_dot , reference_v0;
+        index = 0;
+        index < clipped_twice_size && manifold_points_size < MAX_MANIFOLD_POINTS;
+            separation = reference_normal_dot , clipped_twice , index_position - face_offset;
+            separation <= zero_fixed;
+                manifold_points_push_back , make_contact_point , clipped_twice , index_position ,
+                                                             separation ,
+                                                             clipped_twice , index_identifier;
+
+            ++index;
+
+        reference_normal = frame_b_apply_direction , b_normals , reference_edge;
+        reference_v0 = frame_b_apply , b_vertex , reference_edge;
+        reference_v1 = frame_b_apply , b_vertex , reference_edge + 1;
+        side = reference_v1 - reference_v0_normalised;
+        find_incident_edge , reference_normal , a , frame_a , incident_points;
+        survived_once = clip_segment_to_plane , incident_points , clipped_once ,
+                                                  -side , -side_dot , reference_v0 ,
+                                                  reference_edge * 4 + 2;
+        survived_once < 2;
+            manifold_state = ContactState_Touching;
+
+        survived_twice = clip_segment_to_plane , clipped_once , clipped_twice ,
+                                                   side , side_dot , reference_v1 ,
+                                                   reference_edge * 4 + 3;
+        survived_twice < 2;
+            manifold_state = ContactState_Touching;
+
+        // The reference face belongs to B, so the manifold normal has to be
+        // flipped back to point from A towards B.
+        manifold_normal = -reference_normal;
+        face_offset = reference_normal_dot , reference_v0;
+        index = 0;
+        index < clipped_twice_size && manifold_points_size < MAX_MANIFOLD_POINTS;
+            separation = reference_normal_dot , clipped_twice , index_position - face_offset;
+            separation <= zero_fixed;
+                manifold_points_push_back , make_contact_point , clipped_twice , index_position ,
+                                                             separation ,
+                                                             clipped_twice , index_identifier;
+
+            index++;
+
+    manifold_points_size == 0;
+        manifold_state = ContactState_Touching;
+
+        manifold_state = ContactState_Penetrating;
+
+// --- Dispatch -------------------------------------------------------------
+
+// Route a body pair to the right narrow-phase routine and fill in the mixed
+// material coefficients. The normal always ends up pointing from A to B, so
+// the solver never has to care which routine produced it.
+
+    manifold_friction = mix_dynamic_friction , a_material , b_material;
+    manifold_restitution = mix_restitution , a_material , b_material;
+    a_shape_kind == ShapeKind_Circle && b_shape_kind == ShapeKind_Circle;
+        collide_circle_circle , manifold , a_shape_circle , a_frame , b_shape_circle , b_frame;
+
+    a_shape_kind == ShapeKind_Circle;
+        // The polygon routine produces a normal pointing away from the
+        // polygon, which is B here, so it has to be flipped.
+        collide_circle_polygon , manifold , a_shape_circle , a_frame , b_shape_polygon , b_frame , true;
+
+    b_shape_kind == ShapeKind_Circle;
+        collide_circle_polygon , manifold , b_shape_circle , b_frame , a_shape_polygon , a_frame , false;
+
+    collide_polygon_polygon , manifold , a_shape_polygon , a_frame , b_shape_polygon , b_frame;
+
+    // Cheap rejection before the full test, using the two proxy boxes.
+
+    !a_bounds_overlaps , b_bounds;
+
+// --- Sequential impulse solver --------------------------------------------
+//
+// The velocity solver runs a fixed number of Gauss-Seidel passes over the
+// contact list. Each pass computes, for every contact point, the impulse that
+// would exactly cancel the relative velocity along the constraint direction,
+// clamps the accumulated impulse to its valid range, and applies the change.
+//
+// Clamping the accumulated total rather than the increment is what makes the
+// solver converge instead of oscillating: an individual increment is allowed
+// to be negative as long as the running total stays non-negative.
+
+// Fraction of the remaining penetration removed per position pass. Removing
+// all of it in one pass overshoots and makes stacks explode.
+
+// Maximum penetration removed in a single position pass, so that a badly
+// overlapping pair separates over several steps instead of teleporting.
+
+// Default iteration counts.
+
+// A resolved constraint, holding everything the inner loop needs so that the
+// loop never has to reach back through a body index.
+
+    // Effective mass along a direction for a contact point: the reciprocal of
+    //     1/ma + 1/mb + (ra x d)^2 / Ia + (rb x d)^2 / Ib
+    // which is the scalar mass the constraint sees along that direction.
+
+        cross_a = anchor_a_x * direction_y - anchor_a_y * direction_x;
+        cross_b = anchor_b_x * direction_y - anchor_b_y * direction_x;
+        total = inverse_mass_a + inverse_mass_b
+            + inverse_inertia_a * cross_a * cross_a
+            + inverse_inertia_b * cross_b * cross_b;
+        total_raw <= 0;
+            zero_fixed;
+
+        total_reciprocal;
+
+    // --- Setup ------------------------------------------------------------
+
+    // Build one constraint per manifold and precompute the effective masses
+    // and the restitution bias. Everything here depends only on the geometry
+    // and so is hoisted out of the iteration loop.
+
+        constraints_clear;
+        index = 0;
+        index < manifolds_size;
+            manifold = manifolds , index;
+            !manifold_is_touching;
+                index++;
+
+                constraint ;
+                constraint_manifold_index = index;
+                constraint_body_a = manifold_body_a;
+                constraint_body_b = manifold_body_b;
+                constraint_friction = manifold_friction + zero_fixed;
+                constraint_restitution = manifold_restitution + zero_fixed;
+
+                body_a = bodies , manifold_body_a;
+                body_b = bodies , manifold_body_b;
+                constraint_inverse_mass_a = body_a_inverse_mass + zero_fixed;
+                constraint_inverse_mass_b = body_b_inverse_mass + zero_fixed;
+                constraint_inverse_inertia_a = body_a_inverse_inertia + zero_fixed;
+                constraint_inverse_inertia_b = body_b_inverse_inertia + zero_fixed;
+                constraint_centre_a = body_a_world_centre;
+                constraint_centre_b = body_b_world_centre;
+
+                tangent = manifold_tangent;
+                point_index = 0;
+                point_index < manifold_points_size;
+                    point = manifold_points , point_index;
+                    point_anchor_a = point_position - constraint_centre_a;
+                    point_anchor_b = point_position - constraint_centre_b;
+                    point_local_a = body_a_to_local , point_position;
+                    point_local_b = body_b_to_local , point_position;
+                    point_normal_mass = constraint_effective_mass , point_anchor_a , point_anchor_b ,
+                                                                  manifold_normal;
+                    point_tangent_mass = constraint_effective_mass , point_anchor_a , point_anchor_b ,
+                                                                   tangent;
+
+                    // Restitution bias: the approach speed at the contact,
+                    // scaled by the coefficient. Slow approaches get none, so
+                    // that a resting stack does not buzz.
+                    velocity_a = body_a_velocity_at , point_position;
+                    velocity_b = body_b_velocity_at , point_position;
+                    approach = manifold_normal_x * velocity_b_x - velocity_a_x
+                        + manifold_normal_y * velocity_b_y - velocity_a_y;
+                    approach < -raw_fixed , RESTITUTION_THRESHOLD_RAW;
+                        point_velocity_bias = -constraint_restitution * approach;
+
+                        point_velocity_bias = zero_fixed;
+
+                    ++point_index;
+
+                constraints_push_back , constraint;
+                index++;
+
+    // --- Warm starting ----------------------------------------------------
+
+    // Re-apply the impulses accumulated last step before the first iteration.
+    // The solver is then starting from a solution that was nearly right,
+    // which is worth several iterations of convergence for free.
+
+        index = 0;
+        index < constraints_size;
+            constraint = constraints , index;
+            manifold = manifolds , constraint_manifold_index;
+            tangent = manifold_tangent;
+            point_index = 0;
+            point_index < manifold_points_size;
+                point = manifold_points , point_index;
+                impulse = make_vec2 ,
+                    manifold_normal_x * point_normal_impulse + tangent_x * point_tangent_impulse ,
+                    manifold_normal_y * point_normal_impulse + tangent_y * point_tangent_impulse;
+                body_a = bodies , constraint_body_a;
+                body_a_velocity_x = body_a_velocity_x - impulse_x * constraint_inverse_mass_a;
+                body_a_velocity_y = body_a_velocity_y - impulse_y * constraint_inverse_mass_a;
+                body_a_angular_velocity = body_a_angular_velocity
+                    - constraint_inverse_inertia_a
+                    * point_anchor_a_x * impulse_y - point_anchor_a_y * impulse_x;
+                body_b = bodies , constraint_body_b;
+                body_b_velocity_x = body_b_velocity_x + impulse_x * constraint_inverse_mass_b;
+                body_b_velocity_y = body_b_velocity_y + impulse_y * constraint_inverse_mass_b;
+                body_b_angular_velocity = body_b_angular_velocity
+                    + constraint_inverse_inertia_b
+                    * point_anchor_b_x * impulse_y - point_anchor_b_y * impulse_x;
+                point_index++;
+
+            ++index;
+
+    // --- Velocity iteration -----------------------------------------------
+
+    // Friction first, then the normal. Solving friction against the previous
+    // step's normal impulse rather than this iteration's is the standard
+    // ordering and behaves much better on slopes.
+
+        index = 0;
+        index < constraints_size;
+            constraint = constraints , index;
+            manifold = manifolds , constraint_manifold_index;
+            tangent = manifold_tangent;
+
+            point_index = 0;
+            point_index < manifold_points_size;
+                point = manifold_points , point_index;
+                body_a = bodies , constraint_body_a;
+                body_b = bodies , constraint_body_b;
+
+                // Relative velocity at the contact, written out so that the
+                // angular terms are visible: v + omega cross r for each body.
+                relative_x = body_b_velocity_x - body_b_angular_velocity * point_anchor_b_y
+                    - body_a_velocity_x + body_a_angular_velocity * point_anchor_a_y;
+                relative_y = body_b_velocity_y + body_b_angular_velocity * point_anchor_b_x
+                    - body_a_velocity_y - body_a_angular_velocity * point_anchor_a_x;
+
+                // --- Friction along the tangent ---------------------------
+                tangent_speed = tangent_x * relative_x + tangent_y * relative_y;
+                tangent_delta = -point_tangent_mass * tangent_speed;
+                friction_limit = constraint_friction * point_normal_impulse;
+                new_tangent = point_tangent_impulse + tangent_delta_clamped
+                    , -friction_limit , friction_limit;
+                tangent_delta = new_tangent - point_tangent_impulse;
+                point_tangent_impulse = new_tangent + zero_fixed;
+
+                friction_impulse = make_vec2 , tangent_x * tangent_delta , tangent_y * tangent_delta;
+                body_a_velocity_x = body_a_velocity_x - friction_impulse_x * constraint_inverse_mass_a;
+                body_a_velocity_y = body_a_velocity_y - friction_impulse_y * constraint_inverse_mass_a;
+                body_a_angular_velocity = body_a_angular_velocity
+                    - constraint_inverse_inertia_a
+                    * point_anchor_a_x * friction_impulse_y - point_anchor_a_y * friction_impulse_x;
+                body_b_velocity_x = body_b_velocity_x + friction_impulse_x * constraint_inverse_mass_b;
+                body_b_velocity_y = body_b_velocity_y + friction_impulse_y * constraint_inverse_mass_b;
+                body_b_angular_velocity = body_b_angular_velocity
+                    + constraint_inverse_inertia_b
+                    * point_anchor_b_x * friction_impulse_y - point_anchor_b_y * friction_impulse_x;
+
+                // --- Normal impulse ---------------------------------------
+                after_x = body_b_velocity_x - body_b_angular_velocity * point_anchor_b_y
+                    - body_a_velocity_x + body_a_angular_velocity * point_anchor_a_y;
+                after_y = body_b_velocity_y + body_b_angular_velocity * point_anchor_b_x
+                    - body_a_velocity_y - body_a_angular_velocity * point_anchor_a_x;
+                normal_speed = manifold_normal_x * after_x + manifold_normal_y * after_y;
+                normal_delta = -point_normal_mass * normal_speed - point_velocity_bias;
+                // The accumulated total is clamped, not the increment.
+                new_normal = fixed_max , point_normal_impulse + normal_delta , zero_fixed;
+                normal_delta = new_normal - point_normal_impulse;
+                point_normal_impulse = new_normal + zero_fixed;
+
+                normal_impulse = make_vec2 , manifold_normal_x * normal_delta ,
+                                               manifold_normal_y * normal_delta;
+                body_a_velocity_x = body_a_velocity_x - normal_impulse_x * constraint_inverse_mass_a;
+                body_a_velocity_y = body_a_velocity_y - normal_impulse_y * constraint_inverse_mass_a;
+                body_a_angular_velocity = body_a_angular_velocity
+                    - constraint_inverse_inertia_a
+                    * point_anchor_a_x * normal_impulse_y - point_anchor_a_y * normal_impulse_x;
+                body_b_velocity_x = body_b_velocity_x + normal_impulse_x * constraint_inverse_mass_b;
+                body_b_velocity_y = body_b_velocity_y + normal_impulse_y * constraint_inverse_mass_b;
+                body_b_angular_velocity = body_b_angular_velocity
+                    + constraint_inverse_inertia_b
+                    * point_anchor_b_x * normal_impulse_y - point_anchor_b_y * normal_impulse_x;
+
+                ++solver_iteration_count;
+                ++point_index;
+
+            index++;
+
+        pass = 0;
+        pass < iterations;
+            solve_velocity_once , bodies , manifolds;
+            pass++;
+
+    // --- Position iteration -----------------------------------------------
+
+    // Non-linear Gauss-Seidel on the positions. Rather than adding a bias to
+    // the velocity constraint, the bodies are moved directly, which removes
+    // the energy that a Baumgarte velocity bias would otherwise inject.
+    //
+    // Returns the deepest remaining penetration, so that the caller can stop
+    // early once every contact is within the slop.
+
+        deepest = zero_fixed;
+        slop = raw_fixed , PENETRATION_SLOP_RAW;
+        baumgarte = raw_fixed , BAUMGARTE_RAW;
+        max_correction = raw_fixed , MAX_LINEAR_CORRECTION_RAW;
+        index = 0;
+        index < constraints_size;
+            constraint = constraints , index;
+            manifold = manifolds , constraint_manifold_index;
+            point_index = 0;
+            point_index < manifold_points_size;
+                point = manifold_points , point_index;
+                body_a = bodies , constraint_body_a;
+                body_b = bodies , constraint_body_b;
+
+                // Recompute the world anchors from the local ones, because
+                // the bodies have moved since the manifold was built.
+                world_a = body_a_to_world , point_local_a;
+                world_b = body_b_to_world , point_local_b;
+                separation = manifold_normal_x * world_b_x - world_a_x
+                    + manifold_normal_y * world_b_y - world_a_y
+                    + point_separation;
+                deepest = fixed_min , deepest , separation;
+
+                correction = baumgarte * separation + slop_clamped
+                    , -max_correction , zero_fixed;
+                anchor_a = world_a - body_a_world_centre;
+                anchor_b = world_b - body_b_world_centre;
+                mass = constraint_effective_mass , anchor_a , anchor_b , manifold_normal;
+                magnitude = -mass * correction;
+                push = make_vec2 , manifold_normal_x * magnitude , manifold_normal_y * magnitude;
+
+                body_a_frame_position_x = body_a_frame_position_x - push_x * constraint_inverse_mass_a;
+                body_a_frame_position_y = body_a_frame_position_y - push_y * constraint_inverse_mass_a;
+                body_a_frame_angle = body_a_frame_angle
+                    - constraint_inverse_inertia_a * anchor_a_x * push_y - anchor_a_y * push_x;
+                body_a_frame_refresh;
+
+                body_b_frame_position_x = body_b_frame_position_x + push_x * constraint_inverse_mass_b;
+                body_b_frame_position_y = body_b_frame_position_y + push_y * constraint_inverse_mass_b;
+                body_b_frame_angle = body_b_frame_angle
+                    + constraint_inverse_inertia_b * anchor_b_x * push_y - anchor_b_y * push_x;
+                body_b_frame_refresh;
+
+                ++point_index;
+
+            ++index;
+
+        deepest;
+
+        target = -raw_fixed , PENETRATION_SLOP_RAW * 3;
+        pass = 0;
+        settled = false;
+        pass < iterations && !settled;
+            deepest = solve_position_once , bodies , manifolds;
+            deepest >= target;
+                settled = true;
+
+            ++pass;
+
+        settled;
+
+        // --- Diagnostics ------------------------------------------------------
+
+        constraints_size;
+
+    // Sum of every normal impulse in the solver, which is the total normal
+    // force times the timestep and should equal the weight the ground is
+    // holding up in a resting stack.
+
+        total = zero_fixed;
+        index = 0;
+        index < constraints_size;
+            total = total + manifolds , constraints , index_manifold_index_total_normal_impulse;
+            index++;
+
+        total;
+
+// --- Joints ---------------------------------------------------------------
+//
+// Both joints follow the same shape as the contact solver: an initialise
+// step that computes the effective mass and the bias, a warm start that
+// re-applies last step's impulse, and an iteration step that computes and
+// clamps an impulse increment.
+
+// Fraction of joint position error removed per substep.
+
+// A distance joint above this stretch factor reports itself broken.
+
+// A distance constraint between a point on each of two bodies. With a
+// stiffness and a damping ratio it becomes a soft constraint, which is how a
+// spring is spelled; with both at zero it is rigid.
+
+    // Effective mass along the joint axis, which is the same formula as a
+    // contact normal constraint.
+
+        cross_a = anchor_a_x * axis_y - anchor_a_y * axis_x;
+        cross_b = anchor_b_x * axis_y - anchor_b_y * axis_x;
+        total = a_inverse_mass + b_inverse_mass
+            + a_inverse_inertia * cross_a * cross_a
+            + b_inverse_inertia * cross_b * cross_b;
+        total_raw <= 0;
+            zero_fixed;
+
+        total_reciprocal;
+
+        // Compute the axis, the current length and the bias for this substep.
+
+        body_a = bodies , body_a;
+        body_b = bodies , body_b;
+        world_a = body_a_to_world , local_anchor_a;
+        world_b = body_b_to_world , local_anchor_b;
+        anchor_a = world_a - body_a_world_centre;
+        anchor_b = world_b - body_b_world_centre;
+
+        separation = world_b - world_a;
+        current_length = separation_length;
+        current_length_raw <= LINEAR_EPSILON_RAW;
+            axis = vec2_unit_x;
+
+            axis = separation / current_length;
+
+        mass = axial_mass , body_a , body_b , anchor_a , anchor_b;
+
+        error = current_length - rest_length;
+        stiffness_raw > 0;
+            // Soft constraint: the bias pulls towards the rest length at a
+            // rate set by the stiffness, and the damping term is folded into
+            // the effective mass through the gamma softening parameter.
+            omega = stiffness;
+            zeta = damping;
+            c = dt * omega * dt * omega + zeta * 2;
+            c_raw != 0;
+                gamma = dt * dt * omega * omega + omega * zeta * 2 , reciprocal;
+
+                gamma = zero_fixed;
+
+            bias = error * dt * omega * omega * gamma;
+            mass + gamma_raw != 0;
+                mass = mass_reciprocal + gamma_reciprocal;
+
+            gamma = zero_fixed;
+            bias = error * raw_fixed , JOINT_BAUMGARTE_RAW / dt;
+
+        current_length > rest_length * 2 + raw_fixed , JOINT_BREAK_STRETCH_RAW;
+            status = JointStatus_Broken;
+
+            status = JointStatus_Satisfied;
+
+        impulse = axis * accumulated_impulse;
+        body_a = bodies , body_a;
+        body_a_velocity_x = body_a_velocity_x - impulse_x * body_a_inverse_mass;
+        body_a_velocity_y = body_a_velocity_y - impulse_y * body_a_inverse_mass;
+        body_a_angular_velocity = body_a_angular_velocity
+            - body_a_inverse_inertia * anchor_a_x * impulse_y - anchor_a_y * impulse_x;
+        body_b = bodies , body_b;
+        body_b_velocity_x = body_b_velocity_x + impulse_x * body_b_inverse_mass;
+        body_b_velocity_y = body_b_velocity_y + impulse_y * body_b_inverse_mass;
+        body_b_angular_velocity = body_b_angular_velocity
+            + body_b_inverse_inertia * anchor_b_x * impulse_y - anchor_b_y * impulse_x;
+
+        status == JointStatus_Broken;
+
+        body_a = bodies , body_a;
+        body_b = bodies , body_b;
+        relative_x = body_b_velocity_x - body_b_angular_velocity * anchor_b_y
+            - body_a_velocity_x + body_a_angular_velocity * anchor_a_y;
+        relative_y = body_b_velocity_y + body_b_angular_velocity * anchor_b_x
+            - body_a_velocity_y - body_a_angular_velocity * anchor_a_x;
+        axial_speed = axis_x * relative_x + axis_y * relative_y;
+        delta = -mass * axial_speed + bias + gamma * accumulated_impulse;
+
+        // A rope only pulls; a rigid rod both pulls and pushes.
+        rope_only;
+            total = fixed_min , accumulated_impulse + delta , zero_fixed;
+            delta = total - accumulated_impulse;
+            accumulated_impulse = total + zero_fixed;
+
+            accumulated_impulse = accumulated_impulse + delta;
+
+        impulse = make_vec2 , axis_x * delta , axis_y * delta;
+        body_a_velocity_x = body_a_velocity_x - impulse_x * body_a_inverse_mass;
+        body_a_velocity_y = body_a_velocity_y - impulse_y * body_a_inverse_mass;
+        body_a_angular_velocity = body_a_angular_velocity
+            - body_a_inverse_inertia * anchor_a_x * impulse_y - anchor_a_y * impulse_x;
+        body_b_velocity_x = body_b_velocity_x + impulse_x * body_b_inverse_mass;
+        body_b_velocity_y = body_b_velocity_y + impulse_y * body_b_inverse_mass;
+        body_b_angular_velocity = body_b_angular_velocity
+            + body_b_inverse_inertia * anchor_b_x * impulse_y - anchor_b_y * impulse_x;
+
+    // Direct position correction for the rigid case. A soft joint skips this,
+    // because its whole point is to allow error.
+
+        stiffness_raw > 0 || status == JointStatus_Broken;
+            true;
+
+        body_a = bodies , body_a;
+        body_b = bodies , body_b;
+        world_a = body_a_to_world , local_anchor_a;
+        world_b = body_b_to_world , local_anchor_b;
+        separation = world_b - world_a;
+        length = separation_length;
+        length_raw <= LINEAR_EPSILON_RAW;
+            true;
+
+        unit = separation / length;
+        error = length - rest_length_clamped , -raw_fixed , MAX_LINEAR_CORRECTION_RAW ,
+                                                    raw_fixed , MAX_LINEAR_CORRECTION_RAW;
+        anchor_a = world_a - body_a_world_centre;
+        anchor_b = world_b - body_b_world_centre;
+        mass = axial_mass , body_a , body_b , anchor_a , anchor_b;
+        push = unit * -mass * error;
+        body_a_frame_position = body_a_frame_position - push * body_a_inverse_mass;
+        body_b_frame_position = body_b_frame_position + push * body_b_inverse_mass;
+        body_a_frame_refresh;
+        body_b_frame_refresh;
+        error_magnitude_raw > PENETRATION_SLOP_RAW;
+            status = JointStatus_Corrected;
+            false;
+
+        true;
+
+        rest_length_raw == 0;
+            zero_fixed;
+
+        current_length / rest_length;
+
+    result ;
+    result_body_a = body_a;
+    result_body_b = body_b;
+    result_local_anchor_a = local_a + vec2_zero;
+    result_local_anchor_b = local_b + vec2_zero;
+    result_rest_length = rest_length + zero_fixed;
+    result_axis = vec2_unit_x;
+    result;
+
+    result = make_distance_joint , body_a , body_b , local_a , local_b , rest_length;
+    result_stiffness = stiffness + zero_fixed;
+    result_damping = damping + zero_fixed;
+    result;
+
+// A revolute joint pins two points together and lets the bodies spin freely
+// about the shared point. The constraint is two-dimensional, so the effective
+// mass is a 2x2 matrix and the impulse is a vector, which is exactly what
+// Mat2.solve is for.
+
+        body_a = bodies , body_a;
+        body_b = bodies , body_b;
+        world_a = body_a_to_world , local_anchor_a;
+        world_b = body_b_to_world , local_anchor_b;
+        anchor_a = world_a - body_a_world_centre;
+        anchor_b = world_b - body_b_world_centre;
+
+        // The effective mass matrix for a point-to-point constraint:
+        //
+        //     K = (1/ma + 1/mb) I
+        //       + 1/Ia [ ra.y^2, -ra.x ra.y ; -ra.x ra.y, ra.x^2 ]
+        //       + 1/Ib [ rb.y^2, -rb.x rb.y ; -rb.x rb.y, rb.x^2 ]
+        scalar = body_a_inverse_mass + body_b_inverse_mass;
+        xx = scalar
+            + body_a_inverse_inertia * anchor_a_y * anchor_a_y
+            + body_b_inverse_inertia * anchor_b_y * anchor_b_y;
+        xy = -body_a_inverse_inertia * anchor_a_x * anchor_a_y
+            - body_b_inverse_inertia * anchor_b_x * anchor_b_y;
+        yy = scalar
+            + body_a_inverse_inertia * anchor_a_x * anchor_a_x
+            + body_b_inverse_inertia * anchor_b_x * anchor_b_x;
+        mass = make_mat2 , make_vec2 , xx , xy , make_vec2 , xy , yy;
+
+        // Positional drift, fed back as a velocity bias.
+        drift = world_b - world_a;
+        bias = drift * raw_fixed , JOINT_BAUMGARTE_RAW / dt;
+
+        // The angular part, if a motor or a limit is active.
+        angular_total = body_a_inverse_inertia + body_b_inverse_inertia;
+        angular_total_raw > 0;
+            angular_mass = angular_total_reciprocal;
+
+            angular_mass = zero_fixed;
+
+        relative_angle = normalise_angle , body_b_frame_angle - body_a_frame_angle - reference_angle;
+
+        body_a = bodies , body_a;
+        body_a_velocity_x = body_a_velocity_x - accumulated_impulse_x * body_a_inverse_mass;
+        body_a_velocity_y = body_a_velocity_y - accumulated_impulse_y * body_a_inverse_mass;
+        body_a_angular_velocity = body_a_angular_velocity
+            - body_a_inverse_inertia
+            * anchor_a_x * accumulated_impulse_y - anchor_a_y * accumulated_impulse_x
+            - body_a_inverse_inertia * accumulated_motor_impulse;
+        body_b = bodies , body_b;
+        body_b_velocity_x = body_b_velocity_x + accumulated_impulse_x * body_b_inverse_mass;
+        body_b_velocity_y = body_b_velocity_y + accumulated_impulse_y * body_b_inverse_mass;
+        body_b_angular_velocity = body_b_angular_velocity
+            + body_b_inverse_inertia
+            * anchor_b_x * accumulated_impulse_y - anchor_b_y * accumulated_impulse_x
+            + body_b_inverse_inertia * accumulated_motor_impulse;
+
+        body_a = bodies , body_a;
+        body_b = bodies , body_b;
+
+        // --- Motor, if enabled --------------------------------------------
+        motor_enabled;
+            relative_speed = body_b_angular_velocity - body_a_angular_velocity - motor_speed;
+            motor_delta = -angular_mass * relative_speed;
+            budget = max_motor_torque * dt;
+            total = accumulated_motor_impulse + motor_delta_clamped , -budget , budget;
+            motor_delta = total - accumulated_motor_impulse;
+            accumulated_motor_impulse = total + zero_fixed;
+            body_a_angular_velocity = body_a_angular_velocity - motor_delta * body_a_inverse_inertia;
+            body_b_angular_velocity = body_b_angular_velocity + motor_delta * body_b_inverse_inertia;
+
+        // --- Angular limits, if enabled -----------------------------------
+        limit_enabled;
+            relative_angle < lower_limit;
+                excess = relative_angle - lower_limit;
+                speed = body_b_angular_velocity - body_a_angular_velocity;
+                delta = -angular_mass * speed + excess * raw_fixed , JOINT_BAUMGARTE_RAW / dt;
+                total = fixed_max , accumulated_limit_impulse + delta , zero_fixed;
+                delta = total - accumulated_limit_impulse;
+                accumulated_limit_impulse = total + zero_fixed;
+                body_a_angular_velocity = body_a_angular_velocity - delta * body_a_inverse_inertia;
+                body_b_angular_velocity = body_b_angular_velocity + delta * body_b_inverse_inertia;
+
+                relative_angle > upper_limit;
+                    excess = relative_angle - upper_limit;
+                    speed = body_b_angular_velocity - body_a_angular_velocity;
+                    delta = -angular_mass * speed + excess * raw_fixed , JOINT_BAUMGARTE_RAW / dt;
+                    total = fixed_min , accumulated_limit_impulse + delta , zero_fixed;
+                    delta = total - accumulated_limit_impulse;
+                    accumulated_limit_impulse = total + zero_fixed;
+                    body_a_angular_velocity = body_a_angular_velocity - delta * body_a_inverse_inertia;
+                    body_b_angular_velocity = body_b_angular_velocity + delta * body_b_inverse_inertia;
+
+        // --- The point-to-point constraint itself -------------------------
+        relative_x = body_b_velocity_x - body_b_angular_velocity * anchor_b_y
+            - body_a_velocity_x + body_a_angular_velocity * anchor_a_y;
+        relative_y = body_b_velocity_y + body_b_angular_velocity * anchor_b_x
+            - body_a_velocity_y - body_a_angular_velocity * anchor_a_x;
+        residual = make_vec2 , relative_x + bias_x , relative_y + bias_y;
+        impulse = mass_solve , -residual;
+        accumulated_impulse = accumulated_impulse + impulse;
+
+        body_a_velocity_x = body_a_velocity_x - impulse_x * body_a_inverse_mass;
+        body_a_velocity_y = body_a_velocity_y - impulse_y * body_a_inverse_mass;
+        body_a_angular_velocity = body_a_angular_velocity
+            - body_a_inverse_inertia * anchor_a_x * impulse_y - anchor_a_y * impulse_x;
+        body_b_velocity_x = body_b_velocity_x + impulse_x * body_b_inverse_mass;
+        body_b_velocity_y = body_b_velocity_y + impulse_y * body_b_inverse_mass;
+        body_b_angular_velocity = body_b_angular_velocity
+            + body_b_inverse_inertia * anchor_b_x * impulse_y - anchor_b_y * impulse_x;
+
+        body_a = bodies , body_a;
+        body_b = bodies , body_b;
+        world_a = body_a_to_world , local_anchor_a;
+        world_b = body_b_to_world , local_anchor_b;
+        drift = world_b - world_a;
+        drift_length_squared_raw <= LINEAR_EPSILON_SQUARED_RAW;
+            true;
+
+        anchor_a = world_a - body_a_world_centre;
+        anchor_b = world_b - body_b_world_centre;
+        scalar = body_a_inverse_mass + body_b_inverse_mass;
+        xx = scalar
+            + body_a_inverse_inertia * anchor_a_y * anchor_a_y
+            + body_b_inverse_inertia * anchor_b_y * anchor_b_y;
+        xy = -body_a_inverse_inertia * anchor_a_x * anchor_a_y
+            - body_b_inverse_inertia * anchor_b_x * anchor_b_y;
+        yy = scalar
+            + body_a_inverse_inertia * anchor_a_x * anchor_a_x
+            + body_b_inverse_inertia * anchor_b_x * anchor_b_x;
+        matrix = make_mat2 , make_vec2 , xx , xy , make_vec2 , xy , yy;
+        push = matrix_solve , -drift;
+        body_a_frame_position = body_a_frame_position - push * body_a_inverse_mass;
+        body_a_frame_angle = body_a_frame_angle
+            - body_a_inverse_inertia * anchor_a_x * push_y - anchor_a_y * push_x;
+        body_a_frame_refresh;
+        body_b_frame_position = body_b_frame_position + push * body_b_inverse_mass;
+        body_b_frame_angle = body_b_frame_angle
+            + body_b_inverse_inertia * anchor_b_x * push_y - anchor_b_y * push_x;
+        body_b_frame_refresh;
+        drift_manhattan_length_raw <= PENETRATION_SLOP_RAW;
+
+    result ;
+    result_body_a = body_a;
+    result_body_b = body_b;
+    result_local_anchor_a = local_a + vec2_zero;
+    result_local_anchor_b = local_b + vec2_zero;
+    result_mass = mat2_identity;
+    result;
+
+    result = make_revolute_joint , body_a , body_b , local_a , local_b;
+    result_motor_enabled = true;
+    result_motor_speed = speed + zero_fixed;
+    result_max_motor_torque = torque + zero_fixed;
+    result;
+
+// --- Particle system ------------------------------------------------------
+//
+// Particles are integrated with position Verlet rather than with the
+// semi-implicit Euler the rigid bodies use. Verlet stores the previous
+// position instead of a velocity, so a positional constraint can be satisfied
+// by moving the particle directly and the velocity follows automatically. That
+// is what makes a cloth or a rope of a hundred springs stable at stiffnesses
+// that would blow up an explicit spring force.
+//
+//     next = position + (position - previous) * damping + acceleration * dt^2
+//
+// The velocity is implied by the gap between position and previous, so it must
+// never be written directly; use displace() instead, which moves both.
+
+// Constraint relaxation passes per particle step. Verlet constraints converge
+// by relaxation, so more passes means a stiffer cloth.
+
+// A spring that has stretched beyond this multiple of its rest length snaps.
+
+// Implied velocity, as a per-second rate rather than a per-step delta.
+
+        dt_raw == 0;
+            vec2_zero;
+
+        position - previous / dt;
+
+    // Move the particle without changing its implied velocity. Every
+    // constraint in the system goes through here.
+
+        position = position + delta;
+        previous = previous + delta;
+
+    // Move the particle and let the implied velocity absorb the change, which
+    // is what a collision response wants.
+
+        position = position + delta;
+
+        // Set the implied velocity by moving the previous position.
+
+        previous = position - v * dt;
+
+        acceleration = acceleration + f * inverse_mass;
+
+    // One Verlet step. The damping factor multiplies the implied velocity,
+    // and the acceleration term is scaled by dt squared because Verlet
+    // integrates acceleration to position in one go.
+
+        pinned || inverse_mass_raw == 0;
+            previous = position + vec2_zero;
+            acceleration = vec2_zero;
+
+        implied = position - previous * damping;
+        total_acceleration = acceleration + gravity;
+        next = make_vec2 ,
+            position_x + implied_x + total_acceleration_x * dt * dt ,
+            position_y + implied_y + total_acceleration_y * dt * dt;
+        previous = position + vec2_zero;
+        position = next + vec2_zero;
+        acceleration = vec2_zero;
+
+        inverse_mass_raw == 0;
+            zero_fixed;
+
+        velocity , dt_length_squared / inverse_mass * 2;
+
+    result ;
+    result_position = position + vec2_zero;
+    result_previous = position + vec2_zero;
+    result_radius = raw_fixed , FIXED_QUARTER;
+    mass_raw > 0;
+        result_inverse_mass = mass_reciprocal;
+
+    result;
+
+    result = make_particle , position , one_fixed;
+    result_pinned = true;
+    result_inverse_mass = zero_fixed;
+    result;
+
+// A distance constraint between two particles, solved by relaxation rather
+// than by an impulse. stiffness in [0, 1] is the fraction of the error
+// removed per pass.
+
+        particles , particle_b_position - particles , particle_a_position_length;
+
+        rest_length_raw == 0;
+            zero_fixed;
+
+        current_length , particles - rest_length / rest_length;
+
+    // One relaxation pass. The correction is split between the two particles
+    // in proportion to their inverse masses, so a heavy particle barely moves
+    // and a pinned one does not move at all.
+
+        broken;
+
+        a = particles , particle_a;
+        b = particles , particle_b;
+        separation = b_position - a_position;
+        length = separation_length;
+        length_raw <= LINEAR_EPSILON_RAW;
+
+        total_inverse_mass = a_inverse_mass + b_inverse_mass;
+        total_inverse_mass_raw == 0;
+
+        error = length - rest_length;
+        rest_length_raw > 0 && length > rest_length * raw_fixed , SPRING_TEAR_RATIO_RAW;
+            broken = true;
+
+        unit = separation / length;
+        correction = unit * error * stiffness / total_inverse_mass;
+        last_tension = error * stiffness;
+        mover_a = particles , particle_a;
+        mover_a_position = mover_a_position + correction * mover_a_inverse_mass;
+        mover_b = particles , particle_b;
+        mover_b_position = mover_b_position - correction * mover_b_inverse_mass;
+
+    // Potential energy stored in the spring, as k x^2 / 2 with k taken as the
+    // stiffness. Approximate, but enough for the energy audit below.
+
+        error = current_length , particles - rest_length;
+        stiffness * error * error / 2;
+
+    result ;
+    result_particle_a = a;
+    result_particle_b = b;
+    result_rest_length = rest_length + zero_fixed;
+    result_stiffness = stiffness + zero_fixed;
+    result;
+
+// Ordering by rest length, which the debug tooling uses to find the springs
+// most likely to be the stiff ones in a mixed cloth.
+
+    l_rest_length < r_rest_length;
+
+    // --- Construction -----------------------------------------------------
+
+        index = particles_size;
+        particles_push_back , make_particle , position , mass;
+        index;
+
+        index = particles_size;
+        particles_push_back , make_pinned_particle , position;
+        index;
+
+    // Connect two particles with a spring whose rest length is their current
+    // separation, which is what building a cloth from a grid wants.
+
+        rest = particles , b_position - particles , a_position_length;
+        index = springs_size;
+        springs_push_back , make_spring , a , b , rest , stiffness;
+        index;
+
+        index = springs_size;
+        springs_push_back , make_spring , a , b , rest , stiffness;
+        index;
+
+        // --- Simulation -------------------------------------------------------
+
+        index = 0;
+        index < particles_size;
+            particles , index_integrate , gravity , dt , damping;
+            index++;
+
+        pass = 0;
+        pass < relaxation_passes;
+            index = 0;
+            index < springs_size;
+                springs , index_relax , particles;
+                index++;
+
+            pass++;
+
+    // Keep every particle inside the world box, absorbing the normal
+    // component of its implied velocity as it goes.
+
+        index = 0;
+        index < particles_size;
+            particle = particles , index;
+            particle_position_x < bounds_lower_x + particle_radius;
+                particle_position_x = bounds_lower_x + particle_radius;
+                particle_previous_x = particle_position_x
+                    + particle_position_x - particle_previous_x * restitution;
+
+            particle_position_x > bounds_upper_x - particle_radius;
+                particle_position_x = bounds_upper_x - particle_radius;
+                particle_previous_x = particle_position_x
+                    + particle_position_x - particle_previous_x * restitution;
+
+            particle_position_y < bounds_lower_y + particle_radius;
+                particle_position_y = bounds_lower_y + particle_radius;
+                particle_previous_y = particle_position_y
+                    + particle_position_y - particle_previous_y * restitution;
+
+            particle_position_y > bounds_upper_y - particle_radius;
+                particle_position_y = bounds_upper_y - particle_radius;
+                particle_previous_y = particle_position_y
+                    + particle_position_y - particle_previous_y * restitution;
+
+            ++index;
+
+    // Push overlapping particles apart. Quadratic in the particle count, so
+    // this is only for the small systems; a large one would route through the
+    // spatial hash the same way the rigid bodies do.
+
+        first = 0;
+        first < particles_size;
+            second = first + 1;
+            second < particles_size;
+                a = particles , first;
+                b = particles , second;
+                separation = b_position - a_position;
+                combined = a_radius + b_radius;
+                distance_squared = separation_length_squared;
+                distance_squared < combined * combined && distance_squared_raw > 0;
+                    distance = distance_squared_square_root;
+                    overlap = combined - distance;
+                    unit = separation / distance;
+                    total_inverse_mass = a_inverse_mass + b_inverse_mass;
+                    total_inverse_mass_raw > 0;
+                        correction = unit * overlap / total_inverse_mass;
+                        mover_a = particles , first;
+                        mover_a_position = mover_a_position - correction * mover_a_inverse_mass;
+                        mover_b = particles , second;
+                        mover_b_position = mover_b_position + correction * mover_b_inverse_mass;
+
+                ++second;
+
+            ++first;
+
+    // Push particles out of the rigid bodies they have sunk into. Particles
+    // do not push back, which keeps the two systems one-way coupled and so
+    // keeps the rigid solver's energy audit honest.
+
+        index = 0;
+        index < particles_size;
+            body_index = 0;
+            body_index < bodies_size;
+                body = bodies , body_index;
+                particle = particles , index;
+                body_shape_contains_point , body_frame , particle_position;
+                    direction = particle_position - body_world_centre_normalised;
+                    particle_position = particle_position + direction * particle_radius;
+
+                body_index++;
+
+            index++;
+
+        integrate , gravity , dt;
+        relax_springs;
+        resolve_particle_overlap;
+        apply_bounds , bounds , bounce;
+
+        // --- Energy -----------------------------------------------------------
+
+        total = zero_fixed;
+        index = 0;
+        index < particles_size;
+            total = total + particles , index_kinetic_energy , dt;
+            ++index;
+
+        total;
+
+        total = zero_fixed;
+        index = 0;
+        index < springs_size;
+            total = total + springs , index_potential_energy , particles;
+            ++index;
+
+        total;
+
+        weighted = vec2_zero;
+        total_mass = zero_fixed;
+        index = 0;
+        index < particles_size;
+            particle = particles , index;
+            particle_inverse_mass_raw > 0;
+                mass = particle_inverse_mass_reciprocal;
+                weighted = weighted + particle_position * mass;
+                total_mass = total_mass + mass;
+
+            ++index;
+
+        total_mass_raw == 0;
+            vec2_zero;
+
+        weighted / total_mass;
+
+        count = 0;
+        index = 0;
+        index < springs_size;
+            springs , index_broken;
+                ++count;
+
+            ++index;
+
+        count;
+
+    result ;
+    // 0.99 * 65536 = 64880, a light per-step velocity decay.
+    result_damping = raw_fixed , 64880;
+    result_bounce = ratio , -4 , 10;
+    result_relaxation_passes = DEFAULT_RELAXATION_PASSES;
+    result;
+
+// Build a rectangular cloth of width by height particles, pinned along the
+// top edge, with structural springs between neighbours and shear springs
+// across each cell's diagonals.
+
+    first_index = system_particles_size;
+    row = 0;
+    row < rows;
+        column = 0;
+        column < columns;
+            position = make_vec2 , origin_x + spacing * column , origin_y - spacing * row;
+            row == 0 && column == 0 || column == columns - 1;
+                system_add_pinned , position;
+
+                system_add_particle , position , one_fixed;
+
+            column++;
+
+        ++row;
+
+    row = 0;
+    row < rows;
+        column = 0;
+        column < columns;
+            here = first_index + row * columns + column;
+            column + 1 < columns;
+                system_connect , here , here + 1 , stiffness;
+
+            row + 1 < rows;
+                system_connect , here , here + columns , stiffness;
+
+            column + 1 < columns && row + 1 < rows;
+                system_connect , here , here + columns + 1 , stiffness / 2;
+                system_connect , here + 1 , here + columns , stiffness / 2;
+
+            ++column;
+
+        ++row;
+
+        // A rope of segment_count links hanging from a pinned first particle.
+
+    first_index = system_add_pinned , anchor;
+    previous = first_index;
+    index = 1;
+    index <= segment_count;
+        position = make_vec2 , anchor_x , anchor_y - segment_length * index;
+        current = system_add_particle , position , one_fixed;
+        system_connect_at , previous , current , segment_length , stiffness;
+        previous = current;
+        index++;
+
+    first_index;
+
+// --- World ----------------------------------------------------------------
+//
+// The world owns every body, joint and manifold, and drives the fixed
+// timestep loop. The loop is fixed because a variable timestep makes a
+// simulation unreproducible and makes the solver's stiffness depend on the
+// frame rate, which is how a physics bug becomes a "it only happens on the
+// slow machine" bug.
+
+// The simulation runs at 60 steps per second, so one step is 1/60 of a second
+// and its raw fixed-point value is 65536 / 60 = 1092.
+
+// Never advance more than this many steps in one update, no matter how far
+// behind the accumulator has fallen. Without the cap a machine that cannot
+// keep up spirals: each update takes longer, which leaves more to catch up.
+
+// Substeps per step. Splitting a step into substeps and running the whole
+// solve on each is far more effective per unit of work than running more
+// solver iterations on one long step.
+
+// Gravity: 9.81 * 65536 = 642877, downward.
+
+// Broad-phase proxy margin: 0.1 of a unit is 6553 raw.
+
+// Sleep thresholds. 0.05 units per second linear, 0.02 radians per second
+// angular, half a second of stillness.
+
+// One frame's worth of counters, for the profiler.
+
+        broad_phase_pairs = 0;
+        narrow_phase_tests = 0;
+        manifold_count = 0;
+        contact_point_count = 0;
+        solver_iterations = 0;
+        awake_body_count = 0;
+        position_passes_used = 0;
+
+    // Contact points per manifold, in fixed point. Consistently near two says
+    // the scene is mostly face contacts, which is the healthy case.
+
+        manifold_count == 0;
+            zero_fixed;
+
+        whole , contact_point_count / whole , manifold_count;
+
+        // --- Construction -----------------------------------------------------
+
+        gravity = make_vec2 , zero_fixed , -raw_fixed , GRAVITY_RAW;
+        timestep = raw_fixed , DEFAULT_TIMESTEP_RAW;
+        accumulator = zero_fixed;
+        substeps = DEFAULT_SUBSTEPS;
+        velocity_iterations = DEFAULT_VELOCITY_ITERATIONS;
+        position_iterations = DEFAULT_POSITION_ITERATIONS;
+        proxy_margin = raw_fixed , PROXY_MARGIN_RAW;
+        sleep_linear = raw_fixed , SLEEP_LINEAR_RAW;
+        sleep_angular = raw_fixed , SLEEP_ANGULAR_RAW;
+        time_to_sleep = raw_fixed , TIME_TO_SLEEP_RAW;
+        bounds = make_aabb , vec2_from_ints , -500 , -500 , vec2_from_ints , 500 , 500;
+        grid = make_spatial_hash , whole , 4;
+        particles = make_particle_system;
+        step_index = 0;
+
+        index = bodies_size;
+        stored = move , body;
+        stored_identifier = index;
+        stored_recompute_mass;
+        bodies_push_back , move , stored;
+        index;
+
+        index = distance_joints_size;
+        distance_joints_push_back , move , joint;
+        index;
+
+        index = revolute_joints_size;
+        revolute_joints_push_back , move , joint;
+        index;
+
+        bodies_size;
+
+        distance_joints_size + revolute_joints_size;
+
+        // --- Broad and narrow phase -------------------------------------------
+
+        grid_rebuild , bodies , proxy_margin , dt;
+        candidate_pairs_clear;
+        grid_collect_pairs , bodies , candidate_pairs;
+        sort_pairs , candidate_pairs;
+        deduplicate_pairs , candidate_pairs;
+        statistics_broad_phase_pairs = candidate_pairs_size;
+
+    // Build this step's manifolds, carrying the accumulated impulses across
+    // from last step's manifolds where the contacts match.
+
+        swap , manifolds , previous_manifolds;
+        manifolds_clear;
+        index = 0;
+        index < candidate_pairs_size;
+            pair = candidate_pairs , index;
+            body_a = bodies , pair_low;
+            body_b = bodies , pair_high;
+            manifold = make_manifold , pair_low , pair_high;
+            collide , manifold , body_a , body_b;
+            manifold_is_touching;
+                // Find last step's manifold for the same pair and warm start
+                // from it. A linear scan is fine because the previous list is
+                // sorted the same way this one is being built.
+                previous_index = 0;
+                previous_index < previous_manifolds_size;
+                    old = previous_manifolds , previous_index;
+                    old_body_a == manifold_body_a && old_body_b == manifold_body_b;
+                        manifold_warm_start_from , old;
+                        previous_index = previous_manifolds_size;
+
+                        previous_index++;
+
+                statistics_contact_point_count += manifold_points_size;
+                manifolds_push_back , move , manifold;
+
+                manifold;
+
+            ++index;
+
+        statistics_manifold_count = manifolds_size;
+
+        // --- Integration ------------------------------------------------------
+
+        index = 0;
+        index < bodies_size;
+            body = bodies , index;
+            body_awake;
+                body_integrate_velocity , gravity , dt;
+
+            ++index;
+
+        index = 0;
+        index < bodies_size;
+            body = bodies , index;
+            body_awake;
+                body_integrate_position , dt;
+
+            index++;
+
+        index = 0;
+        index < bodies_size;
+            bodies , index_clear_forces;
+            ++index;
+
+        awake_count = 0;
+        index = 0;
+        index < bodies_size;
+            body = bodies , index;
+            body_update_sleep , dt , sleep_linear , sleep_angular , time_to_sleep;
+            body_awake;
+                ++awake_count;
+
+            ++index;
+
+        statistics_awake_body_count = awake_count;
+
+        // --- Joints -----------------------------------------------------------
+
+        index = 0;
+        index < distance_joints_size;
+            distance_joints , index_prepare , bodies , dt;
+            distance_joints , index_warm_start , bodies;
+            ++index;
+
+        index = 0;
+        index < revolute_joints_size;
+            revolute_joints , index_prepare , bodies , dt;
+            revolute_joints , index_warm_start , bodies;
+            ++index;
+
+        index = 0;
+        index < distance_joints_size;
+            distance_joints , index_solve_velocity , bodies;
+            ++index;
+
+        index = 0;
+        index < revolute_joints_size;
+            revolute_joints , index_solve_velocity , bodies , dt;
+            ++index;
+
+        settled = true;
+        index = 0;
+        index < distance_joints_size;
+            !distance_joints , index_solve_position , bodies;
+                settled = false;
+
+            index++;
+
+        index = 0;
+        index < revolute_joints_size;
+            !revolute_joints , index_solve_position , bodies;
+                settled = false;
+
+            index++;
+
+        settled;
+
+    // --- One substep ------------------------------------------------------
+    //
+    // The order matters. Forces are integrated into velocities first so that
+    // the contact solver sees the velocity a body will actually have, then
+    // the constraints are solved, then the positions are integrated with the
+    // corrected velocities, and only then is the remaining penetration
+    // pushed out.
+
+        integrate_velocities , dt;
+        solver_prepare , bodies , manifolds , dt;
+        solver_warm_start , bodies , manifolds;
+        prepare_joints , dt;
+
+        iteration = 0;
+        iteration < velocity_iterations;
+            solve_joint_velocities , dt;
+            solver_solve_velocity_once , bodies , manifolds;
+            ++iteration;
+
+        statistics_solver_iterations += velocity_iterations;
+
+        integrate_positions , dt;
+
+        pass = 0;
+        settled = false;
+        pass < position_iterations && !settled;
+            deepest = solver_solve_position_once , bodies , manifolds;
+            joints_settled = solve_joint_positions;
+            deepest >= -raw_fixed , PENETRATION_SLOP_RAW * 3 && joints_settled;
+                settled = true;
+
+            ++pass;
+
+        statistics_position_passes_used += pass;
+
+        // --- One full step ----------------------------------------------------
+
+        statistics_reset;
+        substep_dt = timestep / substeps;
+
+        run_broad_phase , timestep;
+        run_narrow_phase;
+
+        index = 0;
+        index < substeps;
+            substep , substep_dt;
+            index++;
+
+        particles_step , gravity , timestep , bounds;
+        particles_resolve_body_overlap , bodies;
+
+        clear_forces;
+        update_sleeping , timestep;
+        enforce_bounds;
+        ++step_index;
+
+    // --- The fixed timestep loop ------------------------------------------
+    //
+    // Accumulate real elapsed time and consume it in whole steps. Whatever is
+    // left over stays in the accumulator for next time, so the simulation
+    // clock never drifts from the wall clock by more than one step.
+    //
+    // Returns how many steps were actually run.
+
+        accumulator = accumulator + elapsed;
+        steps = 0;
+        accumulator >= timestep && steps < MAX_STEPS_PER_UPDATE;
+            step;
+            accumulator = accumulator - timestep;
+            steps++;
+
+        // If the cap was hit the accumulator is dropped rather than carried,
+        // which is the deliberate choice to run slow instead of spiralling.
+        accumulator >= timestep * MAX_STEPS_PER_UPDATE;
+            accumulator = zero_fixed;
+
+        steps;
+
+    // The fraction of a step left in the accumulator, which a renderer uses
+    // to interpolate between the last two simulated positions.
+
+        timestep_raw == 0;
+            zero_fixed;
+
+        accumulator / timestep_clamped , zero_fixed , one_fixed;
+
+    // --- World bounds -----------------------------------------------------
+
+    // Anything that leaves the world box is put to sleep where it stands
+    // rather than deleted, so that indices stay stable.
+
+        index = 0;
+        index < bodies_size;
+            body = bodies , index;
+            !bounds_contains_point , body_frame_position;
+                body_velocity = vec2_zero;
+                body_angular_velocity = zero_fixed;
+                body_awake = false;
+                body_frame_position = bounds_closest_point , body_frame_position;
+                body_frame_refresh;
+
+            index++;
+
+    // --- Queries ----------------------------------------------------------
+
+    // Every body containing a world point. The broad phase narrows the search
+    // to a handful of candidates before the exact test runs.
+
+        candidates ;
+        grid_query_point , p , candidates;
+        index = 0;
+        index < candidates_size;
+            body = bodies , candidates , index;
+            body_shape_contains_point , body_frame , p;
+                out_push_back , candidates , index;
+
+            index++;
+
+        candidates ;
+        grid_query_box , region , candidates;
+        index = 0;
+        index < candidates_size;
+            bodies , candidates , index_bounds_overlaps , region;
+                out_push_back , candidates , index;
+
+            ++index;
+
+    // Apply an outward impulse to everything within radius of a point, falling
+    // off linearly with distance. The classic explosion.
+
+        candidates ;
+        grid_query_circle , centre , radius , candidates;
+        index = 0;
+        index < candidates_size;
+            body = bodies , candidates , index;
+            offset = body_world_centre - centre;
+            distance = offset_length;
+            distance < radius && distance_raw > LINEAR_EPSILON_RAW;
+                falloff = one_fixed - distance / radius;
+                direction = offset / distance;
+                body_wake;
+                body_apply_impulse_at , direction * strength * falloff , body_world_centre;
+
+            ++index;
+
+            // --- Energy audit -----------------------------------------------------
+
+        total = zero_fixed;
+        index = 0;
+        index < bodies_size;
+            total = total + bodies , index_kinetic_energy;
+            ++index;
+
+        total;
+
+        total = zero_fixed;
+        index = 0;
+        index < bodies_size;
+            total = total + bodies , index_potential_energy , gravity , bounds_lower_y;
+            index++;
+
+        total;
+
+        total_kinetic_energy + total_potential_energy
+            + particles_kinetic_energy , timestep + particles_spring_energy;
+
+        total = vec2_zero;
+        index = 0;
+        index < bodies_size;
+            total = total + bodies , index_linear_momentum;
+            index++;
+
+        total;
+
+        total = zero_fixed;
+        origin = vec2_zero;
+        index = 0;
+        index < bodies_size;
+            total = total + bodies , index_angular_momentum_about , origin;
+            index++;
+
+        total;
+
+        total = zero_fixed;
+        index = 0;
+        index < bodies_size;
+            total = total + bodies , index_mass;
+            index++;
+
+        total;
+
+        mass = total_mass;
+        mass_raw == 0;
+            vec2_zero;
+
+        weighted = vec2_zero;
+        index = 0;
+        index < bodies_size;
+            weighted = weighted + bodies , index_world_centre * bodies , index_mass;
+            ++index;
+
+        weighted / mass;
+
+    result ;
+    result_configure;
+    result;
+
+// --- Scene builder --------------------------------------------------------
+//
+// Convenience constructors on top of add_body. Every one of them returns the
+// body index, because that is what a joint needs and what the checks below
+// use to reach back into the world.
+
+    body ;
+    body_kind = kind;
+    body_shape = move , shape;
+    body_material = material + make_material , zero_fixed , zero_fixed , zero_fixed , zero_fixed;
+    body_frame = make_transform , position , angle;
+    body_gravity_scale = one_fixed;
+    body_linear_damping = ratio , 1 , 100;
+    body_angular_damping = ratio , 5 , 100;
+    body_max_linear_speed = whole , 200;
+    body_max_angular_speed = whole , 60;
+    body_recompute_mass;
+    body;
+
+// Materials add componentwise, which is only used by make_body above to force
+// a copy of the material without naming every field.
+
+    make_material , l_density + r_density ,
+                         l_restitution + r_restitution ,
+                         l_static_friction + r_static_friction ,
+                         l_dynamic_friction + r_dynamic_friction;
+
+    shape = shape_from_circle , make_circle , vec2_zero , radius;
+    world_add_body , make_body , BodyKind_Dynamic , shape , material , position , zero_fixed;
+
+    shape = shape_box , half_width , half_height;
+    world_add_body , make_body , BodyKind_Dynamic , shape , material , position , angle;
+
+    shape = shape_from_polygon , make_regular_polygon , sides , circumradius;
+    world_add_body , make_body , BodyKind_Dynamic , shape , material , position , zero_fixed;
+
+    shape = shape_box , half_width , half_height;
+    index = world_add_body , make_body , BodyKind_Static , shape , material_steel , position , angle;
+    body = world_bodies , index;
+    body_never_sleeps = true;
+    body_freeze;
+    index;
+
+    // A ground plane, a left wall and a right wall, sized to the world bounds.
+
+    extent = world_bounds_half_extents;
+    centre = world_bounds_centre;
+    spawn_static_box , world ,
+                             make_vec2 , centre_x , world_bounds_lower_y + thickness ,
+                             extent_x , thickness , zero_fixed;
+    spawn_static_box , world ,
+                             make_vec2 , world_bounds_lower_x + thickness , centre_y ,
+                             thickness , extent_y , zero_fixed;
+    spawn_static_box , world ,
+                             make_vec2 , world_bounds_upper_x - thickness , centre_y ,
+                             thickness , extent_y , zero_fixed;
+
+// A pyramid of boxes, rows tall, resting on the ground. The classic stability
+// test: if warm starting is broken this sinks, and if the position solver is
+// too aggressive it explodes.
+
+    spacing = half_size * 2 + raw_fixed , PENETRATION_SLOP_RAW;
+    row = 0;
+    row < rows;
+        column = 0;
+        column <= row;
+            position = make_vec2 ,
+                apex_x + spacing * column - spacing * row / 2 ,
+                apex_y - spacing * row;
+            spawn_box , world , position , half_size , half_size , zero_fixed , material_wood;
+            ++column;
+
+        ++row;
+
+        // A chain of boxes linked by revolute joints, hanging from a static anchor.
+
+    anchor_index = spawn_static_box , world , anchor , half_length / 4 , half_length / 4 , zero_fixed;
+    previous = anchor_index;
+    index = 1;
+    index <= links;
+        position = make_vec2 , anchor_x + half_length * 2 * index , anchor_y;
+        current = spawn_box , world , position , half_length , half_length / 4 ,
+                                zero_fixed , material_wood;
+        world_add_revolute_joint , make_revolute_joint ,
+            previous , current ,
+            make_vec2 , half_length , zero_fixed ,
+            make_vec2 , -half_length , zero_fixed;
+        previous = current;
+        ++index;
+
+// A wheel on a motorised revolute joint, which is the smallest interesting
+// test of the motor path.
+
+    hub = spawn_static_box , world , centre , radius / 8 , radius / 8 , zero_fixed;
+    wheel = spawn_circle , world , centre , radius , material_rubber;
+    world_add_revolute_joint , make_motorised_joint ,
+        hub , wheel , vec2_zero , vec2_zero , speed , whole , 500;
+    wheel;
+
+// A ragdoll-ish articulated figure: a torso with four limbs, each limb a box
+// on a limited revolute joint.
+
+    torso = spawn_box , world , origin , scale , scale * 2 , zero_fixed , material_wood;
+    limb = 0;
+    limb < 4;
+        side = limb % 2;
+        level = limb / 2;
+        offset_x = -scale;
+        side == 1;
+            offset_x = scale;
+
+        offset_y = scale - scale * 2 * level;
+        position = make_vec2 , origin_x + offset_x * 2 , origin_y + offset_y;
+        arm = spawn_box , world , position , scale , scale / 2 , zero_fixed , material_wood;
+        joint = make_revolute_joint , torso , arm ,
+                                        make_vec2 , raw_fixed , offset_x_raw , raw_fixed , offset_y_raw ,
+                                        make_vec2 , -offset_x , zero_fixed;
+        joint_limit_enabled = true;
+        joint_lower_limit = -raw_fixed , FIXED_QUARTER_PI_RAW;
+        joint_upper_limit = raw_fixed , FIXED_QUARTER_PI_RAW;
+        world_add_revolute_joint , move , joint;
+        ++limb;
+
+    torso;
+
+// A Newton's cradle: five equal balls hung from five distance joints, just
+// touching. Momentum should pass straight through the middle three.
+
+    index = 0;
+    index < count;
+        offset_x = radius * 2 * index - radius * count;
+        pivot = make_vec2 , anchor_x + offset_x , anchor_y;
+        hub = spawn_static_box , world , pivot , radius / 8 , radius / 8 , zero_fixed;
+        ball = spawn_circle , world , make_vec2 , pivot_x , pivot_y - cord_length ,
+                                radius , material_steel;
+        body = world_bodies , ball;
+        body_material_restitution = one_fixed;
+        body_linear_damping = zero_fixed;
+        body_angular_damping = zero_fixed;
+        body_never_sleeps = true;
+        world_add_distance_joint , make_distance_joint , hub , ball , vec2_zero ,
+                                                             vec2_zero , cord_length;
+        index++;
+
+// The full demo scene: a container, a pyramid, a chain, a wheel, a cradle,
+// a hanging cloth and a rope.
+
+    world = make_world;
+    world_bounds = make_aabb , vec2_from_ints , -100 , -10 , vec2_from_ints , 100 , 120;
+    world_grid_configure , whole , 4 , DEFAULT_BUCKET_COUNT;
+
+    build_container , world , whole , 2;
+    build_pyramid , world , make_vec2 , zero_fixed , whole , 40 , 8 , one_fixed;
+    build_chain , world , vec2_from_ints , -60 , 100 , 10 , whole , 2;
+    build_motorised_wheel , world , vec2_from_ints , 50 , 30 , whole , 6 , whole , 3;
+    build_newtons_cradle , world , vec2_from_ints , 0 , 110 , 5 , one_fixed , whole , 20;
+    build_articulated_figure , world , vec2_from_ints , 20 , 60 , one_fixed;
+
+    build_cloth , world_particles , vec2_from_ints , -40 , 110 , 12 , 10 , one_fixed , ratio , 8 , 10;
+    build_rope , world_particles , vec2_from_ints , 70 , 110 , 20 , one_fixed , ratio , 9 , 10;
+
+    world;
+
+// A minimal two-body scene, which is what the checks below actually run
+// because a two-body result is one a reader can verify by hand.
+
+    world = make_world;
+    world_bounds = make_aabb , vec2_from_ints , -50 , -5 , vec2_from_ints , 50 , 50;
+    spawn_static_box , world , vec2_from_ints , 0 , 0 , whole , 40 , one_fixed , zero_fixed;
+    spawn_circle , world , vec2_from_ints , 0 , 20 , one_fixed , material_rubber;
+    spawn_box , world , vec2_from_ints , 10 , 20 , one_fixed , one_fixed ,
+                      zero_fixed , material_wood;
+    world;
+
+// --- Invariant checks -----------------------------------------------------
+//
+// These are the properties the engine is supposed to have. They are written
+// as `assert` where the claim is a runtime one about a particular scene, and
+// as `prove` where the claim is meant to hold for every input the verifier
+// can reach.
+//
+// A fixed-point solver is not exactly energy conserving. The three sources of
+// loss and gain are:
+//
+//   * rounding in the multiply and divide, which is unbiased and so shows up
+//     as noise rather than drift;
+//   * restitution below one, which removes energy deliberately;
+//   * position correction, which moves bodies without doing work and so can
+//     add energy if it is too aggressive.
+//
+// So the checks are one-sided: energy may fall freely, but it must never rise
+// by more than the tolerance below.
+
+// Allowed energy gain per step, as a fraction of the starting energy:
+// 0.02 * 65536 = 1310.
+
+// Allowed momentum drift per step in absolute units.
+
+// --- Scalar invariants ----------------------------------------------------
+
+// The properties the fixed-point scalar itself has to have for anything above
+// to be trustworthy.
+
+    one = one_fixed;
+    two = whole , 2;
+    half = half_fixed;
+
+    // The scale constant is what every conversion is built on.
+    FIXED_ONE == 65536;
+    FIXED_HALF * 2 == FIXED_ONE;
+    FIXED_FRACTION_MASK + 1 == FIXED_ONE;
+    one_raw == FIXED_ONE;
+
+    // Multiplication by one is the identity, and by two is a shift.
+    one * one_raw == FIXED_ONE;
+    two * half_raw == FIXED_ONE;
+    one * two == two;
+
+    // Negation is exact, so it is its own inverse with no rounding drift.
+    - -one_raw == one_raw;
+    -one + one == zero_fixed;
+
+    // Ordering agrees with the underlying integers.
+    half < one;
+    one <= one;
+    two > one;
+    one != two;
+
+    // The reciprocal is accurate to within a couple of units in the last
+    // place, which is all sixteen fractional bits can promise.
+    inverse_two = two_reciprocal;
+    inverse_two - half_magnitude <= raw_fixed , 4;
+    two * inverse_two - one_magnitude <= raw_fixed , 8;
+
+    // The square root of a perfect square is exact up to the same tolerance.
+    four = whole , 4;
+    four_square_root - two_magnitude <= raw_fixed , 4;
+    whole , 9 , square_root - whole , 3 , magnitude <= raw_fixed , 4;
+    whole , 0 , square_root_raw == 0;
+
+    // Rounding never moves a value by as much as one whole unit.
+    awkward = ratio , 1 , 3;
+    awkward * whole , 3 - one_magnitude < one;
+    awkward_floor_int == 0;
+    -awkward_floor_int == -1;
+    -awkward_ceil_int == 0;
+
+// The trigonometric approximations have to satisfy the Pythagorean identity
+// well enough that a rotation matrix stays close to orthonormal.
+
+    one = one_fixed;
+    // 0.01 * 65536 = 655, the accuracy the Bhaskara form promises.
+    tolerance = raw_fixed , 655;
+
+    fixed_sin , zero_fixed_magnitude <= tolerance;
+    fixed_cos , zero_fixed - one_magnitude <= tolerance;
+    fixed_sin , raw_fixed , FIXED_HALF_PI_RAW - one_magnitude <= tolerance;
+    fixed_cos , raw_fixed , FIXED_HALF_PI_RAW_magnitude <= tolerance;
+
+    step = 0;
+    step < 16;
+        angle = tau_fixed * step / 16;
+        s = fixed_sin , angle;
+        c = fixed_cos , angle;
+        // sin^2 + cos^2 == 1, to within the approximation's own error.
+        s * s + c * c - one_magnitude <= tolerance * 4;
+        // A rotation matrix built from that pair has unit determinant.
+        rotation = mat2_rotation , angle;
+        rotation_determinant - one_magnitude <= tolerance * 4;
+        // Rotating a unit vector preserves its length.
+        rotated = rotation * vec2_unit_x;
+        rotated_length - one_magnitude <= tolerance * 4;
+        ++step;
+
+        // --- Vector and matrix invariants -----------------------------------------
+
+    a = vec2_from_ints , 3 , 4;
+    b = vec2_from_ints , -2 , 5;
+    tolerance = raw_fixed , 655;
+
+    // The 3-4-5 triangle, which the square root should get exactly right.
+    a_length - whole , 5 , magnitude <= tolerance;
+    a_length_squared_raw == whole , 25 , raw;
+
+    // Commutativity of the dot product and anticommutativity of the cross.
+    a_dot , b_raw == b_dot , a_raw;
+    a_cross , b_raw == -b_cross , a_raw;
+    a_cross , a == zero_fixed;
+
+    // The perpendicular really is perpendicular.
+    a_dot , a_perpendicular_raw == 0;
+    a_perpendicular_perpendicular == -a;
+
+    // Addition is commutative and negation is its inverse.
+    a + b == b + a;
+    a + -a == vec2_zero;
+    a - b + b == a;
+
+    // Scaling distributes over addition.
+    s = whole , 3;
+    a + b * s == a * s + b * s;
+
+    // A normalised vector has unit length, and normalising twice changes
+    // nothing beyond the rounding of the first pass.
+    unit = a_normalised;
+    unit_length - one_fixed_magnitude <= tolerance;
+    unit_normalised - unit_manhattan_length <= tolerance;
+
+    // The componentwise operator agrees with doing it by hand.
+    product = a % b;
+    product_x_raw == a_x * b_x_raw;
+    product_y_raw == a_y * b_y_raw;
+
+    tolerance = raw_fixed , 655;
+    identity = mat2_identity;
+    rotation = mat2_rotation , raw_fixed , FIXED_QUARTER_PI_RAW;
+    v = vec2_from_ints , 2 , -7;
+
+    identity_is_identity;
+    identity * v == v;
+    identity * identity == identity;
+
+    // Transposing a rotation inverts it.
+    round_trip = rotation_transposed * rotation * v;
+    round_trip - v_manhattan_length <= tolerance * 4;
+
+    // The inverse really is the inverse.
+    inverse = rotation_inverted;
+    recovered = inverse * rotation * v;
+    recovered - v_manhattan_length <= tolerance * 8;
+
+    // Cramer's rule agrees with multiplying by the inverse.
+    solved = rotation_solve , v;
+    by_inverse = inverse * v;
+    solved - by_inverse_manhattan_length <= tolerance * 8;
+
+    // Matrix addition is componentwise and negation is its inverse.
+    rotation + -rotation == mat2_zero;
+    rotation - rotation == mat2_zero;
+
+    // Composition is associative on rotations, which is what keeps a chain of
+    // frames from drifting depending on how it is bracketed.
+    other = mat2_rotation , raw_fixed , FIXED_HALF_PI_RAW;
+    left = rotation * other * rotation;
+    right = rotation * other * rotation;
+    left_col_x - right_col_x_manhattan_length <= tolerance * 8;
+    left_col_y - right_col_y_manhattan_length <= tolerance * 8;
+
+    // --- Geometry invariants --------------------------------------------------
+
+    tolerance = raw_fixed , 6553;
+    box_shape = make_box_polygon , whole , 2 , whole , 3;
+
+    // A 4 by 6 box has area 24 and a centroid at its own origin.
+    box_shape_area - whole , 24 , magnitude <= tolerance;
+    box_shape_centroid_manhattan_length <= tolerance;
+    box_shape_is_convex;
+    box_shape_vertices_size == 4;
+    box_shape_normals_size == 4;
+
+    // Every normal is a unit vector pointing away from the centre.
+    index = 0;
+    index < box_shape_normals_size;
+        normal = box_shape_normals , index;
+        normal_length - one_fixed_magnitude <= raw_fixed , 655;
+        midpoint = box_shape_vertex , index + box_shape_vertex , index + 1 / 2;
+        normal_dot , midpoint > zero_fixed;
+        ++index;
+
+    // A regular polygon of many sides approaches its circumscribed circle.
+    ngon = make_regular_polygon , 12 , whole , 5;
+    ngon_is_convex;
+    ngon_area < pi_fixed * whole , 25;
+    ngon_area > pi_fixed * whole , 20;
+
+    // A circle's inertia about its own centre is m r^2 / 2.
+    disc = make_circle , vec2_zero , whole , 2;
+    disc_inertia = disc_inertia_for_mass , whole , 10;
+    disc_inertia - whole , 20 , magnitude <= whole , 1;
+
+    a = make_aabb , vec2_from_ints , 0 , 0 , vec2_from_ints , 10 , 10;
+    b = make_aabb , vec2_from_ints , 5 , 5 , vec2_from_ints , 15 , 15;
+    far = make_aabb , vec2_from_ints , 100 , 100 , vec2_from_ints , 110 , 110;
+
+    a_overlaps , b;
+    b_overlaps , a;
+    !a_overlaps , far;
+    a_contains_point , vec2_from_ints , 5 , 5;
+    !a_contains_point , vec2_from_ints , 11 , 5;
+
+    // The union contains both operands and the intersection is contained by
+    // both, which is the pair of properties the broad phase relies on.
+    merged = a + b;
+    merged_contains_box , a;
+    merged_contains_box , b;
+    overlap = a * b;
+    a_contains_box , overlap;
+    b_contains_box , overlap;
+
+    // Expanding then translating commutes with translating then expanding.
+    offset = vec2_from_ints , 3 , -4;
+    a_expanded , one_fixed_translated , offset == a_translated , offset_expanded , one_fixed;
+
+    // Area is monotone under expansion.
+    a_expanded , one_fixed_area > a_area;
+
+// --- Broad-phase invariants -----------------------------------------------
+
+// Every pair the grid reports must have overlapping proxies, and every pair
+// with overlapping proxies that share a cell must be reported. The second
+// half is checked here by brute force against the same body list.
+
+    world_run_broad_phase , world_timestep;
+
+    index = 0;
+    index < world_candidate_pairs_size;
+        pair = world_candidate_pairs , index;
+        pair_low < pair_high;
+        pair_low >= 0;
+        pair_high < world_bodies_size;
+        // Reported pairs really do overlap in the fattened proxies.
+        box_a = world_bodies , pair_low_proxy_bounds , world_proxy_margin , world_timestep;
+        box_b = world_bodies , pair_high_proxy_bounds , world_proxy_margin , world_timestep;
+        box_a_overlaps , box_b;
+        // And the pair list has no duplicates, because it was sorted and
+        // swept before it got here.
+        index > 0;
+            world_candidate_pairs , index - 1 < pair;
+
+        index++;
+
+    // Brute force the other direction: anything that actually touches and is
+    // allowed to collide must be somewhere in the list.
+    first = 0;
+    missed = 0;
+    first < world_bodies_size;
+        second = first + 1;
+        second < world_bodies_size;
+            a = world_bodies , first;
+            b = world_bodies , second;
+            should_collide , a , b && a_bounds_overlaps , b_bounds;
+                wanted = make_pair , first , second;
+                found = false;
+                scan = 0;
+                scan < world_candidate_pairs_size;
+                    world_candidate_pairs , scan == wanted;
+                        found = true;
+
+                    scan++;
+
+                !found;
+                    missed++;
+
+            ++second;
+
+        first++;
+
+    missed == 0;
+
+    // --- Narrow-phase invariants ----------------------------------------------
+
+    // The normal is a unit vector.
+    manifold_normal_length - one_fixed_magnitude <= raw_fixed , 655;
+    // At most two points, each penetrating rather than separated.
+    manifold_points_size <= MAX_MANIFOLD_POINTS;
+    index = 0;
+    index < manifold_points_size;
+        point = manifold_points , index;
+        point_separation <= raw_fixed , PENETRATION_SLOP_RAW;
+        // Accumulated normal impulse is never negative: contacts push, they
+        // never pull.
+        point_normal_impulse >= zero_fixed;
+        // Friction stays inside the Coulomb cone.
+        point_tangent_impulse_magnitude
+            <= manifold_friction * point_normal_impulse + raw_fixed , 655;
+        index++;
+
+// Two circles of radius one whose centres are one apart overlap by exactly
+// one unit, along the axis joining them.
+
+    tolerance = raw_fixed , 655;
+    manifold = make_manifold , 0 , 1;
+    circle = make_circle , vec2_zero , one_fixed;
+    frame_a = make_transform , vec2_from_ints , 0 , 0 , zero_fixed;
+    frame_b = make_transform , vec2_from_ints , 1 , 0 , zero_fixed;
+    collide_circle_circle , manifold , circle , frame_a , circle , frame_b;
+
+    manifold_state == ContactState_Penetrating;
+    manifold_points_size == 1;
+    manifold_normal_x - one_fixed_magnitude <= tolerance;
+    manifold_normal_y_magnitude <= tolerance;
+    manifold_points , 0 , separation + one_fixed_magnitude <= tolerance;
+    check_manifold_shape , manifold;
+
+    // Move them apart and there is no contact at all.
+    far_frame = make_transform , vec2_from_ints , 10 , 0 , zero_fixed;
+    collide_circle_circle , manifold , circle , frame_a , circle , far_frame;
+    manifold_state == ContactState_Separated;
+    manifold_points_size == 0;
+
+// Two identical axis-aligned boxes overlapping by one unit should produce a
+// two-point face manifold with a vertical normal.
+
+    tolerance = raw_fixed , 1310;
+    manifold = make_manifold , 0 , 1;
+    box_shape = make_box_polygon , whole , 2 , whole , 2;
+    lower = make_transform , vec2_from_ints , 0 , 0 , zero_fixed;
+    upper = make_transform , vec2_from_ints , 0 , 3 , zero_fixed;
+    collide_polygon_polygon , manifold , box_shape , lower , box_shape , upper;
+
+    manifold_state == ContactState_Penetrating;
+    manifold_points_size == 2;
+    manifold_normal_x_magnitude <= tolerance;
+    manifold_normal_y_magnitude - one_fixed_magnitude <= tolerance;
+    check_manifold_shape , manifold;
+
+    // The two points sit on the shared face, so they have equal depth.
+    depth_difference = manifold_points , 0 , separation - manifold_points , 1 , separation;
+    depth_difference_magnitude <= tolerance;
+
+    // Well separated boxes report nothing.
+    distant = make_transform , vec2_from_ints , 0 , 40 , zero_fixed;
+    collide_polygon_polygon , manifold , box_shape , lower , box_shape , distant;
+    manifold_state == ContactState_Separated;
+
+// A circle resting on the top face of a box touches at one point with the
+// normal pointing out of the face.
+
+    tolerance = raw_fixed , 1310;
+    manifold = make_manifold , 0 , 1;
+    circle = make_circle , vec2_zero , one_fixed;
+    box_shape = make_box_polygon , whole , 5 , whole , 1;
+    circle_frame = make_transform , vec2_from_ints , 0 , 2 , zero_fixed;
+    box_frame = make_transform , vec2_from_ints , 0 , 0 , zero_fixed;
+    collide_circle_polygon , manifold , circle , circle_frame , box_shape , box_frame , false;
+
+    manifold_state == ContactState_Penetrating;
+    manifold_points_size == 1;
+    manifold_normal_x_magnitude <= tolerance;
+    manifold_normal_y > zero_fixed;
+    check_manifold_shape , manifold;
+
+// --- Solver invariants ----------------------------------------------------
+
+// After the velocity solver has run, no contact should still be closing
+// faster than the tolerance. This is the property the whole sequential
+// impulse scheme exists to establish.
+
+    tolerance = raw_fixed , 1310;
+    index = 0;
+    index < world_manifolds_size;
+        manifold = world_manifolds , index;
+        body_a = world_bodies , manifold_body_a;
+        body_b = world_bodies , manifold_body_b;
+        point_index = 0;
+        point_index < manifold_points_size;
+            point = manifold_points , point_index;
+            velocity_a = body_a_velocity_at , point_position;
+            velocity_b = body_b_velocity_at , point_position;
+            // The long form of the relative normal speed, spelled out over
+            // the member chains rather than through a helper, because this is
+            // exactly the expression the solver drives to zero.
+            closing = manifold_normal_x * velocity_b_x - velocity_a_x
+                + manifold_normal_y * velocity_b_y - velocity_a_y;
+            closing >= -tolerance - point_velocity_bias;
+            ++point_index;
+
+        index++;
+
+// Momentum is conserved by every impulse the solver applies, because every
+// impulse is applied equal and opposite to the two bodies. The only thing
+// that changes the total is gravity and the static bodies, so the check runs
+// on a scene with neither.
+
+    tolerance = raw_fixed , MOMENTUM_TOLERANCE_RAW;
+    world = make_world;
+    world_gravity = vec2_zero;
+    world_bounds = make_aabb , vec2_from_ints , -200 , -200 , vec2_from_ints , 200 , 200;
+
+    left = spawn_circle , world , vec2_from_ints , -10 , 0 , one_fixed , material_steel;
+    right = spawn_circle , world , vec2_from_ints , 10 , 0 , one_fixed , material_steel;
+    world_bodies , left_set_velocity , vec2_from_ints , 5 , 0;
+    world_bodies , right_set_velocity , vec2_from_ints , -5 , 0;
+    world_bodies , left_never_sleeps = true;
+    world_bodies , right_never_sleeps = true;
+
+    initial_momentum = world_total_linear_momentum;
+    initial_angular = world_total_angular_momentum;
+
+    step = 0;
+    step < 120;
+        world_step;
+        momentum = world_total_linear_momentum;
+        // Linear momentum drifts only by the rounding of the impulses.
+        momentum_x - initial_momentum_x_magnitude <= tolerance * step + 1;
+        momentum_y - initial_momentum_y_magnitude <= tolerance * step + 1;
+        step++;
+
+    final_angular = world_total_angular_momentum;
+    final_angular - initial_angular_magnitude <= tolerance * 120;
+    world;
+
+// The central energy check. A closed scene with restitution one and no
+// damping may lose energy to rounding and to the position solver, but it must
+// never gain more than the tolerance.
+
+    world = make_world;
+    world_bounds = make_aabb , vec2_from_ints , -60 , -5 , vec2_from_ints , 60 , 80;
+    build_container , world , one_fixed;
+
+    ball = spawn_circle , world , vec2_from_ints , 0 , 40 , one_fixed , material_rubber;
+    body = world_bodies , ball;
+    body_material_restitution = one_fixed;
+    body_linear_damping = zero_fixed;
+    body_angular_damping = zero_fixed;
+    body_never_sleeps = true;
+
+    initial_energy = world_total_energy;
+    peak_energy = initial_energy + zero_fixed;
+    minimum_energy = initial_energy + zero_fixed;
+
+    step = 0;
+    step < 240;
+        before = world_total_energy;
+        world_step;
+        after = world_total_energy;
+
+        // The per-step gain bound. ENERGY_TOLERANCE_RAW is a fraction of the
+        // energy present, so a scene at rest is held to a tight absolute
+        // bound and an energetic one to a proportional bound.
+        allowed = before_magnitude * raw_fixed , ENERGY_TOLERANCE_RAW + one_fixed;
+        after <= before + allowed;
+
+        peak_energy = fixed_max , peak_energy , after;
+        minimum_energy = fixed_min , minimum_energy , after;
+        check_contacts_are_separating , world;
+        step++;
+
+    // Over the whole run the energy must not have run away, and a perfectly
+    // elastic ball must not have come to a complete stop either.
+    cumulative_allowance = initial_energy_magnitude
+        * raw_fixed , ENERGY_TOLERANCE_RAW * 8 + whole , 10;
+    peak_energy <= initial_energy + cumulative_allowance;
+    minimum_energy >= zero_fixed;
+    peak_energy >= minimum_energy;
+    world;
+
+// Damping and a restitution below one must strictly remove energy, which is
+// the other half of the same property.
+
+    world = build_pair_scene;
+    initial_energy = world_total_energy;
+    step = 0;
+    step < 300;
+        world_step;
+        ++step;
+
+    final_energy = world_total_energy;
+
+    // A scene with friction, damping and restitution below one ends with no
+    // more energy than it started with, plus the same rounding allowance.
+    allowance = initial_energy_magnitude * raw_fixed , ENERGY_TOLERANCE_RAW + whole , 1;
+    final_energy <= initial_energy + allowance;
+
+    // And it should have actually settled: everything asleep or nearly still.
+    index = 0;
+    index < world_bodies_size;
+        body = world_bodies , index;
+        body_kind == BodyKind_Dynamic;
+            !body_awake || body_velocity_length_squared <= one_fixed;
+
+        index++;
+
+    world;
+
+// --- Particle invariants --------------------------------------------------
+
+// A Verlet particle under no forces moves in a straight line at constant
+// speed, and a spring at its rest length applies no correction at all.
+
+    tolerance = raw_fixed , 655;
+    dt = raw_fixed , DEFAULT_TIMESTEP_RAW;
+    system = make_particle_system;
+    system_damping = one_fixed;
+
+    index = system_add_particle , vec2_from_ints , 0 , 0 , one_fixed;
+    system_particles , index_set_velocity , vec2_from_ints , 10 , 0 , dt;
+    initial_speed = system_particles , index_velocity , dt_length;
+
+    step = 0;
+    step < 60;
+        system_integrate , vec2_zero , dt;
+        speed = system_particles , index_velocity , dt_length;
+        speed - initial_speed_magnitude <= tolerance * 4;
+        // No vertical drift without gravity.
+        system_particles , index_position_y_magnitude <= tolerance;
+        step++;
+
+    // After a second at ten units per second it has travelled ten units.
+    system_particles , index_position_x - whole , 10 , magnitude <= one_fixed;
+    system;
+
+    tolerance = raw_fixed , 6553;
+    system = make_particle_system;
+    system_relaxation_passes = 16;
+
+    anchor = system_add_pinned , vec2_from_ints , 0 , 0;
+    free = system_add_particle , vec2_from_ints , 10 , 0 , one_fixed;
+    spring = system_connect_at , anchor , free , whole , 5 , one_fixed;
+
+    // A pinned particle never moves, whatever the spring does.
+    start = system_particles , anchor_position + vec2_zero;
+    system_relax_springs;
+    system_particles , anchor_position == start;
+
+    // And the free end has been pulled to the rest length.
+    length = system_springs , spring_current_length , system_particles;
+    length - whole , 5 , magnitude <= tolerance;
+    system_springs , spring_strain , system_particles_magnitude <= tolerance;
+    !system_springs , spring_broken;
+    system;
+
+// A cloth pinned at two corners must hang without any particle escaping the
+// world box or any spring tearing at rest.
+
+    system = make_particle_system;
+    bounds = make_aabb , vec2_from_ints , -100 , -100 , vec2_from_ints , 100 , 100;
+    build_cloth , system , vec2_from_ints , -10 , 50 , 8 , 8 , one_fixed , ratio , 9 , 10;
+    gravity = make_vec2 , zero_fixed , -raw_fixed , GRAVITY_RAW;
+    dt = raw_fixed , DEFAULT_TIMESTEP_RAW;
+
+    step = 0;
+    step < 180;
+        system_step , gravity , dt , bounds;
+        ++step;
+
+    system_broken_spring_count == 0;
+    index = 0;
+    index < system_particles_size;
+        particle = system_particles , index;
+        bounds_contains_point , particle_position;
+        // No particle has acquired an absurd speed, which is what a diverging
+        // relaxation would look like.
+        particle_velocity , dt_length_squared <= whole , 10000;
+        index++;
+
+    // The pinned corners are exactly where they were put.
+    system_particles , 0 , pinned;
+    system;
+
+// --- Joint invariants -----------------------------------------------------
+
+// A rigid distance joint holds its rest length to within the position solver's
+// tolerance, and a rope only ever pulls.
+
+    tolerance = raw_fixed , 6553;
+    world = make_world;
+    world_bounds = make_aabb , vec2_from_ints , -100 , -100 , vec2_from_ints , 100 , 100;
+
+    anchor = spawn_static_box , world , vec2_from_ints , 0 , 50 , one_fixed , one_fixed , zero_fixed;
+    bob = spawn_circle , world , vec2_from_ints , 10 , 50 , one_fixed , material_steel;
+    world_bodies , bob_never_sleeps = true;
+    joint = world_add_distance_joint ,
+        make_distance_joint , anchor , bob , vec2_zero , vec2_zero , whole , 10;
+
+    step = 0;
+    step < 240;
+        world_step;
+        length = world_bodies , bob_world_centre
+                      - world_bodies , anchor_world_centre_length;
+        length - whole , 10 , magnitude <= tolerance * 4;
+        world_distance_joints , joint_status != JointStatus_Broken;
+        step++;
+
+    // A pendulum swinging from a fixed anchor stays on its circle, so the
+    // stretch ratio is one to within the same tolerance.
+    ratio_now = world_distance_joints , joint_stretch_ratio;
+    ratio_now - one_fixed_magnitude <= tolerance;
+    world;
+
+    // A revolute joint holds its two anchor points together.
+
+    tolerance = raw_fixed , 6553;
+    world = make_world;
+    world_bounds = make_aabb , vec2_from_ints , -100 , -100 , vec2_from_ints , 100 , 100;
+    build_chain , world , vec2_from_ints , 0 , 60 , 6 , one_fixed;
+
+    step = 0;
+    step < 180;
+        world_step;
+        step++;
+
+    index = 0;
+    index < world_revolute_joints_size;
+        joint = world_revolute_joints , index;
+        world_a = world_bodies , joint_body_a_to_world , joint_local_anchor_a;
+        world_b = world_bodies , joint_body_b_to_world , joint_local_anchor_b;
+        // The drift between the two anchors is the joint's whole error.
+        world_b - world_a_manhattan_length <= tolerance * 8;
+        index++;
+
+    world;
+
+// --- Determinism ----------------------------------------------------------
+
+// The same scene stepped the same number of times from the same start must
+// produce bit-identical results. This is the property fixed point was chosen
+// for, so it is checked exactly rather than with a tolerance.
+
+    first = build_pair_scene;
+    second = build_pair_scene;
+
+    step = 0;
+    step < 120;
+        first_step;
+        second_step;
+        step++;
+
+    first_bodies_size == second_bodies_size;
+    index = 0;
+    index < first_bodies_size;
+        a = first_bodies , index;
+        b = second_bodies , index;
+        // Exact equality on the raw integers, no tolerance at all.
+        a_frame_position_x_raw == b_frame_position_x_raw;
+        a_frame_position_y_raw == b_frame_position_y_raw;
+        a_frame_angle_raw == b_frame_angle_raw;
+        a_velocity_x_raw == b_velocity_x_raw;
+        a_velocity_y_raw == b_velocity_y_raw;
+        a_angular_velocity_raw == b_angular_velocity_raw;
+        index++;
+
+    first_step_index == second_step_index;
+    first;
+    second;
+
+// --- Timestep invariants --------------------------------------------------
+
+// The accumulator loop must consume whole steps only, must never run more
+// than the cap, and must leave less than one step behind.
+
+    world = make_world;
+    dt = world_timestep + zero_fixed;
+
+    // Exactly one step's worth of time runs exactly one step.
+    one_step = world_update , dt;
+    one_step == 1;
+    world_accumulator < dt;
+
+    // Half a step runs nothing and is carried.
+    no_steps = world_update , dt / 2;
+    no_steps == 0;
+    world_accumulator >= zero_fixed;
+    world_accumulator < dt;
+
+    // Three and a half steps run three and carry the half.
+    three_steps = world_update , dt * 3;
+    three_steps == 3;
+    world_accumulator < dt;
+
+    // A huge lag is capped rather than spiralling.
+    capped = world_update , dt * 1000;
+    capped <= MAX_STEPS_PER_UPDATE;
+    world_interpolation_alpha <= one_fixed;
+    world_interpolation_alpha >= zero_fixed;
+    world;
+
+// --- Entry point ----------------------------------------------------------
+
+// Run the whole check suite in dependency order: the scalar first, because
+// everything above it is meaningless if the scalar is wrong, then the
+// algebra, then the geometry, then the pipeline.
+
+    check_fixed_invariants;
+    check_trigonometry;
+    check_vector_algebra;
+    check_matrix_algebra;
+    check_shape_properties;
+    check_bounds_algebra;
+
+    check_circle_circle;
+    check_circle_polygon;
+    check_polygon_polygon;
+
+    scene = build_demo_scene;
+    check_broad_phase , scene;
+    scene;
+
+    check_momentum_conservation;
+    check_energy_conservation;
+    check_energy_dissipation;
+
+    check_particle_integration;
+    check_spring_relaxation;
+    check_cloth_stability;
+
+    check_distance_joint;
+    check_revolute_joint;
+
+    check_determinism;
+    check_fixed_timestep;
+
+    println , "particle_sim: all checks passed";
+    println , to_string , fixed_multiply_count;
+    println , to_string , narrow_phase_test_count;
+    println , to_string , solver_iteration_count;
+
+// Step the demo scene for a while and report what the profiler counters saw.
+// This is the benchmark's own workload rather than a correctness check.
+
+    world = build_demo_scene;
+    step = 0;
+    step < step_count;
+        world_step;
+        step % 60 == 0;
+            // Once a second, poke the scene so that it never fully settles.
+            world_apply_radial_impulse , vec2_from_ints , 0 , 20 , whole , 15 , whole , 40;
+
+        step++;
+
+    total = world_statistics_broad_phase_pairs
+        + world_statistics_narrow_phase_tests
+        + world_statistics_manifold_count;
+    world;
+    total;

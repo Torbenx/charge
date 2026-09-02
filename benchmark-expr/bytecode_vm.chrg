@@ -1,0 +1,1767 @@
+// A stack-based bytecode virtual machine for a small dynamic language.
+//
+// The design follows the classic single-pass compiler / register-less VM
+// layout: a `Chunk` holds a flat instruction array plus a constant pool, a
+// `CallFrame` records the return address and the base of the local window,
+// and `VM::run` walks the instruction stream with an explicit dispatch
+// cascade. The language has no `switch`, so every dispatch site below is a
+// hand-rolled `if op == OpCode::X: { } else: { ... }` chain. The nested
+// `else` blocks are written on the same line as the enclosing brace so the
+// chain stays readable instead of drifting a hundred columns to the right.
+//
+// Values are dynamically typed and reference-counted objects are tracked by
+// a mark-sweep collector rooted at the value stack, the frame array and the
+// globals table. Fractional numbers are represented as fixed-point integers
+// scaled by FIXED_SCALE; the VM never sees a floating point value.
+
+// --- Tunables ------------------------------------------------------------
+
+// Fixed-point scale: a "number" value of 1500 means 1.5.
+
+// Bit masks used when packing a 24 bit operand next to an 8 bit opcode.
+// 0xFF
+// 0xFFFFFF
+
+// 0xFFFF
+
+// Collector heuristics.
+
+// --- Value model ---------------------------------------------------------
+
+// The garbage collected header shared by every heap object. Real objects
+// embed one of these as their first field so the collector can walk them
+// without knowing the concrete type.
+
+    // Intrusive linked list of every object the collector knows about.
+
+    // Index into VM::objects; -1 means "not yet registered".
+
+// A dynamically typed slot. Only one payload field is meaningful at a time
+// and `kind` says which; the VM asserts on every access.
+
+        kind == ValueKind_Nil;
+
+        kind == ValueKind_Bool;
+
+        kind == ValueKind_Number;
+
+        kind == ValueKind_Object;
+
+    // Everything except `nil` and `false` is truthy, matching the source
+    // language's semantics.
+
+        kind == ValueKind_Nil;
+            false;
+
+            kind == ValueKind_Bool;
+                boolean;
+
+                true;
+
+        kind == ValueKind_Number;
+        number;
+
+        kind == ValueKind_Object;
+        object;
+
+    // Handle into VM::objects rather than a raw pointer, so the collector
+    // may relocate the object table without patching the stack.
+
+    v ;
+    v_kind = ValueKind_Nil;
+    v;
+
+    v ;
+    v_kind = ValueKind_Bool;
+    v_boolean = b;
+    v;
+
+    v ;
+    v_kind = ValueKind_Number;
+    v_number = n;
+    v;
+
+    v ;
+    v_kind = ValueKind_Object;
+    v_object = handle;
+    v;
+
+    a_kind != b_kind;
+        false;
+
+    a_kind == ValueKind_Nil;
+        true;
+
+        a_kind == ValueKind_Bool;
+            a_boolean == b_boolean;
+
+            a_kind == ValueKind_Number;
+                a_number == b_number;
+
+                a_object == b_object;
+
+// --- Instruction set -----------------------------------------------------
+
+// The complete instruction set. Values are fixed because serialized
+// chunks are written to disk; never renumber an existing opcode, only
+// append. The trailing comment on each line is the byte as it appears
+// in a hex dump of the code section.
+
+// Constants, literals and raw stack shuffling.
+// 0x00
+// 0x01
+// 0x02
+// 0x03
+// 0x04
+// 0x05
+// 0x06
+// 0x07
+// 0x08
+// 0x09
+
+// Locals, globals, upvalues, properties and subscripts.
+                            // 0x0A
+                            // 0x0B
+                           // 0x0C
+                           // 0x0D
+                           // 0x0E
+                          // 0x0F
+                          // 0x10
+                         // 0x11
+                         // 0x12
+                            // 0x13
+                            // 0x14
+
+                            // Comparison; every one of these pops two and pushes a bool.
+                            // 0x15
+                            // 0x16
+                            // 0x17
+                            // 0x18
+                            // 0x19
+                            // 0x1A
+
+                            // Binary arithmetic on fixed-point numbers.
+                            // 0x1B
+                            // 0x1C
+                            // 0x1D
+                              // 0x1E
+                              // 0x1F
+                              // 0x20
+
+                              // Unary operators; they rewrite the slot in place.
+                              // 0x21
+                           // 0x22
+                           // 0x23
+                           // 0x24
+
+                           // Bitwise operators. Operands are truncated to integers first.
+                           // 0x25
+                           // 0x26
+                              // 0x27
+                              // 0x28
+                              // 0x29
+                              // 0x2A
+                              // 0x2B
+
+                              // Control flow. The operand is an absolute instruction index.
+                              // 0x2C
+                              // 0x2D
+                              // 0x2E
+                              // 0x2F
+                              // 0x30
+                              // 0x31
+
+                              // Call forms. The operand is the argument count.
+                              // 0x32
+                              // 0x33
+                              // 0x34
+                              // 0x35
+
+                              // Closure construction and function exit.
+                              // 0x36
+                              // 0x37
+                              // 0x38
+                              // 0x39
+
+                              // Array intrinsics.
+                              // 0x3A
+                              // 0x3B
+                              // 0x3C
+                              // 0x3D
+                              // 0x3E
+
+                              // Map intrinsics.
+                              // 0x3F
+                           // 0x40
+                           // 0x41
+                           // 0x42
+                           // 0x43
+
+                           // Builtins, diagnostics and terminators.
+                              // 0x44
+                              // 0x45
+                              // 0x46
+                              // 0x47
+                              // 0x48
+                              // 0x49
+                              // 0x4A
+                              // 0x4B
+
+// A decoded instruction. The on-disk form packs `op` into the low byte and
+// `operand` into the upper three bytes of a single word; `extra` is only
+// materialised for the two-operand forms such as OpCode::Invoke.
+
+        operand << OPERAND_SHIFT | opcode_byte & OPCODE_MASK;
+
+        raw & OPCODE_MASK;
+
+        op == OpCode_Jump;
+            true;
+
+        op == OpCode_JumpIfFalse;
+            true;
+
+        op == OpCode_JumpIfTrue;
+            true;
+
+        op == OpCode_JumpIfNil;
+            true;
+
+        op == OpCode_JumpIfNotNil;
+            true;
+
+        op == OpCode_Loop;
+
+    ins ;
+    ins_raw = raw;
+    ins_operand = raw >> OPERAND_SHIFT & OPERAND_MASK;
+    ins;
+
+// Run-length encoded line table: `count` consecutive instructions all
+// originate from source line `line`.
+
+// --- Chunks --------------------------------------------------------------
+
+// A compiled unit: code, the constant pool it indexes into, and enough
+// debug information to reconstruct a stack trace.
+
+        code_size;
+
+        code_empty;
+
+        ins ;
+        ins_op = op;
+        ins_operand = operand;
+        ins_line = line;
+        ins_raw = ins_packed;
+        code_push_back , ins;
+        note_line , line;
+        code_size - 1;
+
+        write , op , 0 , line;
+
+        index = write , OpCode_Invoke , name_slot , line;
+        slot = code_at , index;
+        slot_extra = argc;
+        index;
+
+        // Append to the run-length encoded line table.
+
+        lines_empty;
+            lines_push_back , LineRun , line , 1;
+
+        last = lines_back;
+        last_line == line;
+            last_count += 1;
+
+            lines_push_back , LineRun , line , 1;
+
+        seen = 0;
+        run , lines;
+            seen += run_count;
+            offset < seen;
+                run_line;
+
+        0;
+
+        // Interning: identical constants share a slot so the pool stays small.
+
+        i = 0;
+        i < constants_size;
+            values_equal , constants_at , i , value;
+                i;
+
+            i++;
+
+        constants_size < CONSTANTS_MAX;
+        constants_push_back , value;
+        constants_size - 1;
+
+        index >= 0;
+        index < constants_size;
+        constants_at , index;
+
+        slot = code_at , offset;
+        slot_is_jump;
+        slot_operand = target;
+        slot_raw = slot_packed;
+
+        write , OpCode_Loop , start , line;
+
+        code_clear;
+        constants_clear;
+        lines_clear;
+
+// --- Disassembly ---------------------------------------------------------
+
+// Canonical mnemonic for every opcode, used by the disassembler and by
+// the error reporter. There is no `switch` in the language, so this is a
+// straight cascade; the nested `else` blocks are all closed in one run at
+// the bottom of the function.
+
+    // constants and stack shuffling
+    op == OpCode_Constant;
+        "OP_CONSTANT";
+    op == OpCode_ConstantLong;
+        "OP_CONSTANT_LONG";
+    op == OpCode_Nil;
+        "OP_NIL";
+    op == OpCode_True;
+        "OP_TRUE";
+    op == OpCode_False;
+        "OP_FALSE";
+    op == OpCode_Pop;
+        "OP_POP";
+    op == OpCode_PopN;
+        "OP_POP_N";
+    op == OpCode_Dup;
+        "OP_DUP";
+    op == OpCode_Swap;
+        "OP_SWAP";
+    op == OpCode_Rotate;
+        "OP_ROTATE";
+    // variable access
+    op == OpCode_GetLocal;
+        "OP_GET_LOCAL";
+    op == OpCode_SetLocal;
+        "OP_SET_LOCAL";
+    op == OpCode_GetGlobal;
+        "OP_GET_GLOBAL";
+    op == OpCode_SetGlobal;
+        "OP_SET_GLOBAL";
+    op == OpCode_DefineGlobal;
+        "OP_DEFINE_GLOBAL";
+    op == OpCode_GetUpvalue;
+        "OP_GET_UPVALUE";
+    op == OpCode_SetUpvalue;
+        "OP_SET_UPVALUE";
+    op == OpCode_GetProperty;
+        "OP_GET_PROPERTY";
+    op == OpCode_SetProperty;
+        "OP_SET_PROPERTY";
+    op == OpCode_GetIndex;
+        "OP_GET_INDEX";
+    op == OpCode_SetIndex;
+        "OP_SET_INDEX";
+    // comparison
+    op == OpCode_Equal;
+        "OP_EQUAL";
+    op == OpCode_NotEqual;
+        "OP_NOT_EQUAL";
+    op == OpCode_Greater;
+        "OP_GREATER";
+    op == OpCode_GreaterEqual;
+        "OP_GREATER_EQUAL";
+    op == OpCode_Less;
+        "OP_LESS";
+    op == OpCode_LessEqual;
+        "OP_LESS_EQUAL";
+    // binary arithmetic
+    op == OpCode_Add;
+        "OP_ADD";
+    op == OpCode_Subtract;
+        "OP_SUBTRACT";
+    op == OpCode_Multiply;
+        "OP_MULTIPLY";
+    op == OpCode_Divide;
+        "OP_DIVIDE";
+    op == OpCode_Modulo;
+        "OP_MODULO";
+    op == OpCode_Power;
+        "OP_POWER";
+    // unary operators
+    op == OpCode_Negate;
+        "OP_NEGATE";
+    op == OpCode_Increment;
+        "OP_INCREMENT";
+    op == OpCode_Decrement;
+        "OP_DECREMENT";
+    op == OpCode_Not;
+        "OP_NOT";
+    // bitwise
+    op == OpCode_BitAnd;
+        "OP_BIT_AND";
+    op == OpCode_BitOr;
+        "OP_BIT_OR";
+    op == OpCode_BitXor;
+        "OP_BIT_XOR";
+    op == OpCode_BitNot;
+        "OP_BIT_NOT";
+    op == OpCode_ShiftLeft;
+        "OP_SHIFT_LEFT";
+    op == OpCode_ShiftRight;
+        "OP_SHIFT_RIGHT";
+    op == OpCode_ShiftRightLogical;
+        "OP_SHIFT_RIGHT_LOGICAL";
+    // control flow
+    op == OpCode_Jump;
+        "OP_JUMP";
+    op == OpCode_JumpIfFalse;
+        "OP_JUMP_IF_FALSE";
+    op == OpCode_JumpIfTrue;
+        "OP_JUMP_IF_TRUE";
+    op == OpCode_JumpIfNil;
+        "OP_JUMP_IF_NIL";
+    op == OpCode_JumpIfNotNil;
+        "OP_JUMP_IF_NOT_NIL";
+    op == OpCode_Loop;
+        "OP_LOOP";
+    // calls
+    op == OpCode_Call;
+        "OP_CALL";
+    op == OpCode_Invoke;
+        "OP_INVOKE";
+    op == OpCode_TailCall;
+        "OP_TAIL_CALL";
+    op == OpCode_CallNative;
+        "OP_CALL_NATIVE";
+    // closures and returns
+    op == OpCode_Closure;
+        "OP_CLOSURE";
+    op == OpCode_CloseUpvalue;
+        "OP_CLOSE_UPVALUE";
+    op == OpCode_Return;
+        "OP_RETURN";
+    op == OpCode_ReturnNil;
+        "OP_RETURN_NIL";
+    // arrays
+    op == OpCode_NewArray;
+        "OP_NEW_ARRAY";
+    op == OpCode_ArrayPush;
+        "OP_ARRAY_PUSH";
+    op == OpCode_ArrayLength;
+        "OP_ARRAY_LENGTH";
+    op == OpCode_ArraySlice;
+        "OP_ARRAY_SLICE";
+    op == OpCode_ArrayConcat;
+        "OP_ARRAY_CONCAT";
+    // maps
+    op == OpCode_NewMap;
+        "OP_NEW_MAP";
+    op == OpCode_MapInsert;
+        "OP_MAP_INSERT";
+    op == OpCode_MapLookup;
+        "OP_MAP_LOOKUP";
+    op == OpCode_MapErase;
+        "OP_MAP_ERASE";
+    op == OpCode_MapLength;
+        "OP_MAP_LENGTH";
+    // builtins and terminators
+    op == OpCode_Concat;
+        "OP_CONCAT";
+    op == OpCode_Length;
+        "OP_LENGTH";
+    op == OpCode_TypeOf;
+        "OP_TYPE_OF";
+    op == OpCode_Print;
+        "OP_PRINT";
+    op == OpCode_Assert;
+        "OP_ASSERT";
+    op == OpCode_Import;
+        "OP_IMPORT";
+    op == OpCode_Nop;
+        "OP_NOP";
+    op == OpCode_Halt;
+        "OP_HALT";
+
+        // Unreachable for a well-formed chunk, but the chunk verifier
+        // calls this on raw bytes read straight off disk.
+        "OP_UNKNOWN";
+
+// How many operands follow the opcode byte in the serialized form. Grouped
+// rather than fully expanded because the answer only takes three values.
+
+    op == OpCode_Invoke;
+        // Constant slot for the method name plus the argument count.
+        2;
+
+    op == OpCode_Constant || op == OpCode_ConstantLong || op == OpCode_PopN;
+        1;
+
+    op == OpCode_Rotate || op == OpCode_GetLocal || op == OpCode_SetLocal;
+        1;
+
+    op == OpCode_GetGlobal || op == OpCode_SetGlobal || op == OpCode_DefineGlobal;
+        1;
+
+    op == OpCode_GetUpvalue || op == OpCode_SetUpvalue;
+        1;
+
+    op == OpCode_GetProperty || op == OpCode_SetProperty;
+        1;
+
+    op == OpCode_Jump || op == OpCode_JumpIfFalse || op == OpCode_JumpIfTrue;
+        1;
+
+    op == OpCode_JumpIfNil || op == OpCode_JumpIfNotNil || op == OpCode_Loop;
+        1;
+
+    op == OpCode_Call || op == OpCode_TailCall || op == OpCode_CallNative;
+        1;
+
+    op == OpCode_Closure || op == OpCode_NewArray || op == OpCode_NewMap;
+        1;
+
+    op == OpCode_Assert || op == OpCode_Import;
+        1;
+
+    0;
+
+    // What the operand means, for the annotated disassembly listing.
+
+    op == OpCode_Constant || op == OpCode_ConstantLong;
+        OperandKind_ConstantSlot;
+
+    op == OpCode_GetProperty || op == OpCode_SetProperty || op == OpCode_Invoke;
+        OperandKind_ConstantSlot;
+
+    op == OpCode_GetLocal || op == OpCode_SetLocal;
+        OperandKind_LocalSlot;
+
+    op == OpCode_GetUpvalue || op == OpCode_SetUpvalue;
+        OperandKind_UpvalueSlot;
+
+    op == OpCode_GetGlobal || op == OpCode_SetGlobal || op == OpCode_DefineGlobal;
+        OperandKind_GlobalSlot;
+
+    op == OpCode_Jump || op == OpCode_JumpIfFalse || op == OpCode_JumpIfTrue;
+        OperandKind_JumpTarget;
+
+    op == OpCode_JumpIfNil || op == OpCode_JumpIfNotNil || op == OpCode_Loop;
+        OperandKind_JumpTarget;
+
+    op == OpCode_Call || op == OpCode_TailCall || op == OpCode_CallNative;
+        OperandKind_ArgumentCount;
+
+    op == OpCode_PopN || op == OpCode_Rotate;
+        OperandKind_Count;
+
+    op == OpCode_NewArray || op == OpCode_NewMap;
+        OperandKind_Count;
+
+    OperandKind_None;
+
+    kind == OperandKind_ConstantSlot;
+        "const";
+    kind == OperandKind_LocalSlot;
+        "local";
+    kind == OperandKind_UpvalueSlot;
+        "upval";
+    kind == OperandKind_GlobalSlot;
+        "global";
+    kind == OperandKind_JumpTarget;
+        "->";
+    kind == OperandKind_ArgumentCount;
+        "argc";
+    kind == OperandKind_Count;
+        "n";
+
+        "";
+
+// Net effect of an instruction on the value stack depth. The verifier walks
+// the chunk with this to prove the stack never underflows.
+
+    op == OpCode_PopN;
+        -operand;
+
+    op == OpCode_Call || op == OpCode_TailCall || op == OpCode_CallNative;
+        -operand;
+
+    op == OpCode_Invoke;
+        -operand;
+
+    op == OpCode_NewArray;
+        1 - operand;
+
+    op == OpCode_NewMap;
+        1 - operand * 2;
+
+    op == OpCode_SetIndex || op == OpCode_MapInsert;
+        -2;
+
+    op == OpCode_ArraySlice;
+        -2;
+
+    is_binary_op , op;
+        -1;
+
+    is_unary_op , op;
+        0;
+
+    pushes_value , op;
+        1;
+
+    pops_value , op;
+        -1;
+
+    0;
+
+    op == OpCode_Add || op == OpCode_Subtract || op == OpCode_Multiply;
+        true;
+
+    op == OpCode_Divide || op == OpCode_Modulo || op == OpCode_Power;
+        true;
+
+    op == OpCode_Equal || op == OpCode_NotEqual;
+        true;
+
+    op == OpCode_Greater || op == OpCode_GreaterEqual;
+        true;
+
+    op == OpCode_Less || op == OpCode_LessEqual;
+        true;
+
+    op == OpCode_BitAnd || op == OpCode_BitOr || op == OpCode_BitXor;
+        true;
+
+    op == OpCode_ShiftLeft || op == OpCode_ShiftRight;
+        true;
+
+    op == OpCode_ShiftRightLogical || op == OpCode_Concat;
+        true;
+
+    op == OpCode_GetIndex || op == OpCode_ArrayConcat;
+
+    op == OpCode_Negate || op == OpCode_Not || op == OpCode_BitNot;
+        true;
+
+    op == OpCode_Increment || op == OpCode_Decrement;
+        true;
+
+    op == OpCode_Length || op == OpCode_TypeOf || op == OpCode_ArrayLength;
+        true;
+
+    op == OpCode_MapLength;
+
+    op == OpCode_Constant || op == OpCode_ConstantLong;
+        true;
+
+    op == OpCode_Nil || op == OpCode_True || op == OpCode_False;
+        true;
+
+    op == OpCode_Dup || op == OpCode_Closure || op == OpCode_Import;
+        true;
+
+    op == OpCode_GetLocal || op == OpCode_GetGlobal || op == OpCode_GetUpvalue;
+
+    op == OpCode_Pop || op == OpCode_Print || op == OpCode_Assert;
+        true;
+
+    op == OpCode_DefineGlobal || op == OpCode_SetProperty;
+        true;
+
+    op == OpCode_JumpIfFalse || op == OpCode_JumpIfTrue;
+        true;
+
+    op == OpCode_ArrayPush || op == OpCode_MapLookup || op == OpCode_MapErase;
+        true;
+
+    op == OpCode_CloseUpvalue || op == OpCode_Return;
+
+    // Render a single instruction as `0042  12 OP_GET_LOCAL   local 3`.
+
+    ins = chunk_code_at , offset;
+    text = to_string , offset;
+    text_append , "  ";
+    text_append , to_string , chunk_line_at , offset;
+    text_append , "  ";
+    text_append , opcode_name , ins_op;
+    count = opcode_operand_count , ins_op;
+    count > 0;
+        text_append , " ";
+        text_append , operand_kind_name , opcode_operand_kind , ins_op;
+        text_append , " ";
+        text_append , to_string , ins_operand;
+
+    count > 1;
+        text_append , " argc ";
+        text_append , to_string , ins_extra;
+
+    text;
+
+    println , chunk_name;
+    depth = 0;
+    i , range , 0 , chunk_size;
+        println , disassemble_instruction , chunk , i;
+        ins = chunk_code_at , i;
+        depth += stack_effect , ins_op , ins_operand;
+        depth >= 0;
+
+    println , "-- end of chunk --";
+
+// --- Heap objects --------------------------------------------------------
+
+// Interned string object. `hash` is cached because the globals table and the
+// property lookup path both key on it.
+
+        text_size;
+
+        hash = hash_of , text;
+
+// A growable value array. `items` is the only field the collector has to
+// trace, but it may be arbitrarily deep so tracing is iterative.
+
+        items_size;
+
+        index >= 0 && index < items_size;
+
+        in_bounds , index;
+        items_at , index;
+
+// Key/value pair storage for OpCode::NewMap. Keys are restricted to strings
+// and numbers by the compiler, so a linear scan is good enough in practice.
+
+        keys_size;
+
+        i , range , 0 , keys_size;
+            values_equal , keys_at , i , key;
+                i;
+
+        -1;
+
+        // A compiled function before it is captured into a closure.
+
+        chunk_name;
+
+// An upvalue is either open (pointing at a live stack slot) or closed
+// (owning its value). `location` is -1 once the upvalue has been closed.
+
+        location >= 0;
+
+        closed;
+
+        // A function plus the upvalues it captured at the point of creation.
+
+        function_arity;
+
+// A builtin implemented outside the VM. `slot` indexes the native table.
+
+// --- Call frames ---------------------------------------------------------
+
+// One activation record. `slot_base` is the index in VM::stack of local 0;
+// arguments were pushed by the caller and become the first locals.
+
+        index >= 0;
+        index < LOCALS_MAX;
+        slot_base + index;
+
+        here = ip;
+        ++ip;
+        here;
+
+        target >= 0;
+        ip = target;
+
+    // Index into VM::closures rather than a borrow, so a frame may outlive
+    // the borrow checker's view of the closure table during a collection.
+
+// --- The virtual machine -------------------------------------------------
+
+// The interpreter. One instance owns the value stack, the frame array, the
+// globals table and every heap object reachable from them.
+
+// --- Stack primitives ------------------------------------------------
+
+        stack_top < STACK_MAX;
+        stack_push_back , value;
+        ++stack_top;
+
+        stack_top > 0;
+        stack_top--;
+        value = stack_back;
+        stack_pop_back;
+        value;
+
+        i = 0;
+        i < count;
+            pop;
+            i++;
+
+            // `distance` counts from the top: peek(0) is the topmost slot.
+
+        distance < stack_top;
+        stack_at , stack_top - 1 - distance;
+
+        index >= 0;
+        index < stack_top;
+        slot = stack_at , index;
+        slot_kind = value_kind;
+        slot_boolean = value_boolean;
+        slot_number = value_number;
+        slot_object = value_object;
+
+        a = pop;
+        b = pop;
+        push , a;
+        push , b;
+
+        // Move the slot `depth` below the top up to the top.
+
+        depth <= 0;
+
+        lifted = stack_at , stack_top - 1 - depth;
+        i = stack_top - 1 - depth;
+        i < stack_top - 1;
+            store_slot , i , stack_at , i + 1;
+            i++;
+
+        store_slot , stack_top - 1 , lifted;
+
+        stack_clear;
+        stack_top = 0;
+        frame_count = 0;
+        open_upvalues_clear;
+
+        // --- Diagnostics -----------------------------------------------------
+
+        text = string;
+        text_append , "runtime error: ";
+        text_append , message;
+        text_append , " (line ";
+        text_append , to_string , line;
+        text_append , ")";
+        println , text;
+        print_backtrace;
+        had_error = true;
+
+        i = frame_count - 1;
+        i >= 0;
+            frame = frames_at , i;
+            line = string;
+            line_append , "  at frame ";
+            line_append , to_string , i;
+            line_append , " ip ";
+            line_append , to_string , frame_ip;
+            println , line;
+            --i;
+
+        value , stack;
+            print , to_display , value;
+            print , " ";
+
+        println , "";
+
+        // --- Globals ---------------------------------------------------------
+
+        key = string_of , name;
+        !globals_contains , key;
+            runtime_error , "undefined variable" , 0;
+
+        push , globals_at , key;
+
+        key = string_of , name;
+        !globals_contains , key;
+            runtime_error , "assignment to undefined variable" , 0;
+
+        globals_insert , key , peek , 0;
+
+        globals_insert , string_of , name , pop;
+
+        value_is_object;
+        strings_by_handle_at , value_object;
+
+        // --- Properties and subscripts ---------------------------------------
+
+        target = pop;
+        !target_is_object;
+            runtime_error , "only objects have properties" , 0;
+
+        push , lookup_field , target_object , string_of , name;
+
+        value = pop;
+        target = peek , 0;
+        !target_is_object;
+            runtime_error , "only objects have properties" , 0;
+
+        store_field , target_object , string_of , name , value;
+
+        handle;
+        name;
+        make_nil;
+
+        handle;
+        name;
+        value;
+
+        key = pop;
+        target = pop;
+        !target_is_object;
+            runtime_error , "value is not indexable" , 0;
+
+        container = arrays_at , target_object;
+        index = key_as_number / FIXED_SCALE;
+        !container_in_bounds , index;
+            runtime_error , "index out of range" , 0;
+
+        push , container_at , index;
+
+        value = pop;
+        key = pop;
+        target = pop;
+        container = arrays_at , target_object;
+        index = key_as_number / FIXED_SCALE;
+        !container_in_bounds , index;
+            runtime_error , "index out of range" , 0;
+
+        slot = container_at , index;
+        slot_kind = value_kind;
+        slot_number = value_number;
+        slot_object = value_object;
+        push , value;
+
+        // --- Comparison ------------------------------------------------------
+
+        b = pop;
+        a = pop;
+        same = values_equal , a , b;
+        invert;
+            push , make_bool , !same;
+
+            push , make_bool , same;
+
+        b = pop;
+        a = pop;
+        !a_is_number || !b_is_number;
+            runtime_error , "operands must be numbers" , 0;
+
+        l = a_as_number;
+        r = b_as_number;
+        op == OpCode_Greater;
+            push , make_bool , l > r;
+        op == OpCode_GreaterEqual;
+            push , make_bool , l >= r;
+        op == OpCode_Less;
+            push , make_bool , l < r;
+
+            push , make_bool , l <= r;
+
+    // --- Arithmetic ------------------------------------------------------
+
+    // All numbers are fixed-point with FIXED_SCALE fractional units, so
+    // multiplication and division need a rescale afterwards.
+
+        b = pop;
+        a = pop;
+        !a_is_number || !b_is_number;
+            runtime_error , "operands must be numbers" , 0;
+
+        l = a_as_number;
+        r = b_as_number;
+        op == OpCode_Add;
+            push , make_number , l + r;
+        op == OpCode_Subtract;
+            push , make_number , l - r;
+        op == OpCode_Multiply;
+            push , make_number , l * r / FIXED_SCALE;
+        op == OpCode_Divide;
+            push , make_number , l * FIXED_SCALE / r;
+        op == OpCode_Modulo;
+            push , make_number , l % r;
+
+            push , make_number , power , l , r / FIXED_SCALE;
+
+        result = FIXED_SCALE;
+        i = 0;
+        i < exponent;
+            result = result * base / FIXED_SCALE;
+            ++i;
+
+        result;
+
+        value = pop;
+        !value_is_number;
+            runtime_error , "operand must be a number" , 0;
+
+        push , make_number , -value_as_number;
+
+        value = pop;
+        push , make_number , value_as_number + delta;
+
+        // --- Bitwise ---------------------------------------------------------
+
+        b = pop;
+        a = pop;
+        l = a_as_number / FIXED_SCALE;
+        r = b_as_number / FIXED_SCALE;
+        op == OpCode_BitAnd;
+            push , make_number , l & r * FIXED_SCALE;
+        op == OpCode_BitOr;
+            push , make_number , l | r * FIXED_SCALE;
+        op == OpCode_BitXor;
+            push , make_number , l ^ r * FIXED_SCALE;
+        op == OpCode_ShiftLeft;
+            push , make_number , l << r * FIXED_SCALE;
+        op == OpCode_ShiftRight;
+            push , make_number , l >> r * FIXED_SCALE;
+
+            push , make_number , l >> r & OPERAND_MASK * FIXED_SCALE;
+
+        value = pop;
+        raw = value_as_number / FIXED_SCALE;
+        push , make_number , ~raw * FIXED_SCALE;
+
+        // --- Strings, arrays and maps ----------------------------------------
+
+        b = pop;
+        a = pop;
+        joined = string_of , a;
+        joined_append , string_of , b;
+        push , intern , joined;
+
+        interned_contains , text;
+            make_object , interned_at , text;
+
+        handle = allocate , ObjectKind_String , text_size;
+        interned_insert , text , handle;
+        strings_by_handle_insert , handle , text;
+        make_object , handle;
+
+        handle = allocate , ObjectKind_Array , count;
+        target = arrays_at , handle;
+        i = 0;
+        i < count;
+            target_items_push_back , peek , count - 1 - i;
+            i++;
+
+        pop_n , count;
+        push , make_object , handle;
+
+        value = pop;
+        target = arrays_at , peek , 0 , as_object;
+        target_items_push_back , value;
+
+        target = pop;
+        push , make_number , arrays_at , target_as_object_size * FIXED_SCALE;
+
+        length = pop_as_number / FIXED_SCALE;
+        begin = pop_as_number / FIXED_SCALE;
+        source = pop;
+        handle = allocate , ObjectKind_Array , length;
+        target = arrays_at , handle;
+        original = arrays_at , source_as_object;
+        i , range , begin , begin + length;
+            original_in_bounds , i;
+                target_items_push_back , original_at , i;
+
+        push , make_object , handle;
+
+        b = pop;
+        a = pop;
+        handle = allocate , ObjectKind_Array , 0;
+        target = arrays_at , handle;
+        value , arrays_at , a_as_object_items;
+            target_items_push_back , value;
+
+        value , arrays_at , b_as_object_items;
+            target_items_push_back , value;
+
+        push , make_object , handle;
+
+        handle = allocate , ObjectKind_Map , pair_count;
+        target = maps_at , handle;
+        i = 0;
+        i < pair_count;
+            target_values_push_back , pop;
+            target_keys_push_back , pop;
+            i++;
+
+        push , make_object , handle;
+
+        value = pop;
+        key = pop;
+        target = maps_at , peek , 0 , as_object;
+        existing = target_find , key;
+        existing >= 0;
+            store_slot_in , target_values , existing , value;
+
+            target_keys_push_back , key;
+            target_values_push_back , value;
+
+        slot = slots_at , index;
+        slot_kind = value_kind;
+        slot_number = value_number;
+        slot_object = value_object;
+        slot_boolean = value_boolean;
+
+        key = pop;
+        target = maps_at , pop_as_object;
+        index = target_find , key;
+        index < 0;
+            push , make_nil;
+
+            push , target_values_at , index;
+
+        key = pop;
+        target = maps_at , peek , 0 , as_object;
+        index = target_find , key;
+        index >= 0;
+            target_keys_erase , index;
+            target_values_erase , index;
+
+        target = pop;
+        push , make_number , maps_at , target_as_object_size * FIXED_SCALE;
+
+        value = peek , 0;
+        !value_is_object;
+            runtime_error , "value has no length" , 0;
+
+        kind = objects_at , value_as_object_kind;
+        kind == ObjectKind_Array;
+            array_length;
+        kind == ObjectKind_Map;
+            map_length;
+
+            text = string_of , pop;
+            push , make_number , text_size * FIXED_SCALE;
+
+        value = pop;
+        push , intern , type_name , value;
+
+        value_is_nil;
+            "nil";
+        value_is_bool;
+            "bool";
+        value_is_number;
+            "number";
+
+            object_kind_name , objects_at , value_object_kind;
+
+        value_is_nil;
+            "nil";
+
+        value_is_bool;
+            value_boolean;
+                "true";
+
+                "false";
+
+        value_is_number;
+            format_fixed , value_number;
+
+        string_of , value;
+
+        key = string_of , name;
+        modules_contains , key;
+            modules_at , key;
+
+        runtime_error , "no such module" , 0;
+        make_nil;
+
+        // A cooperative yield point so long-running loops stay interruptible.
+
+        ++steps;
+        steps % 4096 == 0;
+            interrupted;
+                runtime_error , "execution interrupted" , 0;
+
+                // --- Calls -----------------------------------------------------------
+
+        !callee_is_object;
+            runtime_error , "can only call functions" , 0;
+
+        kind = objects_at , callee_as_object_kind;
+        kind == ObjectKind_Closure;
+            call_closure , callee_as_object , argument_count , false;
+        kind == ObjectKind_Native;
+            call_native , argument_count;
+        kind == ObjectKind_BoundMethod;
+            call_closure , bound_target , callee_as_object , argument_count , false;
+
+            runtime_error , "value is not callable" , 0;
+
+        closure = closures_at , handle;
+        argument_count != closure_arity;
+            runtime_error , "wrong number of arguments" , 0;
+
+        frame_count >= FRAMES_MAX;
+            runtime_error , "stack overflow" , 0;
+
+        frame ;
+        frame_closure = handle;
+        frame_ip = 0;
+        frame_slot_base = stack_top - argument_count - 1;
+        frame_argument_count = argument_count;
+        frame_is_tail = tail;
+        frames_push_back , frame;
+        frame_count++;
+
+        callee = peek , argument_count;
+        frame = frames_at , frame_count - 1;
+        base = frame_slot_base;
+        --frame_count;
+        frames_pop_back;
+        shift_arguments , base , argument_count;
+        call_closure , callee_as_object , argument_count , true;
+
+        // Slide the pending arguments down over the frame being replaced.
+
+        i = 0;
+        i <= argument_count;
+            store_slot , base + i , stack_at , stack_top - argument_count - 1 + i;
+            i++;
+
+        stack_top = base + argument_count + 1;
+
+        receiver = peek , argument_count;
+        !receiver_is_object;
+            runtime_error , "only objects have methods" , 0;
+
+        method = lookup_field , receiver_as_object , string_of , name;
+        call_value , method , argument_count;
+
+        callee = peek , argument_count;
+        slot = natives_at , callee_as_object_slot;
+        result = dispatch_native , slot , argument_count;
+        pop_n , argument_count + 1;
+        push , result;
+
+        slot;
+        argument_count;
+        make_nil;
+
+        bound_methods_at , handle;
+
+        frame = frames_at , frame_count - 1;
+        base = frame_slot_base;
+        close_upvalues , base;
+        frame_count--;
+        frames_pop_back;
+        stack_top > base;
+            pop;
+
+        frame_count > 0;
+            push , result;
+
+            last_result = result;
+
+    // --- Upvalues --------------------------------------------------------
+
+    // Capture the stack slot at `index`, reusing an existing open upvalue if
+    // one already points there. The open list is kept sorted by slot so the
+    // scan stops early.
+
+        handle , open_upvalues;
+            upvalues_at , handle_location == index;
+                handle;
+
+        created = allocate , ObjectKind_Upvalue , 0;
+        target = upvalues_at , created;
+        target_location = index;
+        open_upvalues_push_back , created;
+        created;
+
+    // Close every open upvalue at or above `floor`, copying the live stack
+    // slot into the upvalue itself.
+
+        i = 0;
+        i < open_upvalues_size;
+            handle = open_upvalues_at , i;
+            target = upvalues_at , handle;
+            target_location >= floor;
+                target_closed = stack_at , target_location;
+                target_location = -1;
+                open_upvalues_erase , i;
+
+                ++i;
+
+        handle = closures_at , closure_upvalues_at , index;
+        target = upvalues_at , handle;
+        target_is_open;
+            stack_at , target_location;
+
+        target_closed;
+
+        handle = closures_at , closure_upvalues_at , index;
+        target = upvalues_at , handle;
+        target_is_open;
+            store_slot , target_location , value;
+
+            target_closed = value;
+
+        handle = allocate , ObjectKind_Closure , 0;
+        created = closures_at , handle;
+        created_function = functions_at , function_as_object;
+        i , range , 0 , created_function_upvalue_count;
+            descriptor = upvalue_plan_at , i;
+            descriptor_first;
+                created_upvalues_push_back , capture_upvalue , frame_slot_base + descriptor_second;
+
+                created_upvalues_push_back , closures_at , frame_closure_upvalues_at , descriptor_second;
+
+        push , make_object , handle;
+
+    // --- The interpreter loop --------------------------------------------
+
+    // Ordering in the cascade below matters for throughput: the hottest
+    // opcodes (constants, locals, arithmetic) are tested first and the cold
+    // ones (import, halt) last. There is no `switch` in the language, so
+    // this is a plain chain of equality tests whose nested `else` blocks are
+    // all closed in one run of braces at the bottom.
+
+        steps = 0;
+        had_error = false;
+
+            frame_count == 0;
+
+            frame = frames_at , frame_count - 1;
+            chunk = closures_at , frame_closure_function_chunk;
+            frame_ip >= chunk_size;
+                // Falling off the end of a chunk is an implicit `return nil`.
+                return_from , make_nil;
+
+            trace_execution;
+                print_stack;
+                println , disassemble_instruction , chunk , frame_ip;
+
+            ins = chunk_code_at , frame_ip;
+            op = ins_op;
+            frame_ip += 1;
+            bytes_allocated > next_gc;
+                collect_garbage;
+
+            // --- constants, literals and stack shuffling ---
+            op == OpCode_Constant;
+                push , chunk_constant_at , ins_operand;
+            op == OpCode_ConstantLong;
+                push , chunk_constant_at , ins_operand & OPERAND_MASK;
+            op == OpCode_Nil;
+                push , make_nil;
+            op == OpCode_True;
+                push , make_bool , true;
+            op == OpCode_False;
+                push , make_bool , false;
+            op == OpCode_Pop;
+                pop;
+            op == OpCode_PopN;
+                pop_n , ins_operand;
+            op == OpCode_Dup;
+                push , peek , 0;
+            op == OpCode_Swap;
+                swap_top;
+            op == OpCode_Rotate;
+                // Bring the n-th slot to the top, sliding the rest down.
+                rotate , ins_operand;
+            // --- variable access: locals, globals, upvalues, members ---
+            op == OpCode_GetLocal;
+                push , stack_at , frame_local , ins_operand;
+            op == OpCode_SetLocal;
+                store_slot , frame_local , ins_operand , peek , 0;
+            op == OpCode_GetGlobal;
+                load_global , chunk_constant_at , ins_operand;
+            op == OpCode_SetGlobal;
+                assign_global , chunk_constant_at , ins_operand;
+            op == OpCode_DefineGlobal;
+                define_global , chunk_constant_at , ins_operand;
+            op == OpCode_GetUpvalue;
+                push , read_upvalue , frame_closure , ins_operand;
+            op == OpCode_SetUpvalue;
+                write_upvalue , frame_closure , ins_operand , peek , 0;
+            op == OpCode_GetProperty;
+                get_property , chunk_constant_at , ins_operand;
+            op == OpCode_SetProperty;
+                set_property , chunk_constant_at , ins_operand;
+            op == OpCode_GetIndex;
+                index_get;
+            op == OpCode_SetIndex;
+                index_set;
+            // --- comparison ---
+            op == OpCode_Equal;
+                compare_equal , false;
+            op == OpCode_NotEqual;
+                compare_equal , true;
+            op == OpCode_Greater;
+                compare_order , OpCode_Greater;
+            op == OpCode_GreaterEqual;
+                compare_order , OpCode_GreaterEqual;
+            op == OpCode_Less;
+                compare_order , OpCode_Less;
+            op == OpCode_LessEqual;
+                compare_order , OpCode_LessEqual;
+            // --- arithmetic; operands are fixed-point, scaled by FIXED_SCALE ---
+            op == OpCode_Add;
+                // Add is overloaded: strings concatenate, numbers add.
+                peek , 0 , is_object && peek , 1 , is_object;
+                    concat_strings;
+
+                    arith , OpCode_Add;
+
+            op == OpCode_Subtract;
+                arith , OpCode_Subtract;
+            op == OpCode_Multiply;
+                arith , OpCode_Multiply;
+            op == OpCode_Divide;
+                peek , 0 , as_number == 0;
+                    runtime_error , "division by zero" , chunk_line_at , frame_ip;
+
+                    arith , OpCode_Divide;
+
+            op == OpCode_Modulo;
+                peek , 0 , as_number == 0;
+                    runtime_error , "modulo by zero" , chunk_line_at , frame_ip;
+
+                    arith , OpCode_Modulo;
+
+            op == OpCode_Power;
+                arith , OpCode_Power;
+            // --- unary operators ---
+            op == OpCode_Negate;
+                negate;
+            op == OpCode_Increment;
+                adjust , FIXED_SCALE;
+            op == OpCode_Decrement;
+                adjust , -FIXED_SCALE;
+            op == OpCode_Not;
+                value = pop;
+                push , make_bool , !value_is_truthy;
+            // --- bitwise; operands are truncated to whole integers first ---
+            op == OpCode_BitAnd;
+                bitwise , OpCode_BitAnd;
+            op == OpCode_BitOr;
+                bitwise , OpCode_BitOr;
+            op == OpCode_BitXor;
+                bitwise , OpCode_BitXor;
+            op == OpCode_BitNot;
+                bit_not;
+            op == OpCode_ShiftLeft;
+                bitwise , OpCode_ShiftLeft;
+            op == OpCode_ShiftRight;
+                bitwise , OpCode_ShiftRight;
+            op == OpCode_ShiftRightLogical;
+                bitwise , OpCode_ShiftRightLogical;
+            // --- control flow ---
+            op == OpCode_Jump;
+                frame_jump_to , ins_operand;
+            op == OpCode_JumpIfFalse;
+                cond = pop;
+                !cond_is_truthy;
+                    frame_jump_to , ins_operand;
+
+            op == OpCode_JumpIfTrue;
+                cond = pop;
+                cond_is_truthy;
+                    frame_jump_to , ins_operand;
+
+            op == OpCode_JumpIfNil;
+                // Peeks rather than pops: this backs the nil-coalescing lowering.
+                peek , 0 , is_nil;
+                    frame_jump_to , ins_operand;
+
+            op == OpCode_JumpIfNotNil;
+                !peek , 0 , is_nil;
+                    frame_jump_to , ins_operand;
+
+            op == OpCode_Loop;
+                // Backwards edge; the operand is an absolute index, not a delta.
+                frame_jump_to , ins_operand;
+                check_interrupt;
+            // --- calls ---
+            op == OpCode_Call;
+                call_value , peek , ins_operand , ins_operand;
+            op == OpCode_Invoke;
+                invoke , chunk_constant_at , ins_operand , ins_extra;
+            op == OpCode_TailCall;
+                // Reuses the current frame instead of pushing a new one.
+                tail_call , ins_operand;
+            op == OpCode_CallNative;
+                call_native , ins_operand;
+            // --- closures and returns ---
+            op == OpCode_Closure;
+                make_closure , chunk_constant_at , ins_operand , frame;
+            op == OpCode_CloseUpvalue;
+                close_upvalues , stack_top - 1;
+                pop;
+            op == OpCode_Return;
+                return_from , pop;
+            op == OpCode_ReturnNil;
+                return_from , make_nil;
+            // --- arrays ---
+            op == OpCode_NewArray;
+                new_array , ins_operand;
+            op == OpCode_ArrayPush;
+                array_push;
+            op == OpCode_ArrayLength;
+                array_length;
+            op == OpCode_ArraySlice;
+                array_slice;
+            op == OpCode_ArrayConcat;
+                array_concat;
+            // --- maps ---
+            op == OpCode_NewMap;
+                new_map , ins_operand;
+            op == OpCode_MapInsert;
+                map_insert;
+            op == OpCode_MapLookup;
+                map_lookup;
+            op == OpCode_MapErase;
+                map_erase;
+            op == OpCode_MapLength;
+                map_length;
+            // --- builtins, diagnostics and terminators ---
+            op == OpCode_Concat;
+                concat_strings;
+            op == OpCode_Length;
+                length_of;
+            op == OpCode_TypeOf;
+                type_of;
+            op == OpCode_Print;
+                value = pop;
+                println , to_display , value;
+            op == OpCode_Assert;
+                cond = pop;
+                !cond_is_truthy;
+                    runtime_error , "assertion failed" , ins_operand;
+
+            op == OpCode_Import;
+                push , import_module , chunk_constant_at , ins_operand;
+            op == OpCode_Nop;
+                // Alignment padding left behind by the peephole pass.
+                ins_operand;
+            op == OpCode_Halt;
+                frame_count = 0;
+
+                // An opcode this build does not know about. Serialized chunks
+                // carry a version stamp, so this only fires on corruption.
+                runtime_error , "unknown opcode" , chunk_line_at , frame_ip;
+
+            had_error;
+                reset_stack;
+                InterpretResult_RuntimeError;
+
+        InterpretResult_Ok;
+
+    // --- Allocation and the mark-sweep collector -------------------------
+
+    // Every heap object is registered here so the sweep phase can walk them
+    // all. Allocation is also the only place a collection can start, which
+    // keeps the set of live roots easy to reason about.
+
+        bytes_allocated += 32 + hint * 16;
+        bytes_allocated > next_gc;
+            collect_garbage;
+
+        header ;
+        header_kind = kind;
+        header_marked = false;
+        header_handle = objects_size;
+        objects_push_back , header;
+        header_handle;
+
+        before = bytes_allocated;
+        gray_stack_clear;
+        mark_roots;
+        trace_references;
+        sweep;
+        next_gc = bytes_allocated * GC_GROWTH_PERCENT / 100;
+        next_gc < GC_MIN_THRESHOLD;
+            next_gc = GC_MIN_THRESHOLD;
+
+        trace_gc;
+            line = string;
+            line_append , "gc: reclaimed ";
+            line_append , to_string , before - bytes_allocated;
+            line_append , " bytes";
+            println , line;
+
+    // Roots are the value stack, every live call frame, the open upvalue
+    // list, the globals table and the module cache.
+
+        value , stack;
+            mark_value , value;
+
+        frame , frames;
+            frame_closure >= 0;
+                mark_object , frame_closure;
+
+        handle , open_upvalues;
+            mark_object , handle;
+
+        entry , globals;
+            mark_value , entry_second;
+
+        entry , modules;
+            mark_value , entry_second;
+
+        mark_value , last_result;
+
+        !value_is_object;
+
+        mark_object , value_object;
+
+        handle < 0;
+
+        header = objects_at , handle;
+        header_marked;
+
+        header_marked = true;
+        gray_stack_push_back , handle;
+
+        // Tri-colour marking: gray objects still have unvisited children.
+
+        !gray_stack_empty;
+            handle = gray_stack_back;
+            gray_stack_pop_back;
+            blacken_object , handle;
+
+        kind = objects_at , handle_kind;
+        kind == ObjectKind_Array;
+            value , arrays_at , handle_items;
+                mark_value , value;
+
+        kind == ObjectKind_Map;
+            value , maps_at , handle_keys;
+                mark_value , value;
+
+            value , maps_at , handle_values;
+                mark_value , value;
+
+        kind == ObjectKind_Closure;
+            upvalue , closures_at , handle_upvalues;
+                mark_object , upvalue;
+
+            mark_chunk , closures_at , handle_function_chunk;
+        kind == ObjectKind_Upvalue;
+            mark_value , upvalues_at , handle_closed;
+        kind == ObjectKind_Function;
+            mark_chunk , functions_at , handle_chunk;
+        kind == ObjectKind_BoundMethod;
+            mark_object , bound_methods_at , handle;
+
+            // Strings and natives have no outgoing references.
+            handle;
+
+        value , chunk_constants;
+            mark_value , value;
+
+    // Unmarked objects are released; survivors are cleared for the next
+    // cycle. The object table itself is compacted lazily.
+
+        i = 0;
+        i < objects_size;
+            header = objects_at , i;
+            header_marked;
+                header_marked = false;
+                i++;
+
+                free_object , i;
+                ++i;
+
+        header = objects_at , handle;
+        bytes_allocated -= 32;
+        header_kind == ObjectKind_Array;
+            arrays_at , handle_items_clear;
+        header_kind == ObjectKind_Map;
+            maps_at , handle_keys_clear;
+            maps_at , handle_values_clear;
+        header_kind == ObjectKind_Closure;
+            closures_at , handle_upvalues_clear;
+
+            handle;
+
+        header_handle = -1;
+
+    // --- State -----------------------------------------------------------
+
+    // Parallel object tables, indexed by the handle stored in a Value.
+
+    // Capture plan for the closure currently being built: `first` is true
+    // when the upvalue comes from the enclosing frame's locals.
+
+    // --- Free helpers --------------------------------------------------------
+
+    kind == ObjectKind_String;
+        "string";
+    kind == ObjectKind_Array;
+        "array";
+    kind == ObjectKind_Map;
+        "map";
+    kind == ObjectKind_Function;
+        "function";
+    kind == ObjectKind_Closure;
+        "closure";
+    kind == ObjectKind_Upvalue;
+        "upvalue";
+    kind == ObjectKind_Native;
+        "native";
+    kind == ObjectKind_BoundMethod;
+        "method";
+    kind == ObjectKind_Instance;
+        "instance";
+
+        "class";
+
+        // Render a fixed-point number: 1500 becomes "1.500".
+
+    text = string;
+    value < 0;
+        text_append , "-";
+
+    magnitude = abs , value;
+    text_append , to_string , magnitude / FIXED_SCALE;
+    fraction = magnitude % FIXED_SCALE;
+    fraction != 0;
+        text_append , ".";
+        divisor = FIXED_SCALE / 10;
+        divisor > 0;
+            text_append , to_string , fraction / divisor % 10;
+            divisor /= 10;
+
+    text;
+
+// --- Entry point ---------------------------------------------------------
+
+// Load a top-level chunk into a fresh frame and run it to completion.
+
+    machine_reset_stack;
+    handle = machine_allocate , ObjectKind_Closure , 0;
+    entry = machine_closures_at , handle;
+    entry_function_chunk = chunk;
+    entry_function_arity = 0;
+    machine_push , make_object , handle;
+    machine_call_closure , handle , 0 , false;
+    result = machine_run;
+    result == InterpretResult_RuntimeError;
+        println , "execution aborted";
+
+    result;
+
+// Verify a chunk before running it: the stack depth must never go negative
+// and every jump target must land inside the chunk.
+
+    depth = 0;
+    i , range , 0 , chunk_size;
+        ins = chunk_code_at , i;
+        depth += stack_effect , ins_op , ins_operand;
+        depth < 0;
+            false;
+
+        ins_is_jump;
+            ins_operand < 0 || ins_operand >= chunk_size;
+                false;
+
+        opcode_operand_count , ins_op > 0;
+            opcode_operand_kind , ins_op == OperandKind_ConstantSlot;
+                ins_operand >= chunk_constants_size;
+                    false;
+
+    depth >= 0;
+    true;

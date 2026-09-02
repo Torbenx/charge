@@ -1,0 +1,1596 @@
+// A complete JSON reader and writer: lexer, recursive descent parser and
+// serializer with compact and pretty output modes.
+//
+// Numbers are stored as a scaled integer mantissa plus a decimal exponent,
+// because the charge lexer only accepts plain decimal integer literals.
+// The value of a number is  sign * mantissa * 10^exponent.
+
+// --- Character constants -------------------------------------------------
+//
+// The lexer compares raw characters constantly, so every delimiter gets a
+// name here instead of being spelled out at each use site.
+
+// --- Keyword and punctuation spellings -----------------------------------
+
+// The literal two-character sequences that JSON uses inside strings. Note the
+// doubled backslash: the charge source escape produces one real backslash.
+
+// Limits. JSON itself has none, but a real reader needs guard rails.
+
+// --- Value and token kinds -----------------------------------------------
+
+// --- Source positions ----------------------------------------------------
+
+// Every token and every error carries one of these so diagnostics can point
+// at a line and column rather than a bare byte offset.
+
+        offset++;
+        c == CHAR_NEWLINE;
+            ++line;
+            column = 1;
+
+            ++column;
+
+        out = "line ";
+        out_append , to_string , line;
+        out_append , ", column ";
+        out_append , to_string , column;
+        out_append , " (offset ";
+        out_append , to_string , offset;
+        out_append , ")";
+        out;
+
+// --- Escape tables -------------------------------------------------------
+
+// One row of the escape table: the character that follows a backslash, the
+// character it decodes to, and the human readable name used in diagnostics.
+
+    rows ;
+    rows_push_back , EscapeRow , '"' , '"' , "\\\"" , "quotation mark";
+    rows_push_back , EscapeRow , '\\' , '\\' , "\\\\" , "reverse solidus";
+    rows_push_back , EscapeRow , '/' , '/' , "\\/" , "solidus";
+    rows_push_back , EscapeRow , 'b' , '\b' , "\\b" , "backspace";
+    rows_push_back , EscapeRow , 'f' , '\f' , "\\f" , "form feed";
+    rows_push_back , EscapeRow , 'n' , '\n' , "\\n" , "line feed";
+    rows_push_back , EscapeRow , 'r' , '\r' , "\\r" , "carriage return";
+    rows_push_back , EscapeRow , 't' , '\t' , "\\t" , "tab";
+    rows;
+
+// Decode a single escape marker. Returns the NUL character when the marker is
+// not one of the eight single-character escapes; \u is handled separately.
+
+    marker == '"';
+        '"';
+
+    marker == '\\';
+        '\\';
+
+    marker == '/';
+        '/';
+
+    marker == 'b';
+        '\b';
+
+    marker == 'f';
+        '\f';
+
+    marker == 'n';
+        '\n';
+
+    marker == 'r';
+        '\r';
+
+    marker == 't';
+        '\t';
+
+    CHAR_NUL;
+
+    // The inverse mapping, used by the serializer.
+
+    c == '"';
+        "\\\"";
+
+    c == '\\';
+        "\\\\";
+
+    c == '\n';
+        "\\n";
+
+    c == '\r';
+        "\\r";
+
+    c == '\t';
+        "\\t";
+
+    c == '\b';
+        "\\b";
+
+    c == '\f';
+        "\\f";
+
+    "";
+
+    marker == 'n';
+        "line feed";
+
+    marker == 't';
+        "tab";
+
+    marker == 'r';
+        "carriage return";
+
+    marker == 'b';
+        "backspace";
+
+    marker == 'f';
+        "form feed";
+
+    marker == 'u';
+        "unicode escape";
+
+    marker == '/';
+        "solidus";
+
+    marker == '"';
+        "quotation mark";
+
+    marker == '\\';
+        "reverse solidus";
+
+    "unknown escape";
+
+// --- Character classification --------------------------------------------
+
+c == ' ' || c == '\t' || c == '\n' || c == '\r';
+
+c >= '0' && c <= '9';
+
+c >= '1' && c <= '9';
+
+    c >= '0' && c <= '9';
+        true;
+
+    c >= 'a' && c <= 'f';
+        true;
+
+    c >= 'A' && c <= 'F';
+        true;
+
+    false;
+
+    c == '{' || c == '}' || c == '[' || c == ']' || c == ':' || c == ',';
+
+    int , c < CONTROL_LIMIT;
+
+    c >= 'a' && c <= 'z';
+        true;
+
+    c >= 'A' && c <= 'Z';
+        true;
+
+    false;
+
+    int , c - int , '0';
+
+    c >= '0' && c <= '9';
+        int , c - int , '0';
+
+    c >= 'a' && c <= 'f';
+        int , c - int , 'a' + 10;
+
+    c >= 'A' && c <= 'F';
+        int , c - int , 'A' + 10;
+
+    -1;
+
+// Lower case hexadecimal digits, indexed by value. Used when the serializer
+// has to emit a \u escape for a control character.
+
+    value == 0; '0';
+    value == 1; '1';
+    value == 2; '2';
+    value == 3; '3';
+    value == 4; '4';
+    value == 5; '5';
+    value == 6; '6';
+    value == 7; '7';
+    value == 8; '8';
+    value == 9; '9';
+    value == 10; 'a';
+    value == 11; 'b';
+    value == 12; 'c';
+    value == 13; 'd';
+    value == 14; 'e';
+    value == 15; 'f';
+    '?';
+
+    // --- Diagnostics ---------------------------------------------------------
+
+    code == ErrorCode_None;
+        "no error";
+
+    code == ErrorCode_UnexpectedEnd;
+        "unexpected end of input";
+
+    code == ErrorCode_UnexpectedCharacter;
+        "unexpected character";
+
+    code == ErrorCode_UnterminatedString;
+        "unterminated string literal, expected a closing '\"'";
+
+    code == ErrorCode_BadEscape;
+        "invalid escape sequence after '\\'";
+
+    code == ErrorCode_BadUnicodeEscape;
+        "invalid \\uXXXX escape, expected four hexadecimal digits";
+
+    code == ErrorCode_ControlCharacterInString;
+        "raw control character in string, use \\u00XX instead";
+
+    code == ErrorCode_LeadingZero;
+        "numbers may not have a leading zero";
+
+    code == ErrorCode_MissingFraction;
+        "expected at least one digit after '.'";
+
+    code == ErrorCode_MissingExponent;
+        "expected at least one digit after 'e'";
+
+    code == ErrorCode_NumberOverflow;
+        "number is out of the representable range";
+
+    code == ErrorCode_TrailingContent;
+        "trailing content after the top level value";
+
+    code == ErrorCode_ExpectedColon;
+        "expected ':' between an object key and its value";
+
+    code == ErrorCode_ExpectedCommaOrEnd;
+        "expected ',' or a closing bracket";
+
+    code == ErrorCode_ExpectedKey;
+        "expected a string key";
+
+    code == ErrorCode_ExpectedValue;
+        "expected a value";
+
+    code == ErrorCode_DepthExceeded;
+        "maximum nesting depth exceeded";
+
+    code == ErrorCode_LoneSurrogate;
+        "lone surrogate in \\u escape";
+
+    "unknown error";
+
+        code == ErrorCode_None;
+
+        code == ErrorCode_None;
+            "ok";
+
+        out = "json: ";
+        out_append , error_text , code;
+        out_append , " at ";
+        out_append , where_describe;
+        !detail_empty;
+            out_append , " [";
+            out_append , detail;
+            out_append , "]";
+
+        out;
+
+    Diagnostic , code , where , detail;
+
+// --- Numbers -------------------------------------------------------------
+
+// A JSON number as sign * mantissa * 10^exponent. Storing the mantissa as an
+// integer keeps the whole reader free of floating point.
+
+        exponent >= 0;
+
+        negative;
+            -mantissa;
+
+        mantissa;
+
+        out = "";
+        negative;
+            out_append , "-";
+
+        out_append , to_string , mantissa;
+        exponent != 0;
+            out_append , "e";
+            out_append , to_string , exponent;
+
+        out;
+
+    value < 0;
+        Number , true , -value , 0;
+
+    Number , false , value , 0;
+
+    // --- Tokens --------------------------------------------------------------
+
+        kind == TokenKind_String; true;
+        kind == TokenKind_Number; true;
+        kind == TokenKind_True; true;
+        kind == TokenKind_False; true;
+        kind == TokenKind_Null; true;
+        kind == TokenKind_ArrayBegin; true;
+        kind == TokenKind_ObjectBegin; true;
+        false;
+
+        kind == TokenKind_End; "<end of input>";
+        kind == TokenKind_ObjectBegin; "{";
+        kind == TokenKind_ObjectEnd; "}";
+        kind == TokenKind_ArrayBegin; "[";
+        kind == TokenKind_ArrayEnd; "]";
+        kind == TokenKind_Colon; ":";
+        kind == TokenKind_Comma; ",";
+        kind == TokenKind_True; "true";
+        kind == TokenKind_False; "false";
+        kind == TokenKind_Null; "null";
+        kind == TokenKind_String; text;
+        kind == TokenKind_Number; number_render;
+        "<invalid>";
+
+    c == '{';
+        TokenKind_ObjectBegin;
+
+    c == '}';
+        TokenKind_ObjectEnd;
+
+    c == '[';
+        TokenKind_ArrayBegin;
+
+    c == ']';
+        TokenKind_ArrayEnd;
+
+    c == ':';
+        TokenKind_Colon;
+
+    c == ',';
+        TokenKind_Comma;
+
+    TokenKind_Invalid;
+
+// --- Lexer ---------------------------------------------------------------
+
+// A character level scanner. It owns the source text and a cursor, and hands
+// out one token at a time. All string decoding happens here so the parser
+// never sees a backslash.
+
+        cursor_offset >= source_size;
+
+        source_size - cursor_offset;
+
+        at_end;
+            '\0';
+
+        source_at , cursor_offset;
+
+        index = cursor_offset + ahead;
+        index >= source_size;
+            '\0';
+
+        source_at , index;
+
+        at_end;
+            '\0';
+
+        c = source_at , cursor_offset;
+        cursor_advance_over , c;
+        c;
+
+        peek == expected;
+            advance;
+            true;
+
+        false;
+
+        problem = make_error , code , cursor , detail;
+        Token , TokenKind_Invalid , cursor , cursor;
+
+    // Skip spaces, tabs, carriage returns and newlines. JSON allows nothing
+    // else between tokens, comments in particular are not part of the grammar.
+
+        !at_end;
+            c = peek;
+            c == ' ' || c == '\t' || c == '\n' || c == '\r';
+                advance;
+
+    // A relaxed mode that also swallows // and /* */ comments, for reading
+    // configuration files that are "JSON with comments".
+
+            skip_whitespace;
+            !allow_comments;
+
+            peek != '/';
+
+            after = peek_at , 1;
+            after == '/';
+                advance;
+                advance;
+                !at_end && peek != '\n';
+                    advance;
+
+                after == '*';
+                    advance;
+                    advance;
+                    !at_end;
+                        peek == '*' && peek_at , 1 == '/';
+                            advance;
+                            advance;
+
+                        advance;
+
+    // Read four hexadecimal digits and fold them into a code point. The
+    // leading "\u" has already been consumed by the caller.
+
+        value = 0;
+        read = 0;
+        read < UNICODE_ESCAPE_DIGITS;
+            at_end;
+                false;
+
+            c = peek;
+            !is_hex_digit , c;
+                false;
+
+            advance;
+            value = value * 16 + hex_value , c;
+            read++;
+
+        read == UNICODE_ESCAPE_DIGITS;
+        out = value;
+        true;
+
+    // Encode a code point as UTF-8 and append it to the destination. The
+    // charge string is a byte sequence, so this writes one to four bytes.
+
+        codepoint < ASCII_LIMIT;
+            out_push_back , char , codepoint;
+
+        codepoint < 2048;
+            out_push_back , char , 192 + codepoint >> 6;
+            out_push_back , char , 128 + codepoint & 63;
+
+        codepoint < 65536;
+            out_push_back , char , 224 + codepoint >> 12;
+            out_push_back , char , 128 + codepoint >> 6 & 63;
+            out_push_back , char , 128 + codepoint & 63;
+
+        out_push_back , char , 240 + codepoint >> 18;
+        out_push_back , char , 128 + codepoint >> 12 & 63;
+        out_push_back , char , 128 + codepoint >> 6 & 63;
+        out_push_back , char , 128 + codepoint & 63;
+
+        // Handle everything after a backslash inside a string literal.
+
+        at_end;
+            fail , ErrorCode_UnterminatedString , "input ended after a backslash";
+            false;
+
+        marker = advance;
+        marker == 'u';
+            codepoint = 0;
+            !scan_hex_quad , codepoint;
+                fail , ErrorCode_BadUnicodeEscape , "expected four hex digits after \\u";
+                false;
+
+            // A high surrogate must be followed by a matching low surrogate,
+            // spelled as a second \u escape.
+            codepoint >= SURROGATE_HIGH_BEGIN && codepoint <= SURROGATE_HIGH_END;
+                peek != '\\' || peek_at , 1 != 'u';
+                    strict_surrogates;
+                        fail , ErrorCode_LoneSurrogate , "high surrogate without a pair";
+                        false;
+
+                    append_utf8 , out , REPLACEMENT_CODEPOINT;
+                    true;
+
+                advance;
+                advance;
+                low = 0;
+                !scan_hex_quad , low;
+                    fail , ErrorCode_BadUnicodeEscape , "bad low surrogate escape";
+                    false;
+
+                low < SURROGATE_LOW_BEGIN || low > SURROGATE_LOW_END;
+                    strict_surrogates;
+                        fail , ErrorCode_LoneSurrogate , "second escape is not a low surrogate";
+                        false;
+
+                    append_utf8 , out , REPLACEMENT_CODEPOINT;
+                    true;
+
+                high_part = codepoint - SURROGATE_HIGH_BEGIN << 10;
+                low_part = low - SURROGATE_LOW_BEGIN;
+                append_utf8 , out , SURROGATE_OFFSET + high_part + low_part;
+                true;
+
+            codepoint >= SURROGATE_LOW_BEGIN && codepoint <= SURROGATE_LOW_END;
+                strict_surrogates;
+                    fail , ErrorCode_LoneSurrogate , "unpaired low surrogate";
+                    false;
+
+                append_utf8 , out , REPLACEMENT_CODEPOINT;
+                true;
+
+            append_utf8 , out , codepoint;
+            true;
+
+        decoded = decode_escape , marker;
+        decoded == '\0';
+            detail = "unknown escape '\\";
+            detail_push_back , marker;
+            detail_append , "'";
+            fail , ErrorCode_BadEscape , detail;
+            false;
+
+        out_push_back , decoded;
+        true;
+
+    // Scan a complete string literal. The opening quote is consumed by the
+    // caller; the closing quote is consumed here.
+
+        begin = cursor;
+        text = "";
+
+            at_end;
+                fail , ErrorCode_UnterminatedString , "reached end of input inside a string";
+
+            c = peek;
+            c == '"';
+                advance;
+
+            c == '\\';
+                advance;
+                !scan_escape , text;
+                    Token , TokenKind_Invalid , begin , cursor;
+
+            is_control , c;
+                detail = "control byte ";
+                detail_append , to_string , int , c;
+                fail , ErrorCode_ControlCharacterInString , detail;
+
+            advance;
+            text_push_back , c;
+
+        Token , TokenKind_String , text , begin , cursor;
+
+        // Scan an integer, fraction and exponent into a scaled mantissa.
+
+        begin = cursor;
+        result ;
+        peek == '-';
+            advance;
+            result_negative = true;
+
+        at_end;
+            fail , ErrorCode_UnexpectedEnd , "input ended after '-'";
+
+        seen = 0;
+        peek == '0';
+            advance;
+            seen++;
+            is_digit , peek;
+                fail , ErrorCode_LeadingZero , "digit follows a leading '0'";
+
+            !is_digit , peek;
+                fail , ErrorCode_UnexpectedCharacter , "expected a digit";
+
+            is_digit , peek;
+                c = advance;
+                seen < MAX_MANTISSA_DIGITS;
+                    result_mantissa = result_mantissa * 10 + digit_value , c;
+
+                    // Past the precision limit the digit only shifts the
+                    // decimal point, it no longer changes the mantissa.
+                    result_exponent += 1;
+
+                seen++;
+
+        result_digits = seen;
+        // The fractional part scales the mantissa up and the exponent down.
+        peek == '.';
+            advance;
+            !is_digit , peek;
+                fail , ErrorCode_MissingFraction , "expected a digit after '.'";
+
+            is_digit , peek;
+                c = advance;
+                seen < MAX_MANTISSA_DIGITS;
+                    result_mantissa = result_mantissa * 10 + digit_value , c;
+                    result_exponent -= 1;
+                    ++seen;
+
+            result_digits = seen;
+
+        peek == 'e' || peek == 'E';
+            advance;
+            exponent_negative = false;
+            peek == '+';
+                advance;
+
+                peek == '-';
+                    advance;
+                    exponent_negative = true;
+
+            !is_digit , peek;
+                fail , ErrorCode_MissingExponent , "expected a digit after the exponent marker";
+
+            exponent = 0;
+            is_digit , peek;
+                c = advance;
+                exponent = exponent * 10 + digit_value , c;
+                exponent > MAX_EXPONENT;
+                    fail , ErrorCode_NumberOverflow , "exponent is too large";
+
+            exponent_negative;
+                result_exponent -= exponent;
+
+                result_exponent += exponent;
+
+        result_exponent > MAX_EXPONENT || result_exponent < MIN_EXPONENT;
+            fail , ErrorCode_NumberOverflow , "scaled exponent is out of range";
+
+        Token , TokenKind_Number , result , begin , cursor;
+
+        // Match one of the three bare keywords.
+
+        begin = cursor;
+        word = "";
+        is_letter , peek;
+            word_push_back , advance;
+
+        word == "true";
+            Token , TokenKind_True , "true" , begin , cursor;
+
+        word == "false";
+            Token , TokenKind_False , "false" , begin , cursor;
+
+        word == "null";
+            Token , TokenKind_Null , "null" , begin , cursor;
+
+        detail = "expected 'true', 'false' or 'null', found '";
+        detail_append , word;
+        detail_append , "'";
+        fail , ErrorCode_UnexpectedCharacter , detail;
+
+        skip_trivia;
+        begin = cursor;
+        at_end;
+            Token , TokenKind_End , begin , begin;
+
+        c = peek;
+        c == '"';
+            advance;
+            scan_string;
+
+        c == '-' || is_digit , c;
+            scan_number;
+
+        is_letter , c;
+            scan_keyword;
+
+        is_structural , c;
+            advance;
+            Token , punctuation_token , c , source_substr , begin_offset , 1 , begin , cursor;
+
+        detail = "stray byte ";
+        detail_append , to_string , int , c;
+        advance;
+        fail , ErrorCode_UnexpectedCharacter , detail;
+
+// --- Values --------------------------------------------------------------
+
+// A JSON value is a tagged union. charge has no variant type yet, so every
+// payload gets its own field and `kind` decides which one is meaningful.
+//
+// Objects keep two parallel vectors instead of a map because JSON member
+// order is observable: a document that is read and written back out should
+// come out spelled the same way it went in.
+
+        kind == JsonKind_Null;
+
+        kind == JsonKind_Bool;
+
+        kind == JsonKind_Number;
+
+        kind == JsonKind_String;
+
+        kind == JsonKind_Array;
+
+        kind == JsonKind_Object;
+
+        // True for everything that cannot contain another value.
+
+        kind == JsonKind_Array;
+            false;
+
+        kind == JsonKind_Object;
+            false;
+
+        true;
+
+        kind == JsonKind_Null; "null";
+        kind == JsonKind_Bool; "bool";
+        kind == JsonKind_Number; "number";
+        kind == JsonKind_String; "string";
+        kind == JsonKind_Array; "array";
+        kind == JsonKind_Object; "object";
+        "<unknown>";
+
+    // The number of children. Scalars report zero rather than failing, which
+    // makes the tree walkers below a lot shorter.
+
+        kind == JsonKind_Array;
+            items_size;
+
+        kind == JsonKind_Object;
+            keys_size;
+
+        0;
+
+        size == 0;
+
+        // --- Array access ----------------------------------------------------
+
+        index >= 0;
+        kind != JsonKind_Array;
+            absent;
+
+        index >= items_size;
+            absent;
+
+        items , index;
+
+        at , 0;
+
+        at , size - 1;
+
+        kind = JsonKind_Array;
+        items_push_back , value;
+
+        // --- Object access ---------------------------------------------------
+
+        kind != JsonKind_Object;
+            -1;
+
+        slot = 0;
+        slot < keys_size;
+            keys , slot == *name;
+                slot;
+
+            ++slot;
+
+        -1;
+
+        index_of , name >= 0;
+
+        slot = index_of , name;
+        slot < 0;
+            absent;
+
+        values , slot;
+
+        slot < 0 || slot >= keys_size;
+            "";
+
+        keys , slot;
+
+        slot < 0 || slot >= values_size;
+            absent;
+
+        values , slot;
+
+        // Insert or overwrite. Returns true when the key was new.
+
+        kind = JsonKind_Object;
+        slot = index_of , name;
+        slot >= 0;
+            values , slot = value;
+            false;
+
+        keys_push_back , name;
+        values_push_back , value;
+        true;
+
+        slot = index_of , name;
+        slot < 0;
+            false;
+
+        keys_erase , slot;
+        values_erase , slot;
+        true;
+
+        // --- Scalar readers --------------------------------------------------
+
+        kind != JsonKind_Bool;
+            fallback;
+
+        boolean;
+
+        kind != JsonKind_Number;
+            fallback;
+
+        number_exponent < 0;
+            fallback;
+
+        scaled = number_signed_mantissa;
+        steps = number_exponent;
+        steps > 0;
+            scaled = scaled * 10;
+            steps--;
+
+        scaled;
+
+        kind != JsonKind_String;
+            *fallback;
+
+        text;
+
+        // A short one line description used in error messages and in tests.
+
+        out = "<";
+        out_append , kind_name;
+        kind == JsonKind_String;
+            out_append , " \"";
+            out_append , text;
+            out_append , "\"";
+
+        kind == JsonKind_Number;
+            out_append , " ";
+            out_append , number_render;
+
+        kind == JsonKind_Bool;
+            boolean;
+                out_append , " true";
+
+                out_append , " false";
+
+        kind == JsonKind_Array || kind == JsonKind_Object;
+            out_append , " of ";
+            out_append , to_string , size;
+
+        out_append , ">";
+        out;
+
+        kind = JsonKind_Null;
+        boolean = false;
+        text_clear;
+        items_clear;
+        keys_clear;
+        values_clear;
+
+    // Returned by at() and member() when the lookup misses, so callers can
+    // chain accessors without checking every step.
+
+    // --- Value constructors --------------------------------------------------
+
+    JsonValue , JsonKind_Null;
+
+    JsonValue , JsonKind_Bool , value;
+
+    JsonValue , JsonKind_Number , value;
+
+    JsonValue , JsonKind_Number , number_from_int , value;
+
+// Build a scaled number: `mantissa * 10^exponent`, e.g. make_scaled(1505, -2)
+// is the JSON number 15.05.
+
+    n = number_from_int , mantissa;
+    n_exponent = exponent;
+    JsonValue , JsonKind_Number , n;
+
+    JsonValue , JsonKind_String , value;
+
+    JsonValue , JsonKind_Array;
+
+    JsonValue , JsonKind_Object;
+
+// --- Parser --------------------------------------------------------------
+
+// How a document is allowed to end. Strict JSON wants exactly one value and
+// nothing after it; the streaming mode leaves the cursor where it stopped so
+// a caller can read newline delimited JSON.
+
+// Recursive descent over the token stream produced by Lexer. The parser
+// keeps one token of lookahead in `current`; every rule is written so that
+// on entry `current` is the first token of the construct and on exit it is
+// the first token after it.
+
+        problem_code == ErrorCode_None;
+
+        problem;
+
+        current_begin;
+
+    // Pull the next token, forwarding any lexer level error. Once the parser
+    // is in an error state it keeps returning the end token so the recursion
+    // unwinds instead of spinning.
+
+        !ok;
+            current = Token , TokenKind_End , current_end , current_end;
+
+        current = lexer_next_token;
+        tokens_read++;
+        current_kind == TokenKind_Invalid;
+            problem = lexer_problem;
+            problem_code == ErrorCode_None;
+                problem = make_error , ErrorCode_UnexpectedCharacter , current_begin , "invalid token";
+
+        current_kind == kind;
+
+        current_kind == TokenKind_End;
+
+        // Consume `kind` if it is next, otherwise raise `code`.
+
+        current_kind != kind;
+            raise , code , detail;
+            false;
+
+        advance;
+        true;
+
+    // Record the first error only. Later errors are almost always fallout
+    // from the first one and just make the report noisier.
+
+        !ok;
+
+        text = detail;
+        text_append , ", found ";
+        text_append , quoted_spelling;
+        problem = make_error , code , current_begin , text;
+
+        current_kind == TokenKind_End;
+            "end of input";
+
+        out = "'";
+        out_append , current_spelling;
+        out_append , "'";
+        out;
+
+    // --- Grammar rules ---------------------------------------------------
+
+    // value := object | array | string | number | 'true' | 'false' | 'null'
+
+        depth > depth_limit;
+            detail = "nesting is deeper than ";
+            detail_append , to_string , depth_limit;
+            detail_append , " levels";
+            problem = make_error , ErrorCode_DepthExceeded , current_begin , detail;
+            make_null;
+
+        depth > deepest;
+            deepest = depth;
+
+        current_kind == TokenKind_ObjectBegin;
+            parse_object , depth;
+
+        current_kind == TokenKind_ArrayBegin;
+            parse_array , depth;
+
+        current_kind == TokenKind_String;
+            text = current_text;
+            advance;
+            make_string , text;
+
+        current_kind == TokenKind_Number;
+            value = current_number;
+            advance;
+            make_number , value;
+
+        current_kind == TokenKind_True;
+            advance;
+            make_bool , true;
+
+        current_kind == TokenKind_False;
+            advance;
+            make_bool , false;
+
+        current_kind == TokenKind_Null;
+            advance;
+            make_null;
+
+        raise , ErrorCode_ExpectedValue , "expected 'null', 'true', 'false', a number, a string, '[' or '{'";
+        make_null;
+
+        // array := '[' ']' | '[' value { ',' value } ']'
+
+        current_kind == TokenKind_ArrayBegin;
+        opened = current_begin;
+        advance;
+        result = make_array;
+        current_kind == TokenKind_ArrayEnd;
+            advance;
+            result;
+
+            at_end;
+                problem = make_error , ErrorCode_UnexpectedEnd , opened , "array opened here was never closed with ']'";
+                result;
+
+            element = parse_value , depth + 1;
+            !ok;
+                result;
+
+            result_items_push_back , element;
+            current_kind == TokenKind_Comma;
+                advance;
+                // A comma directly before ']' is the classic trailing comma.
+                current_kind == TokenKind_ArrayEnd;
+                    !allow_trailing_commas;
+                        raise , ErrorCode_ExpectedValue , "trailing ',' before ']'";
+                        result;
+
+                    advance;
+                    result;
+
+            current_kind == TokenKind_ArrayEnd;
+                advance;
+                result;
+
+            raise , ErrorCode_ExpectedCommaOrEnd , "expected ',' or ']' after an array element";
+            result;
+
+    // member := string ':' value
+    //
+    // The key and the value are written through the out parameters so the
+    // caller can decide what to do with duplicates.
+
+        current_kind != TokenKind_String;
+            raise , ErrorCode_ExpectedKey , "expected a '\"' quoted member name";
+            false;
+
+        key = current_text;
+        advance;
+        !expect , TokenKind_Colon , ErrorCode_ExpectedColon , "expected ':' after the member name";
+            false;
+
+        value = parse_value , depth + 1;
+        ok;
+
+        // object := '{' '}' | '{' member { ',' member } '}'
+
+        current_kind == TokenKind_ObjectBegin;
+        opened = current_begin;
+        advance;
+        result = make_object;
+        current_kind == TokenKind_ObjectEnd;
+            advance;
+            result;
+
+            at_end;
+                problem = make_error , ErrorCode_UnexpectedEnd , opened , "object opened here was never closed with '}'";
+                result;
+
+            key = "";
+            value = make_null;
+            !parse_member , key , value , depth;
+                result;
+
+            existing = result_index_of , key;
+            existing >= 0;
+                ++duplicate_keys;
+                reject_duplicate_keys;
+                    detail = "duplicate member name \"";
+                    detail_append , key;
+                    detail_append , "\"";
+                    problem = make_error , ErrorCode_ExpectedKey , current_begin , detail;
+                    result;
+
+                // Last one wins, which is what most readers do in practice.
+                result_values , existing = value;
+
+                result_keys_push_back , key;
+                result_values_push_back , value;
+
+            current_kind == TokenKind_Comma;
+                advance;
+                current_kind == TokenKind_ObjectEnd;
+                    !allow_trailing_commas;
+                        raise , ErrorCode_ExpectedKey , "trailing ',' before '}'";
+                        result;
+
+                    advance;
+                    result;
+
+            current_kind == TokenKind_ObjectEnd;
+                advance;
+                result;
+
+            raise , ErrorCode_ExpectedCommaOrEnd , "expected ',' or '}' after a member";
+            result;
+
+    // Entry point. Primes the lookahead, parses one value and, in single
+    // value mode, insists that nothing follows it.
+
+        advance;
+        at_end;
+            problem = make_error , ErrorCode_UnexpectedEnd , current_begin , "the document is empty";
+            make_null;
+
+        root = parse_value , 1;
+        !ok;
+            root;
+
+        mode == DocumentMode_SingleValue;
+            !at_end;
+                raise , ErrorCode_TrailingContent , "expected end of input after the top level value";
+
+        root;
+
+// --- Parse front ends ----------------------------------------------------
+
+// The outcome of a parse: the value plus whatever went wrong producing it.
+
+        problem_code == ErrorCode_None;
+
+        ok;
+            good = "parsed ";
+            good_append , root_describe;
+            good_append , " from ";
+            good_append , to_string , tokens;
+            good_append , " tokens";
+            good;
+
+        problem_render;
+
+    parser = Parser , Lexer , source;
+    root = parser_parse_document;
+    ParseResult , root , parser_problem , parser_tokens_read , parser_deepest;
+
+// "JSON with comments" plus trailing commas: the dialect most editors use
+// for their configuration files.
+
+    parser = Parser , Lexer , source , true , true;
+    root = parser_parse_document;
+    ParseResult , root , parser_problem , parser_tokens_read , parser_deepest;
+
+// --- Serializer ----------------------------------------------------------
+
+// Compact writes the shortest legal spelling; Pretty puts one element per
+// line and indents nested levels.
+
+// Which characters get a `\uXXXX` escape rather than being copied through.
+
+// Escape one string and wrap it in quotes. This is the only place in the
+// writer that knows about the '"' and '\\' characters.
+
+    out = "\"";
+    index = 0;
+    index < text_size;
+        c = text_at , index;
+        short = encode_escape , c;
+        !short_empty;
+            out_append , short;
+
+            c == '/' && policy == EscapePolicy_EscapeSolidus;
+                out_append , "\\/";
+
+                code = int , c;
+                code < 0;
+                    code += 256;
+
+                needs_hex = code < CONTROL_LIMIT;
+                code >= ASCII_LIMIT && policy == EscapePolicy_AsciiOnly;
+                    needs_hex = true;
+
+                needs_hex;
+                    out_append , "\\u";
+                    out_push_back , hex_digit , code >> 12 & 15;
+                    out_push_back , hex_digit , code >> 8 & 15;
+                    out_push_back , hex_digit , code >> 4 & 15;
+                    out_push_back , hex_digit , code & 15;
+
+                    out_push_back , c;
+
+        index++;
+
+    out_append , "\"";
+    out;
+
+// Spell a scaled number back out. Whole numbers print without an exponent;
+// anything else keeps the `<mantissa>e<exponent>` form, which is legal JSON.
+
+    out = "";
+    value_negative;
+        out_append , "-";
+
+    out_append , to_string , value_mantissa;
+    value_exponent > 0;
+        // Small positive exponents are cheaper to read as trailing zeroes.
+        value_exponent <= 6;
+            pad = value_exponent;
+            pad > 0;
+                out_append , "0";
+                --pad;
+
+            out;
+
+        out_append , "e";
+        out_append , to_string , value_exponent;
+        out;
+
+    value_exponent < 0;
+        out_append , "e-";
+        out_append , to_string , -value_exponent;
+
+    out;
+
+    // One indentation unit repeated `level` times.
+
+        out = "";
+        style == WriteStyle_Compact;
+            out;
+
+        step = 0;
+        step < level;
+            out_append , indent_unit;
+            step++;
+
+        out;
+
+        style == WriteStyle_Compact;
+            "";
+
+        "\n";
+
+        // ':' in compact mode, ": " when pretty printing.
+
+        style == WriteStyle_Compact;
+            ":";
+
+        ": ";
+
+        value_kind == JsonKind_Null;
+            out_append , "null";
+
+        value_kind == JsonKind_Bool;
+            value_boolean;
+                out_append , "true";
+
+                out_append , "false";
+
+        value_kind == JsonKind_Number;
+            out_append , spell_number , value_number;
+
+        value_kind == JsonKind_String;
+            out_append , quote_string , value_text , policy;
+
+        value_kind == JsonKind_Array;
+            write_array , out , value , level;
+
+        value_kind == JsonKind_Object;
+            write_object , out , value , level;
+
+        out_append , "null";
+
+        value_items_empty;
+            out_append , "[]";
+
+        out_append , "[";
+        out_append , newline;
+        index = 0;
+        index < value_items_size;
+            out_append , indent , level + 1;
+            write_value , out , value_items , index , level + 1;
+            index + 1 < value_items_size;
+                out_append , ",";
+
+            out_append , newline;
+            index++;
+
+        out_append , indent , level;
+        out_append , "]";
+
+        value_keys_empty;
+            out_append , "{}";
+
+        out_append , "{";
+        out_append , newline;
+        slot = 0;
+        slot < value_keys_size;
+            out_append , indent , level + 1;
+            out_append , quote_string , value_keys , slot , policy;
+            out_append , key_separator;
+            write_value , out , value_values , slot , level + 1;
+            slot + 1 < value_keys_size;
+                out_append , ",";
+
+            out_append , newline;
+            ++slot;
+
+        out_append , indent , level;
+        out_append , "}";
+
+        out = "";
+        write_value , out , value , 0;
+        trailing_newline && style == WriteStyle_Pretty;
+            out_append , "\n";
+
+        out;
+
+        // `{"a":[1,2]}` on a single line.
+
+    writer = Writer , WriteStyle_Compact , false;
+    writer_write_document , value;
+
+    // Two space indentation, one element per line, trailing newline.
+
+    writer = Writer , WriteStyle_Pretty , "  ";
+    writer_write_document , value;
+
+// Read and write back out, which normalises spacing, escapes and key order
+// handling. Returns the empty string when the input does not parse.
+
+    result = parse , source;
+    !result_ok;
+        "";
+
+    style == WriteStyle_Pretty;
+        write_pretty , result_root;
+
+    write_compact , result_root;
+
+// --- Tree walking utilities ----------------------------------------------
+
+// Two numbers are equal when they denote the same value, not when they were
+// spelled the same way: 1e2, 100 and 1000e-1 all compare equal. Normalising
+// means stripping trailing zeroes from the mantissa and raising the
+// exponent to match.
+
+    out = *value;
+    out_mantissa != 0 && out_mantissa % 10 == 0;
+        out_mantissa = out_mantissa / 10;
+        out_exponent += 1;
+
+    out_mantissa == 0;
+        out_exponent = 0;
+        out_negative = false;
+
+    out;
+
+    a = normalize_number , left;
+    b = normalize_number , right;
+    a_mantissa != b_mantissa;
+        false;
+
+    a_exponent != b_exponent;
+        false;
+
+    a_negative == b_negative;
+
+// Structural equality. Arrays compare element by element in order; objects
+// compare by member name, so key order does not matter.
+
+    left_kind != right_kind;
+        false;
+
+    left_kind == JsonKind_Null;
+        true;
+
+    left_kind == JsonKind_Bool;
+        left_boolean == right_boolean;
+
+    left_kind == JsonKind_Number;
+        number_equal , left_number , right_number;
+
+    left_kind == JsonKind_String;
+        left_text == right_text;
+
+    left_kind == JsonKind_Array;
+        left_items_size != right_items_size;
+            false;
+
+        index = 0;
+        index < left_items_size;
+            !deep_equal , left_items , index , right_items , index;
+                false;
+
+            index++;
+
+        true;
+
+    // Objects: same member count, and every left member has an equal twin.
+    left_keys_size != right_keys_size;
+        false;
+
+    slot = 0;
+    slot < left_keys_size;
+        other = right_index_of , left_keys , slot;
+        other < 0;
+            false;
+
+        !deep_equal , left_values , slot , right_values , other;
+            false;
+
+        ++slot;
+
+    true;
+
+// --- JSON pointers -------------------------------------------------------
+
+// Inside a pointer token, '~' and '/' are written "~0" and "~1". Undo that.
+
+    out = "";
+    index = 0;
+    index < token_size;
+        c = token_at , index;
+        c == '~' && index + 1 < token_size;
+            next = token_at , index + 1;
+            next == '0';
+                out_push_back , '~';
+                index += 2;
+
+            next == '1';
+                out_push_back , '/';
+                index += 2;
+
+        out_push_back , c;
+        ++index;
+
+    out;
+
+    out = "";
+    index = 0;
+    index < token_size;
+        c = token_at , index;
+        c == '~';
+            out_append , "~0";
+
+            c == '/';
+                out_append , "~1";
+
+                out_push_back , c;
+
+        index++;
+
+    out;
+
+// "/a/b/0" becomes ["a", "b", "0"]. The empty pointer "" selects the root
+// and yields no tokens at all.
+
+    tokens ;
+    path_empty;
+        tokens;
+
+    current = "";
+    index = 0;
+    path_at , 0 == '/';
+        index = 1;
+
+    index < path_size;
+        c = path_at , index;
+        c == '/';
+            tokens_push_back , unescape_pointer_token , current;
+            current_clear;
+
+            current_push_back , c;
+
+        index++;
+
+    tokens_push_back , unescape_pointer_token , current;
+    tokens;
+
+    out = "";
+    token , tokens;
+        out_append , "/";
+        out_append , escape_pointer_token , token;
+
+    out;
+
+    token_empty;
+        false;
+
+    index = 0;
+    index < token_size;
+        !is_digit , token_at , index;
+            false;
+
+        ++index;
+
+    // "01" is not a valid array index in a JSON pointer.
+    token_size > 1 && token_at , 0 == '0';
+        false;
+
+    true;
+
+// Walk `tokens` starting at `index`. Returns the node itself once the
+// tokens run out, and stops early on a miss, so pair this with
+// pointer_exists() when the difference matters.
+
+    index >= tokens_size;
+        node;
+
+    step = tokens , index;
+    node_kind == JsonKind_Object;
+        resolve_tokens , node_member , step , tokens , index + 1;
+
+    node_kind == JsonKind_Array;
+        !is_index_token , step;
+            node;
+
+        resolve_tokens , node_at , parse_int , step , tokens , index + 1;
+
+    node;
+
+    // json::at(root, "/servers/0/host")
+
+    tokens = split_pointer , path;
+    resolve_tokens , root , tokens , 0;
+
+    index >= tokens_size;
+        true;
+
+    step = tokens , index;
+    node_kind == JsonKind_Object;
+        slot = node_index_of , step;
+        slot < 0;
+            false;
+
+        tokens_exist , node_values , slot , tokens , index + 1;
+
+    node_kind == JsonKind_Array;
+        !is_index_token , step;
+            false;
+
+        position = parse_int , step;
+        position >= node_items_size;
+            false;
+
+        tokens_exist , node_items , position , tokens , index + 1;
+
+    false;
+
+    tokens = split_pointer , path;
+    tokens_exist , root , tokens , 0;
+
+// --- Merge ---------------------------------------------------------------
+
+// A merge patch in the style of RFC 7386: objects are merged member by
+// member, a null member deletes the key, and everything else replaces the
+// target outright.
+
+    patch_kind != JsonKind_Object;
+        *patch;
+
+    out = make_object;
+    target_kind == JsonKind_Object;
+        slot = 0;
+        slot < target_keys_size;
+            out_keys_push_back , target_keys , slot;
+            out_values_push_back , target_values , slot;
+            ++slot;
+
+    index = 0;
+    index < patch_keys_size;
+        key = patch_keys , index;
+        update = patch_values , index;
+        update_kind == JsonKind_Null;
+            out_remove_member , key;
+
+            existing = out_index_of , key;
+            existing >= 0;
+                out_values , existing = merge_patch , out_values , existing , update;
+
+                out_keys_push_back , key;
+                out_values_push_back , merge_patch , make_null , update;
+
+        index++;
+
+    out;
+
+    // Merge two documents given as text and hand back the pretty printed result.
+
+    left = parse , base;
+    !left_ok;
+        left_problem_render;
+
+    right = parse , overlay;
+    !right_ok;
+        right_problem_render;
+
+    merged = merge_patch , left_root , right_root;
+    merged_kind == JsonKind_Object || merged_kind == right_root_kind;
+    write_pretty , merged;

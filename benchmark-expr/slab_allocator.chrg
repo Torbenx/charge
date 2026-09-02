@@ -1,0 +1,759 @@
+// Slab and free-list memory allocator.
+//
+// The allocator is organised in three layers:
+//
+//   * an Arena owns a run of pages and hands out raw, page-aligned extents,
+//   * a Slab carves one extent into equally sized blocks tracked by a bitmap,
+//   * a FreeList recycles individual blocks and coalesces adjacent neighbours.
+//
+// Every hot path is written against explicit reference categories so that the
+// borrow checker can see exactly which layer owns which byte range at any
+// point in time.
+
+// --- Tuning constants ----------------------------------------------------
+
+// 0xFFF
+
+// 0x3F
+// every bit set
+
+// Fixed-point scale for every ratio in this file. A value of 1000 means
+// "1.000", a value of 875 means "0.875". No floating point is used anywhere.
+
+// A slab is evicted once its occupancy drops below this permille value and
+// the owning cache already holds more than EVICT_KEEP_SLABS partial slabs.
+
+// Poison patterns written over freed payloads when debug fill is enabled.
+            // 0xDD
+            // 0xCD
+            // 0xDEADBEEF
+
+// --- Enumerations --------------------------------------------------------
+
+// --- Alignment helpers ---------------------------------------------------
+
+// Round `value` up to the next multiple of `alignment`. The alignment is
+// assumed to be a power of two; callers go through `normalize_alignment`.
+
+    alignment > 0;
+    mask = alignment - 1;
+    value + mask & ~mask;
+
+    alignment > 0;
+    mask = alignment - 1;
+    value & ~mask;
+
+    mask = alignment - 1;
+    value & mask == 0;
+
+alignment - 1;
+
+    value <= 0;
+        false;
+
+    value & value - 1 == 0;
+
+    // Smallest power of two that is greater than or equal to `value`.
+
+    result = 1;
+    result < value;
+        result <<= 1;
+
+    result;
+
+    requested < MIN_ALIGNMENT;
+        MIN_ALIGNMENT;
+
+    requested > MAX_ALIGNMENT;
+        MAX_ALIGNMENT;
+
+    is_power_of_two , requested;
+        requested;
+
+    next_power_of_two , requested;
+
+offset >> PAGE_SHIFT;
+
+    offset & ~PAGE_MASK;
+
+    bytes + PAGE_MASK >> PAGE_SHIFT;
+
+    // Fixed-point ratio helper: returns `part / whole` scaled by PERMILLE.
+
+    whole <= 0;
+        0;
+
+    part * PERMILLE / whole;
+
+bit >> WORD_SHIFT;
+
+bit & WORD_MASK;
+
+// Population count over a single machine word, using the classic shift and
+// mask reduction rather than an intrinsic.
+
+    value = word;
+    count = 0;
+    value != 0;
+        value &= value - 1;
+        count++;
+
+    count;
+
+    word == 0;
+        WORD_BITS;
+
+    value = word;
+    count = 0;
+    value & 1 == 0;
+        value >>= 1;
+        ++count;
+
+    count;
+
+// --- Size classes --------------------------------------------------------
+
+// One row of the size-class table. `stride` is the distance between two
+// consecutive block starts and already accounts for the header guard, while
+// `payload` is what the caller actually gets to use.
+
+        stride;
+
+        payload;
+
+        stride - payload;
+
+        permille_of , waste_per_block , stride;
+
+        align_up , stride * blocks_per_slab , PAGE_SIZE;
+
+        pages_for , stride * blocks_per_slab;
+
+        bytes > payload;
+            false;
+
+        alignment <= alignment;
+
+        text = to_string , index;
+        text_append , ": ";
+        text_append , to_string , payload;
+        text_append , " bytes, stride ";
+        text_append , to_string , stride;
+        text;
+
+// The size-class table is immutable once built; every lookup therefore takes
+// `&const shared` and returns a `&const` borrow tied to the table itself.
+
+        classes_size;
+
+        classes_empty;
+            0;
+
+        classes_back_payload;
+
+    // Borrow a row out of the table. The returned reference lives exactly as
+    // long as the table it came from.
+
+        index >= 0;
+        index < classes_size;
+        classes , index;
+
+    // Linear scan over a table that is deliberately kept short; the branchy
+    // version below beats a binary search for the tiny classes.
+
+        bytes <= 0;
+            INVALID_INDEX;
+
+        bytes > MAX_SMALL_SIZE;
+            INVALID_INDEX;
+
+        index = 0;
+        index < classes_size;
+            candidate = classes , index;
+            candidate_accepts , bytes , alignment;
+                index;
+
+            ++index;
+
+        INVALID_INDEX;
+
+    // Pick the row directly, returning a borrow rather than an index. Callers
+    // that already hold the table alive prefer this form.
+
+        index = class_for , bytes , MIN_ALIGNMENT;
+        index == INVALID_INDEX;
+            index = classes_size - 1;
+
+        classes , index;
+
+        classes_clear;
+        payload = MIN_BLOCK_SIZE;
+        index = 0;
+        payload <= MAX_SMALL_SIZE;
+            row = SizeClass;
+            row_index = index;
+            row_payload = payload;
+            row_stride = align_up , payload + 8 , MIN_ALIGNMENT;
+            row_alignment = alignment_for , payload;
+            row_blocks_per_slab = blocks_for , row_stride;
+            row_kind = kind_for , payload;
+            classes_push_back , row;
+            index++;
+            payload = next_payload , payload;
+
+        classes_size == index;
+
+        payload < 128;
+            payload + 16;
+
+        payload < 512;
+            payload + 64;
+
+        payload * 2;
+
+        payload <= 32;
+            8;
+
+        payload <= 256;
+            16;
+
+        64;
+
+        payload <= 64;
+            ClassKind_Tiny;
+
+        payload <= 512;
+            ClassKind_Small;
+
+        payload <= MAX_SMALL_SIZE;
+            ClassKind_Medium;
+
+        ClassKind_Large;
+
+        blocks = SLAB_TARGET_BLOCKS;
+        stride * blocks < PAGE_SIZE;
+            blocks = PAGE_SIZE / stride;
+
+        blocks < SLAB_MIN_BLOCKS;
+            blocks = SLAB_MIN_BLOCKS;
+
+        blocks > SLAB_MAX_BLOCKS;
+            blocks = SLAB_MAX_BLOCKS;
+
+        blocks;
+
+        sum = 0;
+        row , classes;
+            sum += row_stride;
+
+        sum;
+
+// --- Free bitmap ---------------------------------------------------------
+
+// Dense bit vector: a set bit means "block in use". The inverse convention
+// would make `find_first_free` cheaper but makes the occupancy statistics
+// read backwards, and those are consulted far more often in practice.
+
+        bits;
+
+        words_size;
+
+        bits = bits;
+        words_clear;
+        words_resize , word_index , bits + WORD_MASK;
+        word , words;
+            *word = 0;
+
+        set_bits = 0;
+        set_bits == 0;
+
+        bit >= 0;
+        bit < bits;
+        word = words , word_index , bit;
+        word >> bit_within_word , bit & 1 == 1;
+
+        bit < bits;
+        slot = words , word_index , bit;
+        before = *slot;
+        *slot = before | 1 << bit_within_word , bit;
+        *slot != before;
+            set_bits++;
+
+        set_bits <= bits;
+
+        bit < bits;
+        slot = words , word_index , bit;
+        before = *slot;
+        *slot = before & ~1 << bit_within_word , bit;
+        *slot != before;
+            set_bits--;
+
+        set_bits >= 0;
+
+    // Returns the index of the first zero bit, or INVALID_INDEX when the
+    // bitmap is saturated.
+
+        index = 0;
+        index < words_size;
+            word = words , index;
+            word != ALL_ONES;
+                bit = trailing_zeros , ~word;
+                absolute = index << WORD_SHIFT + bit;
+                absolute < bits;
+                    absolute;
+
+            ++index;
+
+        INVALID_INDEX;
+
+    // Scan for a run of `length` consecutive free bits. Used by the medium
+    // classes, where a single request can span several blocks.
+
+        start = 0;
+        run = 0;
+        index = 0;
+        index < bits;
+            test , index;
+                run = 0;
+                start = index + 1;
+
+                ++run;
+                run >= length;
+                    start;
+
+            index++;
+
+        INVALID_INDEX;
+
+        index = start;
+        index < start + length;
+            mark , index;
+            index++;
+
+        index = start;
+        index < start + length;
+            unmark , index;
+            ++index;
+
+        total = 0;
+        word , words;
+            total += popcount_word , *word;
+
+        total;
+
+        bits - set_bits;
+
+        set_bits >= bits;
+
+        set_bits == 0;
+
+    // Cheap self-check used by the debug validation pass: the cached counter
+    // and the real population count must agree.
+
+        popcount == set_bits;
+
+        target_reset , bits;
+        index = 0;
+        index < bits;
+            test , index;
+                target_mark , index;
+
+            index++;
+
+// --- Blocks and the recycled free list -----------------------------------
+
+// A single tracked extent inside an arena. Blocks form an implicit doubly
+// linked list ordered by offset so that `coalesce` can merge neighbours in
+// constant time.
+
+        offset + size;
+
+        address < offset;
+            false;
+
+        address < end_offset;
+
+        end_offset == other_offset;
+            true;
+
+        other_end_offset == offset;
+
+        state == BlockState_Free;
+
+        guard == GUARD_MAGIC;
+
+        guard = GUARD_MAGIC;
+
+        adjacent_to , other;
+        other_offset < offset;
+            offset = other_offset;
+
+        size += other_size;
+        next = other_next;
+
+// Recycled blocks live here between a `deallocate` and the next matching
+// `allocate`. The list is kept sorted by offset, which is what makes the
+// adjacent-neighbour coalescing pass a single linear sweep.
+
+        nodes_size;
+
+        nodes_empty;
+
+        sum = 0;
+        node , nodes;
+            sum += node_size;
+
+        sum;
+
+        best = 0;
+        node , nodes;
+            node_size > best;
+                best = node_size;
+
+        best;
+
+    // Borrow the node at `index`. The borrow keeps the whole list pinned
+    // because the backing vector may reallocate on the next push.
+
+        index >= 0;
+        index < nodes_size;
+        nodes , index;
+
+        // Mutable variant: exclusive access to one node, still tied to the list.
+
+        index < nodes_size;
+        nodes , index;
+
+    // The head is the lowest-addressed free block, so it is the one the
+    // bump path prefers.
+
+        nodes_empty == false;
+        nodes_front;
+
+        nodes_empty == false;
+        nodes_back;
+
+        index = 0;
+        index < nodes_size;
+            node = nodes , index;
+            node_offset > offset;
+                index;
+
+            ++index;
+
+        nodes_size;
+
+        at = insertion_point , block_offset;
+        nodes_insert , at , block;
+        bytes += block_size;
+        bytes >= 0;
+
+        bytes += block_size;
+        nodes_push_back , block;
+
+        nodes_empty == false;
+        result = nodes_front;
+        bytes -= result_size;
+        nodes_erase , 0;
+        move , result;
+
+        index < nodes_size;
+        result = nodes , index;
+        bytes -= result_size;
+        nodes_erase , index;
+        move , result;
+
+    // First-fit search. Returns an index rather than a borrow so that the
+    // caller stays free to mutate the list immediately afterwards.
+
+        index = 0;
+        index < nodes_size;
+            node = nodes , index;
+            node_is_free;
+                aligned = align_up , node_offset , alignment;
+                overhead = aligned - node_offset;
+                node_size >= bytes + overhead;
+                    index;
+
+            index++;
+
+        INVALID_INDEX;
+
+        // Best-fit search: smallest block that still satisfies the request.
+
+        best = INVALID_INDEX;
+        best_size = 0;
+        index = 0;
+        index < nodes_size;
+            node = nodes , index;
+            node_is_free && node_size >= bytes;
+                best == INVALID_INDEX || node_size < best_size;
+                    best = index;
+                    best_size = node_size;
+
+            index++;
+
+        best;
+
+    // Split `index` into an allocated prefix of `bytes` and a free remainder.
+    // The remainder is only kept when it is large enough to ever be handed
+    // out again; otherwise the slack is charged to the allocation.
+
+        node = remove_at , index;
+        leftover = node_size - bytes;
+        leftover >= MIN_BLOCK_SIZE;
+            remainder = Block;
+            remainder_offset = node_offset + bytes;
+            remainder_size = leftover;
+            remainder_state = BlockState_Free;
+            remainder_slab_index = node_slab_index;
+            remainder_class_index = node_class_index;
+            remainder_stamp_guard;
+            node_size = bytes;
+            push_sorted , remainder;
+
+        node_state = BlockState_Allocated;
+        move , node;
+
+    // Single linear sweep merging every pair of touching free blocks. The
+    // list is sorted, so one pass is enough; the returned count feeds the
+    // fragmentation statistics.
+
+        nodes_size < 2;
+            0;
+
+        merged = 0;
+        index = 0;
+        index + 1 < nodes_size;
+            left = nodes , index;
+            right = nodes , index + 1;
+            can_merge = left_is_free && right_is_free;
+            can_merge;
+                can_merge = left_end_offset == right_offset;
+
+            can_merge;
+                can_merge = left_slab_index == right_slab_index;
+
+            can_merge;
+                absorbed = remove_at , index + 1;
+                target = nodes , index;
+                target_size += absorbed_size;
+                target_next = absorbed_next;
+                bytes += absorbed_size;
+                absorbed;
+                ++merged;
+
+                index++;
+
+        merge_events += merged;
+        merge_events >= merged;
+        merged;
+
+        // Drop every node that belongs to a slab which is going away.
+
+        removed = 0;
+        index = 0;
+        index < nodes_size;
+            node = nodes , index;
+            node_slab_index == slab_index;
+                dead = remove_at , index;
+                dead;
+                ++removed;
+
+                ++index;
+
+        removed;
+
+        node = nodes , index;
+        node_state = BlockState_Quarantined;
+        quarantined++;
+
+        released = 0;
+        node , nodes;
+            node_state == BlockState_Quarantined;
+                node_state = BlockState_Free;
+                released++;
+
+        quarantined -= released;
+        quarantined >= 0;
+        released;
+
+        nodes_clear;
+        bytes = 0;
+        quarantined = 0;
+
+// --- Slabs ---------------------------------------------------------------
+
+// One slab owns a contiguous run of blocks of a single size class. The
+// bitmap is the authority on which blocks are live; the free list only ever
+// holds blocks that were handed back out of order.
+
+        blocks;
+
+        blocks - used;
+
+        used;
+
+        used == 0;
+
+        used >= blocks;
+
+        base_offset;
+
+        base_offset + blocks * stride;
+
+        offset < base_offset;
+            false;
+
+        offset < limit;
+
+        owns , offset;
+        offset - base_offset / stride;
+
+        index >= 0;
+        index < blocks;
+        base_offset + index * stride;
+
+        permille_of , used , blocks;
+
+        used * payload;
+
+        blocks * stride;
+
+        used * stride - payload;
+
+    // Borrow the bitmap for reading. Statistics code walks it without ever
+    // needing write access.
+
+        bitmap;
+
+        // Exclusive borrow used by the allocation fast path.
+
+        bitmap;
+
+        local_free;
+
+        base_offset = align_up , base , row_alignment;
+        stride = row_stride;
+        payload = row_payload;
+        alignment = row_alignment;
+        class_index = row_index;
+        slab_index = index;
+        blocks = row_blocks_per_slab;
+        used = 0;
+        state = SlabState_Fresh;
+        bitmap_reset , blocks;
+        local_free_clear;
+        is_aligned , base_offset , alignment;
+        used <= blocks;
+
+    // Fast path: take the lowest free bit. Returns the byte offset, or
+    // INVALID_INDEX when the slab is saturated.
+
+        is_full;
+            INVALID_INDEX;
+
+        local_free_empty == false;
+            recycled_block = local_free_pop_front;
+            offset = recycled_block_offset;
+            index = block_index_of , offset;
+            bitmap_mark , index;
+            ++used;
+            ++hits;
+            recycled_block;
+            offset;
+
+        index = bitmap_find_first_free;
+        index == INVALID_INDEX;
+            state = SlabState_Full;
+            INVALID_INDEX;
+
+        bitmap_mark , index;
+        used++;
+        misses++;
+        is_full;
+            state = SlabState_Full;
+
+            state = SlabState_Partial;
+
+        used <= blocks;
+        offset_of_block , index;
+
+        // Multi-block reservation for the medium classes.
+
+        free_count < count;
+            INVALID_INDEX;
+
+        start = bitmap_find_free_run , count;
+        start == INVALID_INDEX;
+            INVALID_INDEX;
+
+        bitmap_mark_run , start , count;
+        used += count;
+        used <= blocks;
+        offset_of_block , start;
+
+        owns , offset;
+        index = block_index_of , offset;
+        bitmap_test , index == false;
+            panic , "double free detected in slab";
+
+        bitmap_unmark , index;
+        used--;
+        used == 0;
+            state = SlabState_Fresh;
+
+            state = SlabState_Partial;
+
+        used >= 0;
+
+    // Hand the block back through the local free list instead of clearing
+    // the bit immediately. Keeps recently freed blocks hot in cache.
+
+        owns , offset;
+        node = Block;
+        node_offset = offset;
+        node_size = stride;
+        node_state = BlockState_Free;
+        node_slab_index = slab_index;
+        node_class_index = class_index;
+        node_stamp_guard;
+        bitmap_unmark , block_index_of , offset;
+        used--;
+        local_free_push_sorted , node;
+        used >= 0;
+
+        start = block_index_of , offset;
+        bitmap_unmark_run , start , count;
+        used -= count;
+        used >= 0;
+
+        merged = local_free_coalesce;
+        local_free_clear;
+        merged;
+
+        is_empty;
+        state = SlabState_Retired;
+        local_free_clear;
+        bitmap_reset , 0;
+        blocks = 0;
+
+        state == SlabState_Retired;
+            false;
+
+        is_empty;
+            true;
+
+        occupancy_permille < EVICT_THRESHOLD_PERMILLE;
+
+        permille_of , hits , hits + misses;
+
+        text = "slab ";
+        text_append , to_string , slab_index;
+        text_append , " class ";
+        text_append , to_string , class_index;
+        text_append , " used ";
+        text_append , to_string , used;
+        text_append , "/";
+        text_append , to_string , blocks;
+        text;

@@ -1,0 +1,3907 @@
+// A Unicode text library: UTF-8 encoding and decoding with full validation,
+// UTF-16 and UTF-32 conversion, code point classification, case mapping,
+// grapheme cluster segmentation, a canonical normalisation sketch, display
+// width calculation and byte order mark handling.
+//
+// Every numeric constant is written in plain decimal because the charge lexer
+// only accepts that notation. Where a value is conventionally written in
+// hexadecimal the hexadecimal spelling follows in a comment, so the tables
+// below can still be checked against the Unicode data files by eye.
+//
+// The library is deliberately table driven: classification, decomposition and
+// width are all expressed as explicit range entries pushed into vectors at
+// start up, and the hot paths are bit manipulations over those tables.
+
+// --- Scalar bounds -------------------------------------------------------
+//
+// The Unicode code space is 0 .. 10FFFF with the surrogate block carved out of
+// the middle of the basic multilingual plane.
+
+// 0x10FFFF
+// 0x110000
+// 0xFFFF
+// 0x10000
+
+// 0xFFFD
+// 0x7F
+// 0xFF
+
+// 0xD800
+// 0xDFFF
+// 0xD800
+       // 0xDBFF
+       // 0xDC00
+       // 0xDFFF
+       // 0x400
+       // 0x10000
+
+// The two-word form of a supplementary code point subtracts this bias before
+// splitting the remainder into ten high bits and ten low bits.
+// 0x10000
+// 0x3FF
+
+// --- UTF-8 bit layout ----------------------------------------------------
+//
+//   0xxxxxxx                                one byte,    7 payload bits
+//   110xxxxx 10xxxxxx                       two bytes,  11 payload bits
+//   1110xxxx 10xxxxxx 10xxxxxx              three bytes,16 payload bits
+//   11110xxx 10xxxxxx 10xxxxxx 10xxxxxx     four bytes, 21 payload bits
+
+// 0x7F
+// 0x7FF
+// 0xFFFF
+// 0x10FFFF
+
+                   // 0x80
+                   // 0xC0
+                   // 0x3F
+
+               // 0xC0
+               // 0xE0
+             // 0x1F
+
+             // 0xE0
+             // 0xF0
+             // 0x0F
+
+              // 0xF0
+              // 0xF8
+              // 0x07
+
+              // 0x80
+              // 0xFF
+              // 0x0F
+              // 0xFFFF
+              // 0xFFFFFFFF
+              // 0xFFFFFFFFFFFFFFFF
+
+// A whole machine word of bytes at a time: these constants let the fast ASCII
+// scan test eight bytes with two operations.
+// 0x8080808080808080
+// 0x0101010101010101
+// 0x7F7F7F7F7F7F7F7F
+
+// --- Byte order marks ----------------------------------------------------
+
+// 0xFEFF
+// 0xFFFE, never a valid scalar
+
+             // 0xEF
+             // 0xBB
+             // 0xBF
+
+         // 0xFE
+         // 0xFF
+         // 0xFF
+         // 0xFE
+
+// --- Named characters ----------------------------------------------------
+//
+// The scanners compare raw characters constantly, so each one gets a name.
+// The escaped apostrophe character literal is not spelled here; the library
+// keeps it as a one character string instead.
+
+// The single quote and a few other awkward spellings live as strings.
+
+// --- Error and status codes ----------------------------------------------
+
+// Every way a byte sequence can fail to be UTF-8. The decoder reports the
+// most specific code it can, because "invalid UTF-8" alone is useless in a
+// diagnostic.
+
+// ran out of bytes mid sequence
+// a 10xxxxxx byte where a lead was expected
+// 0xC0, 0xC1, 0xF5 .. 0xFF
+// a lead byte followed by a non continuation
+// a scalar spelled with more bytes than needed
+// D800 .. DFFF encoded directly, CESU-8 style
+// beyond 10FFFF
+
+// The decoder is a small deterministic automaton. Accept is the only state in
+// which a code point may be handed to the caller.
+
+// three byte form, lead was 0xE0
+             // three byte form, lead was 0xED
+             // four byte form, lead was 0xF0
+             // four byte form, lead was 0xF4
+
+// What a lead byte says about the sequence that follows it.
+
+// Result of sniffing the first few bytes of a stream.
+
+// General category, collapsed to the groups this library actually needs.
+
+// Grapheme cluster break property, the subset needed for the extended rules.
+
+// Word break property, again reduced to what the word iterator uses.
+
+// East Asian width, which drives the terminal column count.
+
+// Canonical combining class buckets. The real property is an integer from 0 to
+// 240; only the values that appear in the small table below are named.
+
+// Which normal form a transformation targets.
+
+// Endianness of a 16 or 32 bit code unit stream.
+
+// --- Core value types ----------------------------------------------------
+
+// A decoded scalar together with how many bytes it consumed. A length of zero
+// always means the error field is set.
+
+        error == DecodeError_None;
+
+        error != DecodeError_None;
+
+        value >= 0 && value <= MAX_ASCII;
+
+        value >= 0 && value <= BMP_MAX;
+
+        value > BMP_MAX && value <= CODE_POINT_MAX;
+
+// The four byte staging buffer an encoder writes into. Keeping the bytes in a
+// struct rather than a vector avoids an allocation for the common case.
+
+        index == 0;
+            byte0;
+
+        index == 1;
+            byte1;
+
+        index == 2;
+            byte2;
+
+        index == 3;
+            byte3;
+
+        0;
+
+        masked = value & BYTE_MASK;
+        index == 0;
+            byte0 = masked;
+
+            index == 1;
+                byte1 = masked;
+
+                index == 2;
+                    byte2 = masked;
+
+                    byte3 = masked;
+
+    // Pack the sequence into one integer, most significant byte first. Handy
+    // for table driven tests and for hashing short sequences.
+
+        out = 0;
+        i , range , 0 , length;
+            out = out << 8 | at , i & BYTE_MASK;
+
+        out;
+
+        error == DecodeError_None && length > 0;
+
+// A byte offset paired with the line and column it lands on, so that a codec
+// error can be reported the way a compiler would report it.
+
+        offset++;
+        value == 10;
+            ++line;
+            column = 1;
+
+            value & CONT_MASK != CONT_MARK;
+                ++column;
+
+        offset += length;
+        scalar == 10;
+            line++;
+            column = 1;
+
+            column++;
+
+        out = "line ";
+        out_append , to_string , line;
+        out_append , ", column ";
+        out_append , to_string , column;
+        out_append , " (byte ";
+        out_append , to_string , offset;
+        out_append , ")";
+        out;
+
+// A half open range of code points carrying one property value. Every table in
+// this file is a vector of one of the range structs below.
+
+// One row of the case mapping table. A delta of zero with a target of minus
+// one means "no mapping"; special casing lives in a separate table because a
+// single code point can expand to three.
+
+// A code point whose case mapping is longer than one code point.
+
+// One canonical decomposition: source expands to first plus second. A second
+// of zero marks a singleton decomposition.
+
+// The result of one grapheme, word or code point step over a buffer.
+
+// --- Raw byte predicates -------------------------------------------------
+//
+// These are the primitives every other layer is built from. They are written
+// as masked comparisons rather than range tests because that is what the
+// generated code should look like.
+
+b & ASCII_MASK == 0;
+
+b & CONT_MASK == CONT_MARK;
+
+b & LEAD_TWO_MASK == LEAD_TWO_MARK;
+
+b & LEAD_THREE_MASK == LEAD_THREE_MARK;
+
+b & LEAD_FOUR_MASK == LEAD_FOUR_MARK;
+
+// 0xC0 and 0xC1 can only ever begin an overlong two byte form, and anything
+// from 0xF5 up would decode past 0x10FFFF. Both are rejected at the lead byte
+// so the decoder never has to build the scalar first.
+
+    b == 192 || b == 193;                 // 0xC0, 0xC1
+        true;
+
+    b >= 245 && b <= 255;                 // 0xF5 .. 0xFF
+        true;
+
+    b < 0 || b > BYTE_MASK;
+
+b & CONT_PAYLOAD_MASK;
+
+CONT_MARK | payload & CONT_PAYLOAD_MASK;
+
+// How many bytes the sequence starting with this lead byte occupies. Zero
+// means the byte cannot start a sequence at all.
+
+    lead & ASCII_MASK == 0;
+        1;
+
+    lead & CONT_MASK == CONT_MARK;
+        0;
+
+    lead & LEAD_TWO_MASK == LEAD_TWO_MARK;
+        2;
+
+    lead & LEAD_THREE_MASK == LEAD_THREE_MARK;
+        3;
+
+    lead & LEAD_FOUR_MASK == LEAD_FOUR_MARK;
+        4;
+
+    0;
+
+    // The payload bits carried by a lead byte, once its marker prefix is stripped.
+
+    length == 1;
+        lead & MAX_ASCII;
+
+    length == 2;
+        lead & LEAD_TWO_PAYLOAD;
+
+    length == 3;
+        lead & LEAD_THREE_PAYLOAD;
+
+    length == 4;
+        lead & LEAD_FOUR_PAYLOAD;
+
+    0;
+
+// Classify a lead byte into the buckets the state machine switches on. The
+// four boundary classes exist because 0xE0, 0xED, 0xF0 and 0xF4 each constrain
+// the range of their first continuation byte.
+
+    b >= 0 && b <= 127;                   // 0x00 .. 0x7F
+        ByteClass_Ascii;
+
+    b >= 128 && b <= 191;                 // 0x80 .. 0xBF
+        ByteClass_Continuation;
+
+    b >= 192 && b <= 193;                 // 0xC0 .. 0xC1
+        ByteClass_Illegal;
+
+    b >= 194 && b <= 223;                 // 0xC2 .. 0xDF
+        ByteClass_LeadTwo;
+
+    b == 224;                             // 0xE0
+        ByteClass_LeadThreeLowBound;
+
+    b >= 225 && b <= 236;                 // 0xE1 .. 0xEC
+        ByteClass_LeadThree;
+
+    b == 237;                             // 0xED
+        ByteClass_LeadThreeSurrogate;
+
+    b >= 238 && b <= 239;                 // 0xEE .. 0xEF
+        ByteClass_LeadThree;
+
+    b == 240;                             // 0xF0
+        ByteClass_LeadFourLowBound;
+
+    b >= 241 && b <= 243;                 // 0xF1 .. 0xF3
+        ByteClass_LeadFour;
+
+    b == 244;                             // 0xF4
+        ByteClass_LeadFourHighBound;
+
+    ByteClass_Illegal;
+
+// The legal range of the first continuation byte, given the lead class. Both
+// bounds are inclusive.
+
+    class == ByteClass_LeadThreeLowBound;
+        160;                            // 0xA0, blocks overlong 3 byte
+
+    class == ByteClass_LeadFourLowBound;
+        144;                            // 0x90, blocks overlong 4 byte
+
+    128;                                // 0x80
+
+    class == ByteClass_LeadThreeSurrogate;
+        159;                            // 0x9F, blocks D800 .. DFFF
+
+    class == ByteClass_LeadFourHighBound;
+        143;                            // 0x8F, blocks above 0x10FFFF
+
+    191;                                // 0xBF
+
+// --- Encoding ------------------------------------------------------------
+
+// How many bytes this scalar needs in UTF-8. Returns zero for values that must
+// not be encoded at all: surrogates and anything past the code space.
+
+    scalar < 0;
+        0;
+
+    scalar <= UTF8_ONE_MAX;
+        1;
+
+    scalar <= UTF8_TWO_MAX;
+        2;
+
+    scalar >= SURROGATE_FIRST && scalar <= SURROGATE_LAST;
+        0;
+
+    scalar <= UTF8_THREE_MAX;
+        3;
+
+    scalar <= UTF8_FOUR_MAX;
+        4;
+
+    0;
+
+    // The same question asked of UTF-16: one code unit, or a surrogate pair.
+
+    scalar < 0 || scalar > CODE_POINT_MAX;
+        0;
+
+    scalar >= SURROGATE_FIRST && scalar <= SURROGATE_LAST;
+        0;
+
+    scalar <= BMP_MAX;
+        1;
+
+    2;
+
+    scalar < 0 || scalar > CODE_POINT_MAX;
+        false;
+
+    scalar < SURROGATE_FIRST || scalar > SURROGATE_LAST;
+
+scalar >= SURROGATE_FIRST && scalar <= SURROGATE_LAST;
+
+scalar >= HIGH_SURROGATE_FIRST && scalar <= HIGH_SURROGATE_LAST;
+
+scalar >= LOW_SURROGATE_FIRST && scalar <= LOW_SURROGATE_LAST;
+
+// A noncharacter is a valid scalar that no interchange format should carry.
+// The block at FDD0 .. FDEF plus the last two of every plane.
+
+    scalar >= 64976 && scalar <= 65007;   // 0xFDD0 .. 0xFDEF
+        true;
+
+    low = scalar & WORD_MASK;
+    low == 65534 || low == 65535;       // 0xFFFE, 0xFFFF
+
+// Encode one scalar into the staging buffer. Every branch writes the marker
+// bits and the payload bits separately so the layout stays readable.
+
+    out ;
+    scalar < 0;
+        out_error = DecodeError_CodePointTooLarge;
+        out;
+
+    scalar > CODE_POINT_MAX;
+        out_error = DecodeError_CodePointTooLarge;
+        out;
+
+    scalar >= SURROGATE_FIRST && scalar <= SURROGATE_LAST;
+        out_error = DecodeError_SurrogateCodePoint;
+        out;
+
+    scalar <= UTF8_ONE_MAX;
+        out_byte0 = scalar & MAX_ASCII;
+        out_length = 1;
+        out;
+
+    scalar <= UTF8_TWO_MAX;
+        out_byte0 = LEAD_TWO_MARK | scalar >> 6 & LEAD_TWO_PAYLOAD;
+        out_byte1 = CONT_MARK | scalar & CONT_PAYLOAD_MASK;
+        out_length = 2;
+        out;
+
+    scalar <= UTF8_THREE_MAX;
+        out_byte0 = LEAD_THREE_MARK | scalar >> 12 & LEAD_THREE_PAYLOAD;
+        out_byte1 = CONT_MARK | scalar >> 6 & CONT_PAYLOAD_MASK;
+        out_byte2 = CONT_MARK | scalar & CONT_PAYLOAD_MASK;
+        out_length = 3;
+        out;
+
+    out_byte0 = LEAD_FOUR_MARK | scalar >> 18 & LEAD_FOUR_PAYLOAD;
+    out_byte1 = CONT_MARK | scalar >> 12 & CONT_PAYLOAD_MASK;
+    out_byte2 = CONT_MARK | scalar >> 6 & CONT_PAYLOAD_MASK;
+    out_byte3 = CONT_MARK | scalar & CONT_PAYLOAD_MASK;
+    out_length = 4;
+    out;
+
+// Append one scalar to a byte vector, substituting the replacement character
+// when the scalar is not encodable. Returns the number of bytes written.
+
+    packet = encode , scalar;
+    packet_error != DecodeError_None;
+        packet = encode , REPLACEMENT;
+
+    i , range , 0 , packet_length;
+        sink_push_back , packet_at , i;
+
+    packet_length;
+
+// Encode a whole vector of scalars. Invalid scalars become U+FFFD rather than
+// aborting the whole run, which is what a text pipeline usually wants.
+
+    out ;
+    out_reserve , scalars_size * 2;
+    scalar , scalars;
+        encode_into , out , scalar;
+
+    out;
+
+    // The lossless variant: the first bad scalar stops the run and is reported.
+
+    report ;
+    index = 0;
+    scalar , scalars;
+        packet = encode , scalar;
+        packet_error != DecodeError_None;
+            report_error = packet_error;
+            report_value = scalar;
+            report_length = index;
+            report;
+
+        i , range , 0 , packet_length;
+            sink_push_back , packet_at , i;
+
+        index++;
+
+    report_length = index;
+    report;
+
+// --- Decoding ------------------------------------------------------------
+
+// The smallest scalar that a sequence of the given length is allowed to carry.
+// A decoded value below this bound means the encoder padded the sequence, and
+// the whole point of the overlong check is that such padding is a security
+// hole rather than a harmless variation.
+
+    length == 1;
+        0;
+
+    length == 2;
+        128;                            // 0x80
+
+    length == 3;
+        2048;                           // 0x800
+
+    length == 4;
+        65536;                          // 0x10000
+
+    CODE_POINT_MAX + 1;
+
+    length == 1;
+        UTF8_ONE_MAX;
+
+    length == 2;
+        UTF8_TWO_MAX;
+
+    length == 3;
+        UTF8_THREE_MAX;
+
+    length == 4;
+        UTF8_FOUR_MAX;
+
+    -1;
+
+// Decode one sequence beginning at offset. This is the reference decoder: the
+// state machine further down must agree with it byte for byte.
+
+    out ;
+    offset < 0 || offset >= bytes_size;
+        out_error = DecodeError_EmptyInput;
+        out;
+
+    lead = bytes_at , offset & BYTE_MASK;
+
+    // The overwhelmingly common case, kept first and kept short.
+    lead & ASCII_MASK == 0;
+        out_value = lead;
+        out_length = 1;
+        out;
+
+    lead & CONT_MASK == CONT_MARK;
+        out_error = DecodeError_UnexpectedContinuation;
+        out_length = 1;
+        out;
+
+    is_illegal_byte , lead;
+        out_error = DecodeError_InvalidLeadByte;
+        out_length = 1;
+        out;
+
+    length = sequence_length , lead;
+    length == 0;
+        out_error = DecodeError_InvalidLeadByte;
+        out_length = 1;
+        out;
+
+    offset + length > bytes_size;
+        out_error = DecodeError_TruncatedSequence;
+        out_length = bytes_size - offset;
+        out;
+
+    scalar = lead_payload , lead , length;
+    consumed = 1;
+    consumed < length;
+        next = bytes_at , offset + consumed & BYTE_MASK;
+        next & CONT_MASK != CONT_MARK;
+            out_error = DecodeError_MissingContinuation;
+            out_length = consumed;
+            out;
+
+        scalar = scalar << CONT_BITS | next & CONT_PAYLOAD_MASK;
+        ++consumed;
+
+    scalar < minimum_for_length , length;
+        out_error = DecodeError_OverlongEncoding;
+        out_value = scalar;
+        out_length = length;
+        out;
+
+    scalar >= SURROGATE_FIRST && scalar <= SURROGATE_LAST;
+        out_error = DecodeError_SurrogateCodePoint;
+        out_value = scalar;
+        out_length = length;
+        out;
+
+    scalar > CODE_POINT_MAX;
+        out_error = DecodeError_CodePointTooLarge;
+        out_value = scalar;
+        out_length = length;
+        out;
+
+    out_value = scalar;
+    out_length = length;
+    out;
+
+// Decode the whole buffer, replacing every ill formed subsequence with a
+// single U+FFFD. The maximal subpart rule says one replacement per maximal
+// prefix of a valid sequence, which is what the length field of the failed
+// result gives us.
+
+    out ;
+    offset = 0;
+    offset < bytes_size;
+        step = decode_at , bytes , offset;
+        step_error == DecodeError_None;
+            out_push_back , step_value;
+            offset += step_length;
+
+            out_push_back , REPLACEMENT;
+            step_length > 0;
+                offset += step_length;
+
+                ++offset;
+
+    out;
+
+    // The strict variant stops at the first defect and reports where it was.
+
+    report ;
+    offset = 0;
+    offset < bytes_size;
+        step = decode_at , bytes , offset;
+        step_error != DecodeError_None;
+            report_error = step_error;
+            report_value = step_value;
+            report_length = offset;
+            report;
+
+        sink_push_back , step_value;
+        offset += step_length;
+
+    report_length = offset;
+    report;
+
+// Validate without materialising any scalars. This is the function a network
+// layer calls on every inbound frame, so it avoids the vector entirely.
+
+    report ;
+    offset = 0;
+    size = bytes_size;
+    offset < size;
+        lead = bytes_at , offset & BYTE_MASK;
+        lead & ASCII_MASK == 0;
+            offset++;
+
+            step = decode_at , bytes , offset;
+            step_error != DecodeError_None;
+                report_error = step_error;
+                report_value = step_value;
+                report_length = offset;
+                report;
+
+            offset += step_length;
+
+    report_length = offset;
+    report;
+
+    report = validate , bytes;
+    report_error == DecodeError_None;
+
+// Count scalars without decoding them: every byte that is not a continuation
+// byte starts exactly one scalar. Only correct on a validated buffer, which is
+// why the assertion is here.
+
+    bytes_size >= 0;
+    count = 0;
+    b , bytes;
+        b & CONT_MASK != CONT_MARK;
+            count++;
+
+    count;
+
+// Walk backwards to the start of the sequence containing this offset. At most
+// three steps, because no sequence is longer than four bytes.
+
+    index = offset;
+    steps = 0;
+    index > 0 && steps < UTF8_MAX_LENGTH;
+        b = bytes_at , index & BYTE_MASK;
+        b & CONT_MASK != CONT_MARK;
+            index;
+
+        --index;
+        steps++;
+
+    index;
+
+    offset <= 0 || offset >= bytes_size;
+        true;
+
+    bytes_at , offset & CONT_MASK != CONT_MARK;
+
+// --- The decoder state machine -------------------------------------------
+//
+// A byte at a time decoder for stream input, where a sequence may be split
+// across two reads. The automaton is the classic nine state one: each step
+// folds six payload bits into the accumulator and moves to the next state.
+
+        state = DecodeState_Accept;
+        accumulator = 0;
+        remaining = 0;
+        lower_bound = CONT_MARK;
+        upper_bound = 191;                    // 0xBF
+        consumed = 0;
+        error = DecodeError_None;
+
+        state == DecodeState_Accept && remaining == 0;
+
+        state == DecodeState_Reject;
+
+    // Begin a new sequence. Sets the accumulator to the lead payload and the
+    // continuation bounds implied by the lead class.
+
+        class = classify_byte , lead;
+        lower_bound = continuation_low_bound , class;
+        upper_bound = continuation_high_bound , class;
+
+        class == ByteClass_Ascii;
+            accumulator = lead & MAX_ASCII;
+            remaining = 0;
+            state = DecodeState_Accept;
+            true;
+
+        class == ByteClass_Continuation;
+            error = DecodeError_UnexpectedContinuation;
+            state = DecodeState_Reject;
+            false;
+
+        class == ByteClass_Illegal;
+            error = DecodeError_InvalidLeadByte;
+            state = DecodeState_Reject;
+            false;
+
+        class == ByteClass_LeadTwo;
+            accumulator = lead & LEAD_TWO_PAYLOAD;
+            remaining = 1;
+            state = DecodeState_NeedOne;
+            true;
+
+        class == ByteClass_LeadThreeLowBound;
+            accumulator = lead & LEAD_THREE_PAYLOAD;
+            remaining = 2;
+            state = DecodeState_NeedTwoOfThreeLow;
+            true;
+
+        class == ByteClass_LeadThreeSurrogate;
+            accumulator = lead & LEAD_THREE_PAYLOAD;
+            remaining = 2;
+            state = DecodeState_NeedTwoOfThreeHigh;
+            true;
+
+        class == ByteClass_LeadThree;
+            accumulator = lead & LEAD_THREE_PAYLOAD;
+            remaining = 2;
+            state = DecodeState_NeedTwo;
+            true;
+
+        class == ByteClass_LeadFourLowBound;
+            accumulator = lead & LEAD_FOUR_PAYLOAD;
+            remaining = 3;
+            state = DecodeState_NeedThreeOfFourLow;
+            true;
+
+        class == ByteClass_LeadFourHighBound;
+            accumulator = lead & LEAD_FOUR_PAYLOAD;
+            remaining = 3;
+            state = DecodeState_NeedThreeOfFourHigh;
+            true;
+
+        accumulator = lead & LEAD_FOUR_PAYLOAD;
+        remaining = 3;
+        state = DecodeState_NeedThree;
+        true;
+
+    // Feed one byte. Returns true when a complete scalar is now available in
+    // the accumulator; false means either "need more" or "rejected", which the
+    // caller separates by asking failed().
+
+        b = raw & BYTE_MASK;
+        ++consumed;
+
+        remaining == 0;
+            error = DecodeError_None;
+            begin , b == false;
+                false;
+
+            remaining == 0;
+
+        b < lower_bound || b > upper_bound;
+            // The bound violation tells us exactly which rule was broken.
+            lower_bound > CONT_MARK;
+                error = DecodeError_OverlongEncoding;
+
+                upper_bound < 191;
+                    error = DecodeError_SurrogateCodePoint;
+
+                    error = DecodeError_MissingContinuation;
+
+            b & CONT_MASK != CONT_MARK;
+                error = DecodeError_MissingContinuation;
+
+            state = DecodeState_Reject;
+            remaining = 0;
+            false;
+
+        accumulator = accumulator << CONT_BITS | b & CONT_PAYLOAD_MASK;
+        remaining--;
+
+        // After the first continuation byte the bounds relax back to the full
+        // 0x80 .. 0xBF window.
+        lower_bound = CONT_MARK;
+        upper_bound = 191;                    // 0xBF
+
+        remaining == 0;
+            state = DecodeState_Accept;
+            true;
+
+        remaining == 1;
+            state = DecodeState_NeedOne;
+
+            state = DecodeState_NeedTwo;
+
+        false;
+
+        accumulator;
+
+        // Called at end of input: a sequence still in progress is a truncation.
+
+        remaining > 0;
+            error = DecodeError_TruncatedSequence;
+            state = DecodeState_Reject;
+            remaining = 0;
+
+        error;
+
+                        // 0x80
+                        // 0xBF
+
+// Drive the state machine over a whole buffer. Used by the test suite to check
+// that the streaming decoder and the reference decoder never disagree.
+
+    out ;
+    machine ;
+    machine_reset;
+    b , bytes;
+        machine_feed , b;
+            out_push_back , machine_value;
+
+            machine_failed;
+                out_push_back , REPLACEMENT;
+                machine_reset;
+
+    machine_finish != DecodeError_None;
+        out_push_back , REPLACEMENT;
+
+    out;
+
+// --- UTF-16 --------------------------------------------------------------
+//
+// A supplementary scalar is stored as a pair: subtract 0x10000, then take the
+// top ten bits into 0xD800 .. 0xDBFF and the bottom ten into 0xDC00 .. 0xDFFF.
+
+    biased = scalar - SURROGATE_BIAS;
+    HIGH_SURROGATE_FIRST | biased >> SURROGATE_SHIFT & SURROGATE_MASK;
+
+    biased = scalar - SURROGATE_BIAS;
+    LOW_SURROGATE_FIRST | biased & SURROGATE_MASK;
+
+    high_bits = high - HIGH_SURROGATE_FIRST & SURROGATE_MASK;
+    low_bits = low - LOW_SURROGATE_FIRST & SURROGATE_MASK;
+    SURROGATE_BIAS + high_bits << SURROGATE_SHIFT + low_bits;
+
+// Encode one scalar into a UTF-16 code unit vector. Returns the number of code
+// units appended, or zero when the scalar is not encodable.
+
+    is_valid_scalar , scalar == false;
+        sink_push_back , REPLACEMENT;
+        1;
+
+    scalar <= BMP_MAX;
+        sink_push_back , scalar & WORD_MASK;
+        1;
+
+    sink_push_back , high_surrogate_of , scalar;
+    sink_push_back , low_surrogate_of , scalar;
+    2;
+
+    out ;
+    out_reserve , scalars_size + scalars_size / 4;
+    scalar , scalars;
+        utf16_encode_into , out , scalar;
+
+    out;
+
+// Decode one scalar from a UTF-16 code unit sequence. Unpaired surrogates are
+// reported rather than silently passed through, which is the difference
+// between UTF-16 and the looser WTF-16 that filesystems use.
+
+    out ;
+    offset < 0 || offset >= units_size;
+        out_error = DecodeError_EmptyInput;
+        out;
+
+    unit = units_at , offset & WORD_MASK;
+
+    unit < SURROGATE_FIRST || unit > SURROGATE_LAST;
+        out_value = unit;
+        out_length = 1;
+        out;
+
+    unit >= LOW_SURROGATE_FIRST;
+        out_error = DecodeError_UnpairedLowSurrogate;
+        out_value = unit;
+        out_length = 1;
+        out;
+
+    offset + 1 >= units_size;
+        out_error = DecodeError_UnpairedHighSurrogate;
+        out_value = unit;
+        out_length = 1;
+        out;
+
+    trail = units_at , offset + 1 & WORD_MASK;
+    trail < LOW_SURROGATE_FIRST || trail > LOW_SURROGATE_LAST;
+        out_error = DecodeError_UnpairedHighSurrogate;
+        out_value = unit;
+        out_length = 1;
+        out;
+
+    out_value = combine_surrogates , unit , trail;
+    out_length = 2;
+    out;
+
+    out ;
+    offset = 0;
+    offset < units_size;
+        step = utf16_decode_at , units , offset;
+        step_error == DecodeError_None;
+            out_push_back , step_value;
+
+            out_push_back , REPLACEMENT;
+
+        offset += step_length;
+        step_length == 0;
+            offset++;
+
+    out;
+
+// Direct UTF-8 to UTF-16 transcoding, without building the intermediate
+// scalar vector. This is the path a Windows API shim takes.
+
+    out ;
+    offset = 0;
+    offset < bytes_size;
+        step = decode_at , bytes , offset;
+        step_error == DecodeError_None;
+            utf16_encode_into , out , step_value;
+            offset += step_length;
+
+            out_push_back , REPLACEMENT;
+            step_length > 0;
+                offset += step_length;
+
+                ++offset;
+
+    out;
+
+    out ;
+    offset = 0;
+    offset < units_size;
+        step = utf16_decode_at , units , offset;
+        step_error == DecodeError_None;
+            encode_into , out , step_value;
+
+            encode_into , out , REPLACEMENT;
+
+        step_length > 0;
+            offset += step_length;
+
+            offset++;
+
+    out;
+
+// How many UTF-16 code units a UTF-8 buffer will need. Every four byte
+// sequence becomes a pair, everything else becomes a single unit.
+
+    units = 0;
+    b , bytes;
+        b & CONT_MASK != CONT_MARK;
+            ++units;
+
+        b & LEAD_FOUR_MASK == LEAD_FOUR_MARK;
+            ++units;
+
+    units;
+
+    // --- UTF-32 --------------------------------------------------------------
+
+    out ;
+    scalar , scalars;
+        is_valid_scalar , scalar;
+            out_push_back , scalar;
+
+            out_push_back , REPLACEMENT;
+
+    out;
+
+    out ;
+    unit , units;
+        is_valid_scalar , unit;
+            out_push_back , unit;
+
+            out_push_back , REPLACEMENT;
+
+    out;
+
+    report ;
+    index = 0;
+    unit , units;
+        unit < 0 || unit > CODE_POINT_MAX;
+            report_error = DecodeError_CodePointTooLarge;
+            report_value = unit;
+            report_length = index;
+            report;
+
+        unit >= SURROGATE_FIRST && unit <= SURROGATE_LAST;
+            report_error = DecodeError_SurrogateCodePoint;
+            report_value = unit;
+            report_length = index;
+            report;
+
+        index++;
+
+    report_length = index;
+    report;
+
+    decode_all_lossy , bytes;
+
+    out ;
+    unit , units;
+        encode_into , out , unit;
+
+    out;
+
+    // --- Byte order ----------------------------------------------------------
+
+    low = unit & BYTE_MASK << 8;
+    high = unit >> 8 & BYTE_MASK;
+    low | high & WORD_MASK;
+
+    b0 = unit & BYTE_MASK << 24;
+    b1 = unit >> 8 & BYTE_MASK << 16;
+    b2 = unit >> 16 & BYTE_MASK << 8;
+    b3 = unit >> 24 & BYTE_MASK;
+    b0 | b1 | b2 | b3 & DWORD_MASK;
+
+    first = bytes_at , offset & BYTE_MASK;
+    second = bytes_at , offset + 1 & BYTE_MASK;
+    order == ByteOrder_Big;
+        first << 8 | second;
+
+    second << 8 | first;
+
+    b0 = bytes_at , offset & BYTE_MASK;
+    b1 = bytes_at , offset + 1 & BYTE_MASK;
+    b2 = bytes_at , offset + 2 & BYTE_MASK;
+    b3 = bytes_at , offset + 3 & BYTE_MASK;
+    order == ByteOrder_Big;
+        b0 << 24 | b1 << 16 | b2 << 8 | b3;
+
+    b3 << 24 | b2 << 16 | b1 << 8 | b0;
+
+    order == ByteOrder_Big;
+        sink_push_back , unit >> 8 & BYTE_MASK;
+        sink_push_back , unit & BYTE_MASK;
+
+        sink_push_back , unit & BYTE_MASK;
+        sink_push_back , unit >> 8 & BYTE_MASK;
+
+    order == ByteOrder_Big;
+        sink_push_back , unit >> 24 & BYTE_MASK;
+        sink_push_back , unit >> 16 & BYTE_MASK;
+        sink_push_back , unit >> 8 & BYTE_MASK;
+        sink_push_back , unit & BYTE_MASK;
+
+        sink_push_back , unit & BYTE_MASK;
+        sink_push_back , unit >> 8 & BYTE_MASK;
+        sink_push_back , unit >> 16 & BYTE_MASK;
+        sink_push_back , unit >> 24 & BYTE_MASK;
+
+        // --- Byte order marks ----------------------------------------------------
+
+    bytes_size < BOM_UTF8_LENGTH;
+        false;
+
+    bytes_at , 0 & BYTE_MASK != BOM_UTF8_BYTE_0;
+        false;
+
+    bytes_at , 1 & BYTE_MASK != BOM_UTF8_BYTE_1;
+        false;
+
+    bytes_at , 2 & BYTE_MASK == BOM_UTF8_BYTE_2;
+
+    bytes_size < BOM_UTF16_LENGTH;
+        false;
+
+    first = bytes_at , 0 & BYTE_MASK;
+    second = bytes_at , 1 & BYTE_MASK;
+    first == BOM_UTF16_BE_BYTE_0 && second == BOM_UTF16_BE_BYTE_1;
+
+    bytes_size < BOM_UTF16_LENGTH;
+        false;
+
+    first = bytes_at , 0 & BYTE_MASK;
+    second = bytes_at , 1 & BYTE_MASK;
+    first == BOM_UTF16_LE_BYTE_0 && second == BOM_UTF16_LE_BYTE_1;
+
+// The 32 bit marks have to be tested before the 16 bit ones, because a UTF-32
+// little endian mark begins with the same two bytes as a UTF-16 little endian
+// mark and would otherwise be misread.
+
+    bytes_size < BOM_UTF32_LENGTH;
+        false;
+
+    bytes_at , 0 & BYTE_MASK != 0;
+        false;
+
+    bytes_at , 1 & BYTE_MASK != 0;
+        false;
+
+    bytes_at , 2 & BYTE_MASK != 254;     // 0xFE
+        false;
+
+    bytes_at , 3 & BYTE_MASK == 255;   // 0xFF
+
+    bytes_size < BOM_UTF32_LENGTH;
+        false;
+
+    bytes_at , 0 & BYTE_MASK != 255;     // 0xFF
+        false;
+
+    bytes_at , 1 & BYTE_MASK != 254;     // 0xFE
+        false;
+
+    bytes_at , 2 & BYTE_MASK != 0;
+        false;
+
+    bytes_at , 3 & BYTE_MASK == 0;
+
+    encoding == Encoding_Utf8WithBom;
+        BOM_UTF8_LENGTH;
+
+    encoding == Encoding_Utf16Big || encoding == Encoding_Utf16Little;
+        BOM_UTF16_LENGTH;
+
+    encoding == Encoding_Utf32Big || encoding == Encoding_Utf32Little;
+        BOM_UTF32_LENGTH;
+
+    0;
+
+// Sniff the encoding of a buffer. Marks first, then the zero byte pattern that
+// a 16 or 32 bit stream of mostly ASCII text produces, then a validity test.
+
+    bytes_empty;
+        Encoding_Unknown;
+
+    has_utf32_be_bom , bytes;
+        Encoding_Utf32Big;
+
+    has_utf32_le_bom , bytes;
+        Encoding_Utf32Little;
+
+    has_utf8_bom , bytes;
+        Encoding_Utf8WithBom;
+
+    has_utf16_be_bom , bytes;
+        Encoding_Utf16Big;
+
+    has_utf16_le_bom , bytes;
+        Encoding_Utf16Little;
+
+    // No mark. Count zero bytes at even and odd positions; ASCII text encoded
+    // as UTF-16 leaves a zero in every other slot and the side it lands on
+    // gives the byte order away.
+    even_zeros = 0;
+    odd_zeros = 0;
+    high_bytes = 0;
+    limit = min , bytes_size , 512;
+    i , range , 0 , limit;
+        b = bytes_at , i & BYTE_MASK;
+        b == 0;
+            i & 1 == 0;
+                even_zeros++;
+
+                ++odd_zeros;
+
+        b & ASCII_MASK != 0;
+            ++high_bytes;
+
+    even_zeros > limit / 4 && odd_zeros == 0;
+        Encoding_Utf16Big;
+
+    odd_zeros > limit / 4 && even_zeros == 0;
+        Encoding_Utf16Little;
+
+    high_bytes == 0;
+        Encoding_Ascii;
+
+    is_valid_utf8 , bytes;
+        Encoding_Utf8;
+
+    Encoding_Unknown;
+
+    // Strip a leading mark, if any, and report what was stripped.
+
+    encoding = detect_encoding , bytes;
+    length = bom_length , encoding;
+    i , range , 0 , length;
+        bytes_erase , 0;
+
+    encoding;
+
+    bytes_insert , 0 , BOM_UTF8_BYTE_2;
+    bytes_insert , 0 , BOM_UTF8_BYTE_1;
+    bytes_insert , 0 , BOM_UTF8_BYTE_0;
+
+    encoding == Encoding_Utf8;
+        "UTF-8";
+
+    encoding == Encoding_Utf8WithBom;
+        "UTF-8 with byte order mark";
+
+    encoding == Encoding_Utf16Big;
+        "UTF-16 big endian";
+
+    encoding == Encoding_Utf16Little;
+        "UTF-16 little endian";
+
+    encoding == Encoding_Utf32Big;
+        "UTF-32 big endian";
+
+    encoding == Encoding_Utf32Little;
+        "UTF-32 little endian";
+
+    encoding == Encoding_Ascii;
+        "US-ASCII";
+
+    "unknown";
+
+// --- ASCII classification bitset -----------------------------------------
+//
+// The first 128 code points are classified with a bit per property rather than
+// with a table lookup, because the whole set fits in one integer per
+// character and the compiler can fold the tests.
+
+// bit 0
+                    // bit 1
+                    // bit 2
+                    // bit 3
+                    // bit 4
+                    // bit 5
+                    // bit 6
+                    // bit 7
+                    // bit 8
+                    // bit 9
+                    // bit 10
+                    // bit 11
+                    // bit 12
+      // bit 13
+      // bit 14
+      // bit 15
+      // bit 16
+      // bit 17
+      // bit 18
+      // bit 19
+
+      // Common combinations, precomputed so the predicates below stay one line.
+      // LETTER | DIGIT
+      // LETTER | UPPER | PRINTABLE | ...
+      // LETTER | LOWER
+      // WHITESPACE | BLANK
+      // START | PART
+      // LETTER | DIGIT | GRAPHIC | PRINTABLE
+      // PUNCTUATION | SYMBOL | BRACKET
+
+// The classification of one ASCII character, as a bit union. Written out as a
+// chain of range tests over character literals so that the source reads like
+// the table it represents.
+
+    c >= 'a' && c <= 'z';
+        FLAG_LETTER | FLAG_LOWER | FLAG_PRINTABLE | FLAG_GRAPHIC | FLAG_WORD | FLAG_IDENTIFIER_START | FLAG_IDENTIFIER_PART;
+
+    c >= 'A' && c <= 'Z';
+        FLAG_LETTER | FLAG_UPPER | FLAG_PRINTABLE | FLAG_GRAPHIC | FLAG_WORD | FLAG_IDENTIFIER_START | FLAG_IDENTIFIER_PART;
+
+    c >= '0' && c <= '9';
+        FLAG_DIGIT | FLAG_HEX_DIGIT | FLAG_PRINTABLE | FLAG_GRAPHIC | FLAG_WORD | FLAG_IDENTIFIER_PART;
+
+    c == ' ';
+        FLAG_WHITESPACE | FLAG_BLANK | FLAG_PRINTABLE;
+
+    c == '\t';
+        FLAG_WHITESPACE | FLAG_BLANK | FLAG_CONTROL;
+
+    c == '\n';
+        FLAG_WHITESPACE | FLAG_CONTROL | FLAG_LINE_BREAK;
+
+    c == '\r';
+        FLAG_WHITESPACE | FLAG_CONTROL | FLAG_LINE_BREAK;
+
+    c == '\f';
+        FLAG_WHITESPACE | FLAG_CONTROL | FLAG_LINE_BREAK;
+
+    c == '\v';
+        FLAG_WHITESPACE | FLAG_CONTROL | FLAG_LINE_BREAK;
+
+    c == '_';
+        FLAG_PUNCTUATION | FLAG_PRINTABLE | FLAG_GRAPHIC | FLAG_WORD | FLAG_IDENTIFIER_START | FLAG_IDENTIFIER_PART;
+
+    c == '"';
+        FLAG_PUNCTUATION | FLAG_QUOTE | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '(' || c == ')';
+        FLAG_PUNCTUATION | FLAG_BRACKET | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '[' || c == ']';
+        FLAG_PUNCTUATION | FLAG_BRACKET | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '{' || c == '}';
+        FLAG_PUNCTUATION | FLAG_BRACKET | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '+' || c == '-';
+        FLAG_SYMBOL | FLAG_SIGN | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '<' || c == '>' || c == '=';
+        FLAG_SYMBOL | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '|' || c == '~' || c == '^';
+        FLAG_SYMBOL | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '$';
+        FLAG_SYMBOL | FLAG_PRINTABLE | FLAG_GRAPHIC | FLAG_IDENTIFIER_START | FLAG_IDENTIFIER_PART;
+
+    c == '`';
+        FLAG_SYMBOL | FLAG_QUOTE | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '!' || c == '?' || c == '.' || c == ',';
+        FLAG_PUNCTUATION | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == ':' || c == ';';
+        FLAG_PUNCTUATION | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '*' || c == '/' || c == '%' || c == '&' || c == '#' || c == '@';
+        FLAG_PUNCTUATION | FLAG_PRINTABLE | FLAG_GRAPHIC;
+
+    c == '\0';
+        FLAG_CONTROL;
+
+    int , c < 32;
+        FLAG_CONTROL;
+
+    int , c == 127;
+        FLAG_CONTROL;
+
+    FLAG_PRINTABLE;
+
+    // Hexadecimal digits pick up their own bit on top of whatever else they carry.
+
+    base = ascii_flags , c;
+    c >= 'a' && c <= 'f';
+        base | FLAG_HEX_DIGIT;
+
+    c >= 'A' && c <= 'F';
+        base | FLAG_HEX_DIGIT;
+
+    base;
+
+flags & wanted != 0;
+
+flags & wanted == wanted;
+
+ascii_flags , c & FLAG_LETTER != 0;
+
+c >= '0' && c <= '9';
+
+hex_flags , c & FLAG_HEX_DIGIT != 0;
+
+ascii_flags , c & FLAG_WHITESPACE != 0;
+
+ascii_flags , c & FLAG_CONTROL != 0;
+
+ascii_flags , c & MASK_ANY_PUNCT != 0;
+
+ascii_flags , c & FLAG_IDENTIFIER_START != 0;
+
+ascii_flags , c & FLAG_IDENTIFIER_PART != 0;
+
+    c >= '0' && c <= '9';
+        int , c - int , '0';
+
+    -1;
+
+    c >= '0' && c <= '9';
+        int , c - int , '0';
+
+    c >= 'a' && c <= 'f';
+        int , c - int , 'a' + 10;
+
+    c >= 'A' && c <= 'F';
+        int , c - int , 'A' + 10;
+
+    -1;
+
+    value == 0; '0';
+    value == 1; '1';
+    value == 2; '2';
+    value == 3; '3';
+    value == 4; '4';
+    value == 5; '5';
+    value == 6; '6';
+    value == 7; '7';
+    value == 8; '8';
+    value == 9; '9';
+    value == 10; 'A';
+    value == 11; 'B';
+    value == 12; 'C';
+    value == 13; 'D';
+    value == 14; 'E';
+    value == 15; 'F';
+    '?';
+
+    // Format a scalar the way the Unicode standard does: U+0041, U+1F600.
+
+    out = "U+";
+    digits = 4;
+    scalar > 65535;                       // 0xFFFF
+        digits = 6;
+
+    scalar > 16777215;                    // 0xFFFFFF
+        digits = 8;
+
+    shift = digits - 1 * 4;
+    shift >= 0;
+        nibble = scalar >> shift & NIBBLE_MASK;
+        out_push_back , hex_digit_char , nibble;
+        shift -= 4;
+
+    out;
+
+// --- General category table ----------------------------------------------
+//
+// A sorted, non overlapping list of half open ranges. It is deliberately a
+// coarse sample of the real UnicodeData table: the blocks that a text editor
+// touches most, plus enough of the supplementary planes to exercise the four
+// byte decode path. Ranges are stored inclusive on both ends.
+
+    rows ;
+
+    // C0 controls and basic Latin.
+    rows_push_back , CategoryRange , 0 , 31 , Category_Control;                    // 0x0000 .. 0x001F
+    rows_push_back , CategoryRange , 32 , 32 , Category_SpaceSeparator;            // space
+    rows_push_back , CategoryRange , 33 , 35 , Category_OtherPunctuation;          // ! " #
+    rows_push_back , CategoryRange , 36 , 36 , Category_CurrencySymbol;            // $
+    rows_push_back , CategoryRange , 37 , 39 , Category_OtherPunctuation;          // % & apostrophe
+    rows_push_back , CategoryRange , 40 , 40 , Category_OpenPunctuation;           // (
+    rows_push_back , CategoryRange , 41 , 41 , Category_ClosePunctuation;          // )
+    rows_push_back , CategoryRange , 42 , 42 , Category_OtherPunctuation;          // *
+    rows_push_back , CategoryRange , 43 , 43 , Category_MathSymbol;                // +
+    rows_push_back , CategoryRange , 44 , 44 , Category_OtherPunctuation;          // ,
+    rows_push_back , CategoryRange , 45 , 45 , Category_DashPunctuation;           // -
+    rows_push_back , CategoryRange , 46 , 47 , Category_OtherPunctuation;          // . /
+    rows_push_back , CategoryRange , 48 , 57 , Category_DecimalNumber;             // 0 .. 9
+    rows_push_back , CategoryRange , 58 , 59 , Category_OtherPunctuation;          // : ;
+    rows_push_back , CategoryRange , 60 , 62 , Category_MathSymbol;                // < = >
+    rows_push_back , CategoryRange , 63 , 64 , Category_OtherPunctuation;          // ? @
+    rows_push_back , CategoryRange , 65 , 90 , Category_UppercaseLetter;           // A .. Z
+    rows_push_back , CategoryRange , 91 , 91 , Category_OpenPunctuation;           // [
+    rows_push_back , CategoryRange , 92 , 92 , Category_OtherPunctuation;          // backslash
+    rows_push_back , CategoryRange , 93 , 93 , Category_ClosePunctuation;          // ]
+    rows_push_back , CategoryRange , 94 , 94 , Category_ModifierSymbol;            // ^
+    rows_push_back , CategoryRange , 95 , 95 , Category_ConnectorPunctuation;      // _
+    rows_push_back , CategoryRange , 96 , 96 , Category_ModifierSymbol;            // backtick
+    rows_push_back , CategoryRange , 97 , 122 , Category_LowercaseLetter;          // a .. z
+    rows_push_back , CategoryRange , 123 , 123 , Category_OpenPunctuation;         // {
+    rows_push_back , CategoryRange , 124 , 124 , Category_MathSymbol;              // |
+    rows_push_back , CategoryRange , 125 , 125 , Category_ClosePunctuation;        // }
+    rows_push_back , CategoryRange , 126 , 126 , Category_MathSymbol;              // ~
+    rows_push_back , CategoryRange , 127 , 159 , Category_Control;                 // DEL and C1
+
+    // Latin-1 supplement.
+    rows_push_back , CategoryRange , 160 , 160 , Category_SpaceSeparator;          // 0x00A0 no break space
+    rows_push_back , CategoryRange , 161 , 161 , Category_OtherPunctuation;        // 0x00A1
+    rows_push_back , CategoryRange , 162 , 165 , Category_CurrencySymbol;          // 0x00A2 .. 0x00A5
+    rows_push_back , CategoryRange , 166 , 166 , Category_OtherSymbol;             // 0x00A6
+    rows_push_back , CategoryRange , 167 , 167 , Category_OtherPunctuation;        // 0x00A7
+    rows_push_back , CategoryRange , 168 , 168 , Category_ModifierSymbol;          // 0x00A8
+    rows_push_back , CategoryRange , 169 , 169 , Category_OtherSymbol;             // 0x00A9
+    rows_push_back , CategoryRange , 170 , 170 , Category_OtherLetter;             // 0x00AA
+    rows_push_back , CategoryRange , 171 , 171 , Category_InitialPunctuation;      // 0x00AB
+    rows_push_back , CategoryRange , 172 , 172 , Category_MathSymbol;              // 0x00AC
+    rows_push_back , CategoryRange , 173 , 173 , Category_Format;                  // 0x00AD soft hyphen
+    rows_push_back , CategoryRange , 174 , 174 , Category_OtherSymbol;             // 0x00AE
+    rows_push_back , CategoryRange , 175 , 175 , Category_ModifierSymbol;          // 0x00AF
+    rows_push_back , CategoryRange , 176 , 176 , Category_OtherSymbol;             // 0x00B0 degree
+    rows_push_back , CategoryRange , 177 , 177 , Category_MathSymbol;              // 0x00B1
+    rows_push_back , CategoryRange , 178 , 179 , Category_OtherNumber;             // 0x00B2 .. 0x00B3
+    rows_push_back , CategoryRange , 180 , 180 , Category_ModifierSymbol;          // 0x00B4
+    rows_push_back , CategoryRange , 181 , 181 , Category_LowercaseLetter;         // 0x00B5 micro
+    rows_push_back , CategoryRange , 182 , 183 , Category_OtherPunctuation;        // 0x00B6 .. 0x00B7
+    rows_push_back , CategoryRange , 184 , 184 , Category_ModifierSymbol;          // 0x00B8
+    rows_push_back , CategoryRange , 185 , 185 , Category_OtherNumber;             // 0x00B9
+    rows_push_back , CategoryRange , 186 , 186 , Category_OtherLetter;             // 0x00BA
+    rows_push_back , CategoryRange , 187 , 187 , Category_FinalPunctuation;        // 0x00BB
+    rows_push_back , CategoryRange , 188 , 190 , Category_OtherNumber;             // 0x00BC .. 0x00BE
+    rows_push_back , CategoryRange , 191 , 191 , Category_OtherPunctuation;        // 0x00BF
+    rows_push_back , CategoryRange , 192 , 214 , Category_UppercaseLetter;         // 0x00C0 .. 0x00D6
+    rows_push_back , CategoryRange , 215 , 215 , Category_MathSymbol;              // 0x00D7 multiply
+    rows_push_back , CategoryRange , 216 , 222 , Category_UppercaseLetter;         // 0x00D8 .. 0x00DE
+    rows_push_back , CategoryRange , 223 , 246 , Category_LowercaseLetter;         // 0x00DF .. 0x00F6
+    rows_push_back , CategoryRange , 247 , 247 , Category_MathSymbol;              // 0x00F7 divide
+    rows_push_back , CategoryRange , 248 , 255 , Category_LowercaseLetter;         // 0x00F8 .. 0x00FF
+
+    // Latin extended, collapsed: the alternating upper and lower runs are far
+    // too long to spell out, so the whole block is marked as letters and the
+    // case table below carries the finer detail.
+    rows_push_back , CategoryRange , 256 , 383 , Category_OtherLetter;             // 0x0100 .. 0x017F
+    rows_push_back , CategoryRange , 384 , 591 , Category_OtherLetter;             // 0x0180 .. 0x024F
+    rows_push_back , CategoryRange , 592 , 687 , Category_LowercaseLetter;         // IPA extensions
+    rows_push_back , CategoryRange , 688 , 767 , Category_ModifierLetter;          // spacing modifiers
+    rows_push_back , CategoryRange , 768 , 879 , Category_NonspacingMark;          // combining diacriticals
+
+    // Greek and Coptic.
+    rows_push_back , CategoryRange , 880 , 883 , Category_OtherLetter;             // 0x0370 .. 0x0373
+    rows_push_back , CategoryRange , 884 , 885 , Category_ModifierLetter;          // 0x0374 .. 0x0375
+    rows_push_back , CategoryRange , 890 , 890 , Category_ModifierLetter;          // 0x037A
+    rows_push_back , CategoryRange , 891 , 893 , Category_LowercaseLetter;         // 0x037B .. 0x037D
+    rows_push_back , CategoryRange , 894 , 894 , Category_OtherPunctuation;        // 0x037E
+    rows_push_back , CategoryRange , 902 , 902 , Category_UppercaseLetter;         // 0x0386
+    rows_push_back , CategoryRange , 903 , 903 , Category_OtherPunctuation;        // 0x0387
+    rows_push_back , CategoryRange , 904 , 929 , Category_UppercaseLetter;         // 0x0388 .. 0x03A1
+    rows_push_back , CategoryRange , 931 , 939 , Category_UppercaseLetter;         // 0x03A3 .. 0x03AB
+    rows_push_back , CategoryRange , 940 , 974 , Category_LowercaseLetter;         // 0x03AC .. 0x03CE
+    rows_push_back , CategoryRange , 975 , 1023 , Category_OtherLetter;            // 0x03CF .. 0x03FF
+
+    // Cyrillic.
+    rows_push_back , CategoryRange , 1024 , 1071 , Category_UppercaseLetter;       // 0x0400 .. 0x042F
+    rows_push_back , CategoryRange , 1072 , 1119 , Category_LowercaseLetter;       // 0x0430 .. 0x045F
+    rows_push_back , CategoryRange , 1120 , 1279 , Category_OtherLetter;           // 0x0460 .. 0x04FF
+    rows_push_back , CategoryRange , 1280 , 1327 , Category_OtherLetter;           // 0x0500 .. 0x052F
+
+    // Hebrew and Arabic.
+    rows_push_back , CategoryRange , 1425 , 1469 , Category_NonspacingMark;        // 0x0591 .. 0x05BD
+    rows_push_back , CategoryRange , 1471 , 1471 , Category_NonspacingMark;        // 0x05BF
+    rows_push_back , CategoryRange , 1473 , 1474 , Category_NonspacingMark;        // 0x05C1 .. 0x05C2
+    rows_push_back , CategoryRange , 1488 , 1514 , Category_OtherLetter;           // 0x05D0 .. 0x05EA
+    rows_push_back , CategoryRange , 1536 , 1541 , Category_Format;                // 0x0600 .. 0x0605
+    rows_push_back , CategoryRange , 1542 , 1544 , Category_MathSymbol;            // 0x0606 .. 0x0608
+    rows_push_back , CategoryRange , 1548 , 1549 , Category_OtherPunctuation;      // 0x060C .. 0x060D
+    rows_push_back , CategoryRange , 1552 , 1562 , Category_NonspacingMark;        // 0x0610 .. 0x061A
+    rows_push_back , CategoryRange , 1569 , 1610 , Category_OtherLetter;           // 0x0621 .. 0x064A
+    rows_push_back , CategoryRange , 1611 , 1631 , Category_NonspacingMark;        // 0x064B .. 0x065F
+    rows_push_back , CategoryRange , 1632 , 1641 , Category_DecimalNumber;         // 0x0660 .. 0x0669
+    rows_push_back , CategoryRange , 1642 , 1645 , Category_OtherPunctuation;      // 0x066A .. 0x066D
+
+    // Devanagari, enough of it to exercise the spacing mark rules.
+    rows_push_back , CategoryRange , 2304 , 2306 , Category_NonspacingMark;        // 0x0900 .. 0x0902
+    rows_push_back , CategoryRange , 2307 , 2307 , Category_SpacingMark;           // 0x0903
+    rows_push_back , CategoryRange , 2308 , 2361 , Category_OtherLetter;           // 0x0904 .. 0x0939
+    rows_push_back , CategoryRange , 2362 , 2362 , Category_NonspacingMark;        // 0x093A
+    rows_push_back , CategoryRange , 2363 , 2363 , Category_SpacingMark;           // 0x093B
+    rows_push_back , CategoryRange , 2364 , 2364 , Category_NonspacingMark;        // 0x093C nukta
+    rows_push_back , CategoryRange , 2366 , 2368 , Category_SpacingMark;           // 0x093E .. 0x0940
+    rows_push_back , CategoryRange , 2369 , 2376 , Category_NonspacingMark;        // 0x0941 .. 0x0948
+    rows_push_back , CategoryRange , 2377 , 2380 , Category_SpacingMark;           // 0x0949 .. 0x094C
+    rows_push_back , CategoryRange , 2381 , 2381 , Category_NonspacingMark;        // 0x094D virama
+    rows_push_back , CategoryRange , 2406 , 2415 , Category_DecimalNumber;         // 0x0966 .. 0x096F
+
+    // Thai, which is the classic zero width mark test case.
+    rows_push_back , CategoryRange , 3585 , 3632 , Category_OtherLetter;           // 0x0E01 .. 0x0E30
+    rows_push_back , CategoryRange , 3633 , 3633 , Category_NonspacingMark;        // 0x0E31
+    rows_push_back , CategoryRange , 3634 , 3635 , Category_OtherLetter;           // 0x0E32 .. 0x0E33
+    rows_push_back , CategoryRange , 3636 , 3642 , Category_NonspacingMark;        // 0x0E34 .. 0x0E3A
+    rows_push_back , CategoryRange , 3648 , 3653 , Category_OtherLetter;           // 0x0E40 .. 0x0E45
+    rows_push_back , CategoryRange , 3654 , 3654 , Category_ModifierLetter;        // 0x0E46
+    rows_push_back , CategoryRange , 3655 , 3662 , Category_NonspacingMark;        // 0x0E47 .. 0x0E4E
+    rows_push_back , CategoryRange , 3664 , 3673 , Category_DecimalNumber;         // 0x0E50 .. 0x0E59
+
+    // Hangul jamo, split by the L, V and T groups the composition rules need.
+    rows_push_back , CategoryRange , 4352 , 4447 , Category_OtherLetter;           // 0x1100 .. 0x115F leading
+    rows_push_back , CategoryRange , 4448 , 4519 , Category_OtherLetter;           // 0x1160 .. 0x11A7 vowel
+    rows_push_back , CategoryRange , 4520 , 4607 , Category_OtherLetter;           // 0x11A8 .. 0x11FF trailing
+
+    // General punctuation and the invisible formatting characters.
+    rows_push_back , CategoryRange , 8192 , 8202 , Category_SpaceSeparator;        // 0x2000 .. 0x200A
+    rows_push_back , CategoryRange , 8203 , 8207 , Category_Format;                // 0x200B .. 0x200F
+    rows_push_back , CategoryRange , 8208 , 8213 , Category_DashPunctuation;       // 0x2010 .. 0x2015
+    rows_push_back , CategoryRange , 8214 , 8215 , Category_OtherPunctuation;      // 0x2016 .. 0x2017
+    rows_push_back , CategoryRange , 8216 , 8216 , Category_InitialPunctuation;    // 0x2018
+    rows_push_back , CategoryRange , 8217 , 8217 , Category_FinalPunctuation;      // 0x2019
+    rows_push_back , CategoryRange , 8220 , 8220 , Category_InitialPunctuation;    // 0x201C
+    rows_push_back , CategoryRange , 8221 , 8221 , Category_FinalPunctuation;      // 0x201D
+    rows_push_back , CategoryRange , 8224 , 8231 , Category_OtherPunctuation;      // 0x2020 .. 0x2027
+    rows_push_back , CategoryRange , 8232 , 8232 , Category_LineSeparator;         // 0x2028
+    rows_push_back , CategoryRange , 8233 , 8233 , Category_ParagraphSeparator;    // 0x2029
+    rows_push_back , CategoryRange , 8234 , 8238 , Category_Format;                // 0x202A .. 0x202E
+    rows_push_back , CategoryRange , 8239 , 8239 , Category_SpaceSeparator;        // 0x202F
+    rows_push_back , CategoryRange , 8240 , 8248 , Category_OtherPunctuation;      // 0x2030 .. 0x2038
+    rows_push_back , CategoryRange , 8287 , 8287 , Category_SpaceSeparator;        // 0x205F
+    rows_push_back , CategoryRange , 8288 , 8303 , Category_Format;                // 0x2060 .. 0x206F
+    rows_push_back , CategoryRange , 8352 , 8399 , Category_CurrencySymbol;        // 0x20A0 .. 0x20CF
+    rows_push_back , CategoryRange , 8400 , 8432 , Category_NonspacingMark;        // 0x20D0 .. 0x20F0
+
+    // Letterlike symbols, arrows and mathematical operators.
+    rows_push_back , CategoryRange , 8448 , 8527 , Category_OtherSymbol;           // 0x2100 .. 0x214F
+    rows_push_back , CategoryRange , 8528 , 8585 , Category_OtherNumber;           // 0x2150 .. 0x2189
+    rows_push_back , CategoryRange , 8592 , 8703 , Category_MathSymbol;            // 0x2190 .. 0x21FF
+    rows_push_back , CategoryRange , 8704 , 8959 , Category_MathSymbol;            // 0x2200 .. 0x22FF
+    rows_push_back , CategoryRange , 9312 , 9371 , Category_OtherNumber;           // 0x2460 .. 0x249B
+    rows_push_back , CategoryRange , 9472 , 9599 , Category_OtherSymbol;           // 0x2500 .. 0x257F box drawing
+    rows_push_back , CategoryRange , 9600 , 9631 , Category_OtherSymbol;           // 0x2580 .. 0x259F blocks
+    rows_push_back , CategoryRange , 9632 , 9727 , Category_OtherSymbol;           // 0x25A0 .. 0x25FF shapes
+    rows_push_back , CategoryRange , 9728 , 9983 , Category_OtherSymbol;           // 0x2600 .. 0x26FF misc
+    rows_push_back , CategoryRange , 9984 , 10175 , Category_OtherSymbol;          // 0x2700 .. 0x27BF dingbats
+
+    // CJK.
+    rows_push_back , CategoryRange , 11904 , 12031 , Category_OtherSymbol;         // 0x2E80 .. 0x2EFF radicals
+    rows_push_back , CategoryRange , 12288 , 12288 , Category_SpaceSeparator;      // 0x3000 ideographic space
+    rows_push_back , CategoryRange , 12289 , 12291 , Category_OtherPunctuation;    // 0x3001 .. 0x3003
+    rows_push_back , CategoryRange , 12296 , 12296 , Category_OpenPunctuation;     // 0x3008
+    rows_push_back , CategoryRange , 12297 , 12297 , Category_ClosePunctuation;    // 0x3009
+    rows_push_back , CategoryRange , 12352 , 12447 , Category_OtherLetter;         // 0x3040 .. 0x309F hiragana
+    rows_push_back , CategoryRange , 12448 , 12543 , Category_OtherLetter;         // 0x30A0 .. 0x30FF katakana
+    rows_push_back , CategoryRange , 13312 , 19903 , Category_OtherLetter;         // 0x3400 .. 0x4DBF ext A
+    rows_push_back , CategoryRange , 19968 , 40959 , Category_OtherLetter;         // 0x4E00 .. 0x9FFF unified
+    rows_push_back , CategoryRange , 44032 , 55203 , Category_OtherLetter;         // 0xAC00 .. 0xD7A3 hangul
+
+    // Surrogates and private use, present so that a lookup never falls through
+    // to Unassigned for a code point that is merely unusable.
+    rows_push_back , CategoryRange , 55296 , 57343 , Category_Surrogate;           // 0xD800 .. 0xDFFF
+    rows_push_back , CategoryRange , 57344 , 63743 , Category_PrivateUse;          // 0xE000 .. 0xF8FF
+
+    // Compatibility forms and the specials block.
+    rows_push_back , CategoryRange , 64256 , 64262 , Category_LowercaseLetter;     // 0xFB00 .. 0xFB06 ligatures
+    rows_push_back , CategoryRange , 65024 , 65039 , Category_NonspacingMark;      // 0xFE00 .. 0xFE0F variation
+    rows_push_back , CategoryRange , 65056 , 65071 , Category_NonspacingMark;      // 0xFE20 .. 0xFE2F half marks
+    rows_push_back , CategoryRange , 65279 , 65279 , Category_Format;              // 0xFEFF byte order mark
+    rows_push_back , CategoryRange , 65281 , 65374 , Category_OtherPunctuation;    // 0xFF01 .. 0xFF5E full width
+    rows_push_back , CategoryRange , 65529 , 65531 , Category_Format;              // 0xFFF9 .. 0xFFFB
+
+    // Supplementary planes: the four byte decode path.
+    rows_push_back , CategoryRange , 65536 , 65663 , Category_OtherLetter;         // 0x10000 linear B
+    rows_push_back , CategoryRange , 66560 , 66599 , Category_UppercaseLetter;     // 0x10400 deseret upper
+    rows_push_back , CategoryRange , 66600 , 66639 , Category_LowercaseLetter;     // 0x10428 deseret lower
+    rows_push_back , CategoryRange , 119808 , 119892 , Category_UppercaseLetter;   // 0x1D400 math bold
+    rows_push_back , CategoryRange , 127462 , 127487 , Category_OtherSymbol;       // 0x1F1E6 regional
+    rows_push_back , CategoryRange , 127744 , 128511 , Category_OtherSymbol;       // 0x1F300 .. 0x1F5FF
+    rows_push_back , CategoryRange , 128512 , 128591 , Category_OtherSymbol;       // 0x1F600 .. 0x1F64F
+    rows_push_back , CategoryRange , 129280 , 129535 , Category_OtherSymbol;       // 0x1F980 .. 0x1FA7F
+    rows_push_back , CategoryRange , 131072 , 173791 , Category_OtherLetter;       // 0x20000 ext B
+    rows_push_back , CategoryRange , 983040 , 1048573 , Category_PrivateUse;       // 0xF0000 plane 15
+    rows_push_back , CategoryRange , 1048576 , 1114109 , Category_PrivateUse;      // 0x100000 plane 16
+
+    rows;
+
+// Binary search over a sorted range table. The tables are built once and never
+// mutated, so the invariant the search relies on is easy to state.
+
+    low = 0;
+    high = rows_size - 1;
+    low <= high;
+        middle = low + high - low >> 1;
+        row = rows_at , middle;
+        scalar < row_first;
+            high = middle - 1;
+
+            scalar > row_last;
+                low = middle + 1;
+
+                row_category;
+
+    Category_Unassigned;
+
+    // --- Category predicates -------------------------------------------------
+
+    category == Category_UppercaseLetter;
+        true;
+
+    category == Category_LowercaseLetter;
+        true;
+
+    category == Category_TitlecaseLetter;
+        true;
+
+    category == Category_ModifierLetter;
+        true;
+
+    category == Category_OtherLetter;
+
+    category == Category_NonspacingMark;
+        true;
+
+    category == Category_SpacingMark;
+        true;
+
+    category == Category_EnclosingMark;
+
+    category == Category_DecimalNumber;
+        true;
+
+    category == Category_LetterNumber;
+        true;
+
+    category == Category_OtherNumber;
+
+    category == Category_ConnectorPunctuation;
+        true;
+
+    category == Category_DashPunctuation;
+        true;
+
+    category == Category_OpenPunctuation;
+        true;
+
+    category == Category_ClosePunctuation;
+        true;
+
+    category == Category_InitialPunctuation;
+        true;
+
+    category == Category_FinalPunctuation;
+        true;
+
+    category == Category_OtherPunctuation;
+
+    category == Category_MathSymbol;
+        true;
+
+    category == Category_CurrencySymbol;
+        true;
+
+    category == Category_ModifierSymbol;
+        true;
+
+    category == Category_OtherSymbol;
+
+    category == Category_SpaceSeparator;
+        true;
+
+    category == Category_LineSeparator;
+        true;
+
+    category == Category_ParagraphSeparator;
+
+    category == Category_UppercaseLetter; "Lu";
+    category == Category_LowercaseLetter; "Ll";
+    category == Category_TitlecaseLetter; "Lt";
+    category == Category_ModifierLetter; "Lm";
+    category == Category_OtherLetter; "Lo";
+    category == Category_NonspacingMark; "Mn";
+    category == Category_SpacingMark; "Mc";
+    category == Category_EnclosingMark; "Me";
+    category == Category_DecimalNumber; "Nd";
+    category == Category_LetterNumber; "Nl";
+    category == Category_OtherNumber; "No";
+    category == Category_ConnectorPunctuation; "Pc";
+    category == Category_DashPunctuation; "Pd";
+    category == Category_OpenPunctuation; "Ps";
+    category == Category_ClosePunctuation; "Pe";
+    category == Category_InitialPunctuation; "Pi";
+    category == Category_FinalPunctuation; "Pf";
+    category == Category_OtherPunctuation; "Po";
+    category == Category_MathSymbol; "Sm";
+    category == Category_CurrencySymbol; "Sc";
+    category == Category_ModifierSymbol; "Sk";
+    category == Category_OtherSymbol; "So";
+    category == Category_SpaceSeparator; "Zs";
+    category == Category_LineSeparator; "Zl";
+    category == Category_ParagraphSeparator; "Zp";
+    category == Category_Control; "Cc";
+    category == Category_Format; "Cf";
+    category == Category_Surrogate; "Cs";
+    category == Category_PrivateUse; "Co";
+    "Cn";
+
+// --- Whitespace and combining tables -------------------------------------
+
+// Every code point with White_Space=Yes. Short enough to spell out in full.
+
+    rows ;
+    rows_push_back , CategoryRange , 9 , 13 , Category_Control;                    // tab .. carriage return
+    rows_push_back , CategoryRange , 32 , 32 , Category_SpaceSeparator;            // space
+    rows_push_back , CategoryRange , 133 , 133 , Category_Control;                 // 0x0085 next line
+    rows_push_back , CategoryRange , 160 , 160 , Category_SpaceSeparator;          // 0x00A0
+    rows_push_back , CategoryRange , 5760 , 5760 , Category_SpaceSeparator;        // 0x1680 ogham
+    rows_push_back , CategoryRange , 8192 , 8202 , Category_SpaceSeparator;        // 0x2000 .. 0x200A
+    rows_push_back , CategoryRange , 8232 , 8232 , Category_LineSeparator;         // 0x2028
+    rows_push_back , CategoryRange , 8233 , 8233 , Category_ParagraphSeparator;    // 0x2029
+    rows_push_back , CategoryRange , 8239 , 8239 , Category_SpaceSeparator;        // 0x202F narrow
+    rows_push_back , CategoryRange , 8287 , 8287 , Category_SpaceSeparator;        // 0x205F medium math
+    rows_push_back , CategoryRange , 12288 , 12288 , Category_SpaceSeparator;      // 0x3000 ideographic
+    rows;
+
+// Canonical combining classes for the marks this library composes. The value
+// is the raw property number, not the enumeration, because the reordering
+// algorithm compares magnitudes.
+
+    rows ;
+    rows_push_back , CombiningRange , 768 , 788 , 230;      // 0x0300 .. 0x0314 above
+    rows_push_back , CombiningRange , 789 , 789 , 232;      // 0x0315 above right
+    rows_push_back , CombiningRange , 790 , 793 , 220;      // 0x0316 .. 0x0319 below
+    rows_push_back , CombiningRange , 794 , 795 , 232;      // 0x031A .. 0x031B
+    rows_push_back , CombiningRange , 796 , 803 , 220;      // 0x031C .. 0x0323
+    rows_push_back , CombiningRange , 804 , 806 , 220;      // 0x0324 .. 0x0326
+    rows_push_back , CombiningRange , 807 , 808 , 202;      // 0x0327 .. 0x0328 attached below
+    rows_push_back , CombiningRange , 809 , 819 , 220;      // 0x0329 .. 0x0333
+    rows_push_back , CombiningRange , 820 , 824 , 1;        // 0x0334 .. 0x0338 overlay
+    rows_push_back , CombiningRange , 825 , 828 , 220;      // 0x0339 .. 0x033C
+    rows_push_back , CombiningRange , 829 , 836 , 230;      // 0x033D .. 0x0344
+    rows_push_back , CombiningRange , 837 , 837 , 240;      // 0x0345 iota subscript
+    rows_push_back , CombiningRange , 838 , 841 , 230;      // 0x0346 .. 0x0349
+    rows_push_back , CombiningRange , 842 , 844 , 230;      // 0x034A .. 0x034C
+    rows_push_back , CombiningRange , 845 , 846 , 220;      // 0x034D .. 0x034E
+    rows_push_back , CombiningRange , 848 , 855 , 230;      // 0x0350 .. 0x0357
+    rows_push_back , CombiningRange , 856 , 859 , 230;      // 0x0358 .. 0x035B
+    rows_push_back , CombiningRange , 860 , 860 , 233;      // 0x035C double below
+    rows_push_back , CombiningRange , 861 , 862 , 234;      // 0x035D .. 0x035E double above
+    rows_push_back , CombiningRange , 863 , 863 , 233;      // 0x035F
+    rows_push_back , CombiningRange , 864 , 865 , 234;      // 0x0360 .. 0x0361
+    rows_push_back , CombiningRange , 866 , 866 , 233;      // 0x0362
+    rows_push_back , CombiningRange , 867 , 879 , 230;      // 0x0363 .. 0x036F
+    rows_push_back , CombiningRange , 1425 , 1425 , 220;    // 0x0591 hebrew
+    rows_push_back , CombiningRange , 1426 , 1426 , 230;    // 0x0592
+    rows_push_back , CombiningRange , 1443 , 1444 , 220;    // 0x05A3 .. 0x05A4
+    rows_push_back , CombiningRange , 1456 , 1465 , 10;     // 0x05B0 .. 0x05B9 points
+    rows_push_back , CombiningRange , 1471 , 1471 , 23;     // 0x05BF
+    rows_push_back , CombiningRange , 1473 , 1474 , 24;     // 0x05C1 .. 0x05C2
+    rows_push_back , CombiningRange , 1611 , 1621 , 230;    // 0x064B .. 0x0655 arabic
+    rows_push_back , CombiningRange , 1648 , 1648 , 230;    // 0x0670
+    rows_push_back , CombiningRange , 2364 , 2364 , 7;      // 0x093C nukta
+    rows_push_back , CombiningRange , 2381 , 2381 , 9;      // 0x094D virama
+    rows_push_back , CombiningRange , 3633 , 3633 , 0;      // 0x0E31 thai
+    rows_push_back , CombiningRange , 3636 , 3642 , 0;      // 0x0E34 .. 0x0E3A
+    rows_push_back , CombiningRange , 12330 , 12331 , 218;  // 0x302A .. 0x302B
+    rows_push_back , CombiningRange , 12332 , 12333 , 228;  // 0x302C .. 0x302D
+    rows_push_back , CombiningRange , 12441 , 12442 , 8;    // 0x3099 .. 0x309A kana voicing
+    rows;
+
+    low = 0;
+    high = rows_size - 1;
+    low <= high;
+        middle = low + high - low >> 1;
+        row = rows_at , middle;
+        scalar < row_first;
+            high = middle - 1;
+
+            scalar > row_last;
+                low = middle + 1;
+
+                row_combining;
+
+    0;
+
+// --- The shared property database ----------------------------------------
+//
+// One instance holds every table. Building the tables costs a few hundred
+// vector pushes, so the caller is expected to build it once and pass a
+// reference around.
+
+        categories = category_table;
+        whitespace = whitespace_table;
+        combining = combining_table;
+        widths = width_table;
+        breaks = grapheme_break_table;
+        words = word_break_table;
+        cases = case_table;
+        specials = special_case_table;
+        decompositions = decomposition_table;
+        ready = true;
+
+        scalar >= 0 && scalar <= MAX_ASCII;
+            ascii_category , scalar;
+
+        find_category , categories , scalar;
+
+        scalar <= MAX_ASCII;
+            0;
+
+        find_combining , combining , scalar;
+
+        is_letter_category , category_of , scalar;
+
+        category_of , scalar == Category_DecimalNumber;
+
+        is_number_category , category_of , scalar;
+
+        is_mark_category , category_of , scalar;
+
+        is_punctuation_category , category_of , scalar;
+
+        is_symbol_category , category_of , scalar;
+
+        scalar < 32;
+            true;
+
+        scalar >= 127 && scalar <= 159;   // 0x7F .. 0x9F
+            true;
+
+        category_of , scalar == Category_Control;
+
+        category_of , scalar == Category_Format;
+
+        scalar >= 9 && scalar <= 13;
+            true;
+
+        scalar == 32;
+            true;
+
+        find_category , whitespace , scalar != Category_Unassigned;
+
+        combining_of , scalar != 0 || is_mark , scalar;
+
+        is_control , scalar;
+            false;
+
+        is_format , scalar;
+            false;
+
+        category = category_of , scalar;
+        category == Category_Surrogate;
+            false;
+
+        category != Category_Unassigned;
+
+    // A code point that may begin an identifier under the default rules: a
+    // letter, a letter number, or the connector underscore.
+
+        scalar == 95;                     // underscore
+            true;
+
+        category = category_of , scalar;
+        category == Category_LetterNumber;
+            true;
+
+        is_letter_category , category;
+
+        is_identifier_start , scalar;
+            true;
+
+        category = category_of , scalar;
+        category == Category_NonspacingMark;
+            true;
+
+        category == Category_SpacingMark;
+            true;
+
+        category == Category_DecimalNumber;
+            true;
+
+        category == Category_ConnectorPunctuation;
+            true;
+
+        category == Category_Format;
+
+        // ASCII is answered without touching the range table at all.
+
+    c = char , scalar;
+    c >= 'A' && c <= 'Z';
+        Category_UppercaseLetter;
+
+    c >= 'a' && c <= 'z';
+        Category_LowercaseLetter;
+
+    c >= '0' && c <= '9';
+        Category_DecimalNumber;
+
+    c == ' ';
+        Category_SpaceSeparator;
+
+    scalar < 32 || scalar == 127;
+        Category_Control;
+
+    c == '$';
+        Category_CurrencySymbol;
+
+    c == '+' || c == '<' || c == '=' || c == '>' || c == '|' || c == '~';
+        Category_MathSymbol;
+
+    c == '^' || c == '`';
+        Category_ModifierSymbol;
+
+    c == '-';
+        Category_DashPunctuation;
+
+    c == '_';
+        Category_ConnectorPunctuation;
+
+    c == '(' || c == '[' || c == '{';
+        Category_OpenPunctuation;
+
+    c == ')' || c == ']' || c == '}';
+        Category_ClosePunctuation;
+
+    Category_OtherPunctuation;
+
+// --- Case mapping --------------------------------------------------------
+//
+// Most case mappings are a constant delta over a run of code points, and many
+// of those runs alternate upper and lower on consecutive code points. A row
+// therefore carries a step: step one covers a solid run, step two covers the
+// alternating Latin Extended-A pattern where each uppercase letter is
+// immediately followed by its lowercase partner.
+
+    rows ;
+
+    // Basic Latin.
+    rows_push_back , CaseRow , 65 , 90 , 1 , 32 , 0 , 0;       // A .. Z
+    rows_push_back , CaseRow , 97 , 122 , 1 , 0 , -32 , -32;   // a .. z
+
+    // Latin-1 supplement. The multiply and divide signs sit inside the runs
+    // and are excluded by splitting each run in two.
+    rows_push_back , CaseRow , 192 , 214 , 1 , 32 , 0 , 0;     // 0x00C0 .. 0x00D6
+    rows_push_back , CaseRow , 216 , 222 , 1 , 32 , 0 , 0;     // 0x00D8 .. 0x00DE
+    rows_push_back , CaseRow , 224 , 246 , 1 , 0 , -32 , -32;  // 0x00E0 .. 0x00F6
+    rows_push_back , CaseRow , 248 , 254 , 1 , 0 , -32 , -32;  // 0x00F8 .. 0x00FE
+    rows_push_back , CaseRow , 255 , 255 , 1 , 0 , -121 , -121;// 0x00FF y diaeresis
+
+    // Latin Extended-A: alternating pairs, so a step of two with the uppercase
+    // rows starting on the even code points.
+    rows_push_back , CaseRow , 256 , 302 , 2 , 1 , 0 , 0;      // 0x0100 .. 0x012E
+    rows_push_back , CaseRow , 257 , 303 , 2 , 0 , -1 , -1;    // 0x0101 .. 0x012F
+    rows_push_back , CaseRow , 306 , 310 , 2 , 1 , 0 , 0;      // 0x0132 .. 0x0136
+    rows_push_back , CaseRow , 307 , 311 , 2 , 0 , -1 , -1;    // 0x0133 .. 0x0137
+    rows_push_back , CaseRow , 313 , 327 , 2 , 1 , 0 , 0;      // 0x0139 .. 0x0147
+    rows_push_back , CaseRow , 314 , 328 , 2 , 0 , -1 , -1;    // 0x013A .. 0x0148
+    rows_push_back , CaseRow , 330 , 374 , 2 , 1 , 0 , 0;      // 0x014A .. 0x0176
+    rows_push_back , CaseRow , 331 , 375 , 2 , 0 , -1 , -1;    // 0x014B .. 0x0177
+    rows_push_back , CaseRow , 376 , 376 , 1 , -121 , 0 , 0;   // 0x0178
+    rows_push_back , CaseRow , 377 , 381 , 2 , 1 , 0 , 0;      // 0x0179 .. 0x017D
+    rows_push_back , CaseRow , 378 , 382 , 2 , 0 , -1 , -1;    // 0x017A .. 0x017E
+    rows_push_back , CaseRow , 383 , 383 , 1 , 0 , -268 , -268;// 0x017F long s
+
+    // A handful of Latin Extended-B rows with the title case column actually
+    // different from the upper case column.
+    rows_push_back , CaseRow , 452 , 452 , 1 , 2 , 0 , 1;      // 0x01C4 DZ
+    rows_push_back , CaseRow , 453 , 453 , 1 , 1 , -1 , 0;     // 0x01C5 Dz
+    rows_push_back , CaseRow , 454 , 454 , 1 , 0 , -2 , -1;    // 0x01C6 dz
+    rows_push_back , CaseRow , 455 , 455 , 1 , 2 , 0 , 1;      // 0x01C7 LJ
+    rows_push_back , CaseRow , 456 , 456 , 1 , 1 , -1 , 0;     // 0x01C8 Lj
+    rows_push_back , CaseRow , 457 , 457 , 1 , 0 , -2 , -1;    // 0x01C9 lj
+    rows_push_back , CaseRow , 458 , 458 , 1 , 2 , 0 , 1;      // 0x01CA NJ
+    rows_push_back , CaseRow , 459 , 459 , 1 , 1 , -1 , 0;     // 0x01CB Nj
+    rows_push_back , CaseRow , 460 , 460 , 1 , 0 , -2 , -1;    // 0x01CC nj
+
+    // Greek.
+    rows_push_back , CaseRow , 902 , 902 , 1 , 38 , 0 , 0;     // 0x0386
+    rows_push_back , CaseRow , 904 , 906 , 1 , 37 , 0 , 0;     // 0x0388 .. 0x038A
+    rows_push_back , CaseRow , 908 , 908 , 1 , 64 , 0 , 0;     // 0x038C
+    rows_push_back , CaseRow , 910 , 911 , 1 , 63 , 0 , 0;     // 0x038E .. 0x038F
+    rows_push_back , CaseRow , 913 , 929 , 1 , 32 , 0 , 0;     // 0x0391 .. 0x03A1
+    rows_push_back , CaseRow , 931 , 939 , 1 , 32 , 0 , 0;     // 0x03A3 .. 0x03AB
+    rows_push_back , CaseRow , 945 , 961 , 1 , 0 , -32 , -32;  // 0x03B1 .. 0x03C1
+    rows_push_back , CaseRow , 962 , 962 , 1 , 0 , -31 , -31;  // 0x03C2 final sigma
+    rows_push_back , CaseRow , 963 , 971 , 1 , 0 , -32 , -32;  // 0x03C3 .. 0x03CB
+
+    // Cyrillic: one solid run of 32 plus the shifted archaic block.
+    rows_push_back , CaseRow , 1024 , 1039 , 1 , 80 , 0 , 0;   // 0x0400 .. 0x040F
+    rows_push_back , CaseRow , 1040 , 1071 , 1 , 32 , 0 , 0;   // 0x0410 .. 0x042F
+    rows_push_back , CaseRow , 1072 , 1103 , 1 , 0 , -32 , -32;// 0x0430 .. 0x044F
+    rows_push_back , CaseRow , 1104 , 1119 , 1 , 0 , -80 , -80;// 0x0450 .. 0x045F
+    rows_push_back , CaseRow , 1120 , 1152 , 2 , 1 , 0 , 0;    // 0x0460 .. 0x0480
+    rows_push_back , CaseRow , 1121 , 1153 , 2 , 0 , -1 , -1;  // 0x0461 .. 0x0481
+
+    // Armenian and Georgian.
+    rows_push_back , CaseRow , 1329 , 1366 , 1 , 48 , 0 , 0;   // 0x0531 .. 0x0556
+    rows_push_back , CaseRow , 1377 , 1414 , 1 , 0 , -48 , -48;// 0x0561 .. 0x0586
+    rows_push_back , CaseRow , 4256 , 4293 , 1 , 7264 , 0 , 0; // 0x10A0 .. 0x10C5
+
+    // Halfwidth and fullwidth Latin.
+    rows_push_back , CaseRow , 65313 , 65338 , 1 , 32 , 0 , 0; // 0xFF21 .. 0xFF3A
+    rows_push_back , CaseRow , 65345 , 65370 , 1 , 0 , -32 , -32; // 0xFF41 .. 0xFF5A
+
+    // Supplementary plane: Deseret, which is the standard test that a case
+    // mapper does not silently truncate to sixteen bits.
+    rows_push_back , CaseRow , 66560 , 66599 , 1 , 40 , 0 , 0; // 0x10400 .. 0x10427
+    rows_push_back , CaseRow , 66600 , 66639 , 1 , 0 , -40 , -40; // 0x10428 .. 0x1044F
+
+    rows;
+
+// Mappings that are not one to one. The German sharp s uppercases to two
+// letters, the ligatures expand, and the Greek iota subscript forms grow a
+// letter when they are uppercased.
+
+    rows ;
+    rows_push_back , SpecialCaseRow , 223 , 83 , 83 , 0 , 223 , 0 , 0 , "sharp s becomes SS";            // 0x00DF
+    rows_push_back , SpecialCaseRow , 305 , 73 , 0 , 0 , 305 , 0 , 0 , "dotless i uppercases to I";      // 0x0131
+    rows_push_back , SpecialCaseRow , 329 , 700 , 78 , 0 , 329 , 0 , 0 , "n preceded by apostrophe";     // 0x0149
+    rows_push_back , SpecialCaseRow , 496 , 74 , 780 , 0 , 496 , 0 , 0 , "j with caron";                 // 0x01F0
+    rows_push_back , SpecialCaseRow , 912 , 921 , 776 , 769 , 912 , 0 , 0 , "iota with dialytika tonos"; // 0x0390
+    rows_push_back , SpecialCaseRow , 944 , 933 , 776 , 769 , 944 , 0 , 0 , "upsilon dialytika tonos";   // 0x03B0
+    rows_push_back , SpecialCaseRow , 64256 , 70 , 70 , 0 , 64256 , 0 , 0 , "ligature ff";               // 0xFB00
+    rows_push_back , SpecialCaseRow , 64257 , 70 , 73 , 0 , 64257 , 0 , 0 , "ligature fi";               // 0xFB01
+    rows_push_back , SpecialCaseRow , 64258 , 70 , 76 , 0 , 64258 , 0 , 0 , "ligature fl";               // 0xFB02
+    rows_push_back , SpecialCaseRow , 64259 , 70 , 70 , 73 , 64259 , 0 , 0 , "ligature ffi";             // 0xFB03
+    rows_push_back , SpecialCaseRow , 64260 , 70 , 70 , 76 , 64260 , 0 , 0 , "ligature ffl";             // 0xFB04
+    rows_push_back , SpecialCaseRow , 64261 , 83 , 84 , 0 , 64261 , 0 , 0 , "ligature long s t";         // 0xFB05
+    rows_push_back , SpecialCaseRow , 64262 , 83 , 84 , 0 , 64262 , 0 , 0 , "ligature st";               // 0xFB06
+    rows;
+
+    index = 0;
+    row , rows;
+        scalar >= row_first && scalar <= row_last;
+            row_step == 1;
+                index;
+
+            // A stepped row only covers every other code point, so the offset
+            // from the start of the row has to be a multiple of the step.
+            scalar - row_first % row_step == 0;
+                index;
+
+        index++;
+
+    -1;
+
+    index = 0;
+    row , rows;
+        row_source == scalar;
+            index;
+
+        index++;
+
+    -1;
+
+    scalar >= int , 'A' && scalar <= int , 'Z';
+        scalar + 32;
+
+    scalar <= MAX_ASCII;
+        scalar;
+
+    index = find_case_row , props_cases , scalar;
+    index < 0;
+        scalar;
+
+    row = props_cases_at , index;
+    scalar + row_lower_delta;
+
+    scalar >= int , 'a' && scalar <= int , 'z';
+        scalar - 32;
+
+    scalar <= MAX_ASCII;
+        scalar;
+
+    index = find_case_row , props_cases , scalar;
+    index < 0;
+        scalar;
+
+    row = props_cases_at , index;
+    scalar + row_upper_delta;
+
+    scalar >= int , 'a' && scalar <= int , 'z';
+        scalar - 32;
+
+    scalar <= MAX_ASCII;
+        scalar;
+
+    index = find_case_row , props_cases , scalar;
+    index < 0;
+        scalar;
+
+    row = props_cases_at , index;
+    scalar + row_title_delta;
+
+// Case folding for caseless comparison. Simple folding only: it maps to lower
+// case with the handful of exceptions that would otherwise compare unequal.
+
+    scalar == 304;                        // 0x0130 capital I with dot
+        int , 'i';
+
+    scalar == 305;                        // 0x0131 dotless i
+        int , 'i';
+
+    scalar == 383;                        // 0x017F long s
+        int , 's';
+
+    scalar == 962;                        // 0x03C2 final sigma
+        963;                            // 0x03C3
+
+    scalar == 976;                        // 0x03D0 beta symbol
+        946;                            // 0x03B2
+
+    scalar == 977;                        // 0x03D1 theta symbol
+        952;                            // 0x03B8
+
+    scalar == 981;                        // 0x03D5 phi symbol
+        966;                            // 0x03C6
+
+    scalar == 982;                        // 0x03D6 pi symbol
+        960;                            // 0x03C0
+
+    scalar == 8486;                       // 0x2126 ohm sign
+        969;                            // 0x03C9
+
+    scalar == 8490;                       // 0x212A kelvin sign
+        int , 'k';
+
+    scalar == 8491;                       // 0x212B angstrom sign
+        229;                            // 0x00E5
+
+    to_lower_scalar , props , scalar;
+
+// Uppercase one scalar, expanding it when the special case table says so.
+// Returns how many scalars were appended.
+
+    index = find_special_case , props_specials , scalar;
+    index < 0;
+        sink_push_back , to_upper_scalar , props , scalar;
+        1;
+
+    row = props_specials_at , index;
+    sink_push_back , row_upper0;
+    row_upper1 == 0;
+        1;
+
+    sink_push_back , row_upper1;
+    row_upper2 == 0;
+        2;
+
+    sink_push_back , row_upper2;
+    3;
+
+    index = find_special_case , props_specials , scalar;
+    index < 0;
+        sink_push_back , to_lower_scalar , props , scalar;
+        1;
+
+    row = props_specials_at , index;
+    sink_push_back , row_lower0;
+    row_lower1 == 0;
+        1;
+
+    sink_push_back , row_lower1;
+    row_lower2 == 0;
+        2;
+
+    sink_push_back , row_lower2;
+    3;
+
+    out ;
+    out_reserve , scalars_size;
+    scalar , scalars;
+        upper_expand , props , scalar , out;
+
+    out;
+
+    out ;
+    out_reserve , scalars_size;
+    scalar , scalars;
+        lower_expand , props , scalar , out;
+
+    out;
+
+// Title case a run: the first cased scalar of every word is titled and the
+// rest are lowered. Word boundaries here are the simple ones, which is all a
+// display routine needs.
+
+    out ;
+    at_word_start = true;
+    scalar , scalars;
+        props_is_letter , scalar;
+            at_word_start;
+                out_push_back , to_title_scalar , props , scalar;
+
+                out_push_back , to_lower_scalar , props , scalar;
+
+            at_word_start = false;
+
+            out_push_back , scalar;
+            props_is_whitespace , scalar || props_is_punctuation , scalar;
+                at_word_start = true;
+
+    out;
+
+    out ;
+    scalar , scalars;
+        out_push_back , fold_scalar , props , scalar;
+
+    out;
+
+// Compare two scalar runs ignoring case. Returns a negative number, zero or a
+// positive number in the usual way.
+
+    limit = min , left_size , right_size;
+    i , range , 0 , limit;
+        a = fold_scalar , props , left_at , i;
+        b = fold_scalar , props , right_at , i;
+        a < b;
+            -1;
+
+        a > b;
+            1;
+
+    left_size < right_size;
+        -1;
+
+    left_size > right_size;
+        1;
+
+    0;
+
+// --- Grapheme cluster segmentation ---------------------------------------
+//
+// Hangul syllables are composed algorithmically rather than by table: the
+// block at 0xAC00 holds L * 21 * 28 + V * 28 + T for every combination, so the
+// LV and LVT distinction falls out of one modulo.
+
+// 0xAC00
+// 0xD7A3
+
+             // 0x1100
+
+             // 0x1161
+
+             // 0x11A7
+
+             // V_COUNT * T_COUNT
+
+             // 0x200D
+             // 0x200C
+ // 0x20E3
+ // 0x1F1E6
+  // 0x1F1FF
+  // 0xFE00
+  // 0xFE0F
+
+scalar >= HANGUL_SYLLABLE_FIRST && scalar <= HANGUL_SYLLABLE_LAST;
+
+    is_hangul_syllable , scalar == false;
+        false;
+
+    scalar - HANGUL_SYLLABLE_FIRST % HANGUL_T_COUNT == 0;
+
+    is_hangul_syllable , scalar == false;
+        false;
+
+    scalar - HANGUL_SYLLABLE_FIRST % HANGUL_T_COUNT != 0;
+
+    // Grapheme cluster break property table. Everything not listed is Other.
+
+    rows ;
+    rows_push_back , BreakRange , 0 , 9 , GraphemeBreak_ControlBreak;                 // 0x00 .. 0x09
+    rows_push_back , BreakRange , 10 , 10 , GraphemeBreak_LineFeed;                   // line feed
+    rows_push_back , BreakRange , 11 , 12 , GraphemeBreak_ControlBreak;               // 0x0B .. 0x0C
+    rows_push_back , BreakRange , 13 , 13 , GraphemeBreak_CarriageReturn;             // carriage return
+    rows_push_back , BreakRange , 14 , 31 , GraphemeBreak_ControlBreak;               // 0x0E .. 0x1F
+    rows_push_back , BreakRange , 127 , 159 , GraphemeBreak_ControlBreak;             // 0x7F .. 0x9F
+    rows_push_back , BreakRange , 173 , 173 , GraphemeBreak_ControlBreak;             // 0x00AD soft hyphen
+    rows_push_back , BreakRange , 768 , 879 , GraphemeBreak_Extend;                   // 0x0300 .. 0x036F
+    rows_push_back , BreakRange , 1155 , 1161 , GraphemeBreak_Extend;                 // 0x0483 .. 0x0489
+    rows_push_back , BreakRange , 1425 , 1469 , GraphemeBreak_Extend;                 // 0x0591 .. 0x05BD
+    rows_push_back , BreakRange , 1471 , 1471 , GraphemeBreak_Extend;                 // 0x05BF
+    rows_push_back , BreakRange , 1473 , 1474 , GraphemeBreak_Extend;                 // 0x05C1 .. 0x05C2
+    rows_push_back , BreakRange , 1552 , 1562 , GraphemeBreak_Extend;                 // 0x0610 .. 0x061A
+    rows_push_back , BreakRange , 1611 , 1631 , GraphemeBreak_Extend;                 // 0x064B .. 0x065F
+    rows_push_back , BreakRange , 1648 , 1648 , GraphemeBreak_Extend;                 // 0x0670
+    rows_push_back , BreakRange , 2304 , 2306 , GraphemeBreak_Extend;                 // 0x0900 .. 0x0902
+    rows_push_back , BreakRange , 2307 , 2307 , GraphemeBreak_SpacingMarkBreak;       // 0x0903
+    rows_push_back , BreakRange , 2362 , 2362 , GraphemeBreak_Extend;                 // 0x093A
+    rows_push_back , BreakRange , 2363 , 2363 , GraphemeBreak_SpacingMarkBreak;       // 0x093B
+    rows_push_back , BreakRange , 2364 , 2364 , GraphemeBreak_Extend;                 // 0x093C
+    rows_push_back , BreakRange , 2366 , 2368 , GraphemeBreak_SpacingMarkBreak;       // 0x093E .. 0x0940
+    rows_push_back , BreakRange , 2369 , 2376 , GraphemeBreak_Extend;                 // 0x0941 .. 0x0948
+    rows_push_back , BreakRange , 2377 , 2380 , GraphemeBreak_SpacingMarkBreak;       // 0x0949 .. 0x094C
+    rows_push_back , BreakRange , 2381 , 2381 , GraphemeBreak_Extend;                 // 0x094D
+    rows_push_back , BreakRange , 3633 , 3633 , GraphemeBreak_Extend;                 // 0x0E31
+    rows_push_back , BreakRange , 3636 , 3642 , GraphemeBreak_Extend;                 // 0x0E34 .. 0x0E3A
+    rows_push_back , BreakRange , 3655 , 3662 , GraphemeBreak_Extend;                 // 0x0E47 .. 0x0E4E
+    rows_push_back , BreakRange , 4352 , 4447 , GraphemeBreak_HangulL;                // 0x1100 .. 0x115F
+    rows_push_back , BreakRange , 4448 , 4519 , GraphemeBreak_HangulV;                // 0x1160 .. 0x11A7
+    rows_push_back , BreakRange , 4520 , 4607 , GraphemeBreak_HangulT;                // 0x11A8 .. 0x11FF
+    rows_push_back , BreakRange , 6068 , 6069 , GraphemeBreak_Prepend;                // 0x17B4 .. 0x17B5
+    rows_push_back , BreakRange , 8203 , 8203 , GraphemeBreak_ControlBreak;           // 0x200B
+    rows_push_back , BreakRange , 8204 , 8204 , GraphemeBreak_Extend;                 // 0x200C
+    rows_push_back , BreakRange , 8205 , 8205 , GraphemeBreak_ZeroWidthJoiner;        // 0x200D
+    rows_push_back , BreakRange , 8206 , 8207 , GraphemeBreak_ControlBreak;           // 0x200E .. 0x200F
+    rows_push_back , BreakRange , 8232 , 8233 , GraphemeBreak_ControlBreak;           // 0x2028 .. 0x2029
+    rows_push_back , BreakRange , 8234 , 8238 , GraphemeBreak_ControlBreak;           // 0x202A .. 0x202E
+    rows_push_back , BreakRange , 8288 , 8303 , GraphemeBreak_ControlBreak;           // 0x2060 .. 0x206F
+    rows_push_back , BreakRange , 8400 , 8432 , GraphemeBreak_Extend;                 // 0x20D0 .. 0x20F0
+    rows_push_back , BreakRange , 9757 , 9757 , GraphemeBreak_ExtendedPictographic;   // 0x261D
+    rows_push_back , BreakRange , 9977 , 9977 , GraphemeBreak_ExtendedPictographic;   // 0x26F9
+    rows_push_back , BreakRange , 12330 , 12335 , GraphemeBreak_Extend;               // 0x302A .. 0x302F
+    rows_push_back , BreakRange , 12441 , 12442 , GraphemeBreak_Extend;               // 0x3099 .. 0x309A
+    rows_push_back , BreakRange , 65024 , 65039 , GraphemeBreak_Extend;               // 0xFE00 .. 0xFE0F
+    rows_push_back , BreakRange , 65056 , 65071 , GraphemeBreak_Extend;               // 0xFE20 .. 0xFE2F
+    rows_push_back , BreakRange , 65279 , 65279 , GraphemeBreak_ControlBreak;         // 0xFEFF
+    rows_push_back , BreakRange , 65529 , 65531 , GraphemeBreak_ControlBreak;         // 0xFFF9 .. 0xFFFB
+    rows_push_back , BreakRange , 127462 , 127487 , GraphemeBreak_RegionalIndicator;  // 0x1F1E6 .. 0x1F1FF
+    rows_push_back , BreakRange , 127744 , 128511 , GraphemeBreak_ExtendedPictographic; // 0x1F300 .. 0x1F5FF
+    rows_push_back , BreakRange , 128512 , 128591 , GraphemeBreak_ExtendedPictographic; // 0x1F600 .. 0x1F64F
+    rows_push_back , BreakRange , 128640 , 128767 , GraphemeBreak_ExtendedPictographic; // 0x1F680 .. 0x1F6FF
+    rows_push_back , BreakRange , 129280 , 129535 , GraphemeBreak_ExtendedPictographic; // 0x1F980 .. 0x1FA7F
+    rows_push_back , BreakRange , 917504 , 921599 , GraphemeBreak_Extend;             // 0xE0000 .. 0xE0FFF tags
+    rows;
+
+    low = 0;
+    high = rows_size - 1;
+    low <= high;
+        middle = low + high - low >> 1;
+        row = rows_at , middle;
+        scalar < row_first;
+            high = middle - 1;
+
+            scalar > row_last;
+                low = middle + 1;
+
+                row_property;
+
+    GraphemeBreak_Other;
+
+    // The Hangul syllable block is not in the table because it is computed.
+
+    is_hangul_syllable , scalar;
+        hangul_is_lv , scalar;
+            GraphemeBreak_HangulLV;
+
+        GraphemeBreak_HangulLVT;
+
+    find_break , props_breaks , scalar;
+
+// The state a cluster walker carries between code points, which is what makes
+// the regional indicator and emoji sequence rules expressible.
+
+        previous = GraphemeBreak_Other;
+        regional_run = 0;
+        in_emoji_sequence = false;
+        started = false;
+
+// Decide whether a cluster boundary falls between two code points. The rules
+// are applied in the order the standard gives them, and the numbering in the
+// comments matches the standard so the two can be diffed.
+
+    left = grapheme_property , props , before;
+    right = grapheme_property , props , after;
+
+    // GB3: do not break inside a carriage return line feed pair.
+    left == GraphemeBreak_CarriageReturn && right == GraphemeBreak_LineFeed;
+        state_regional_run = 0;
+        false;
+
+    // GB4: break after any control, carriage return or line feed.
+    left == GraphemeBreak_ControlBreak;
+        state_regional_run = 0;
+        true;
+
+    left == GraphemeBreak_CarriageReturn;
+        state_regional_run = 0;
+        true;
+
+    left == GraphemeBreak_LineFeed;
+        state_regional_run = 0;
+        true;
+
+    // GB5: break before any control, carriage return or line feed.
+    right == GraphemeBreak_ControlBreak;
+        state_regional_run = 0;
+        true;
+
+    right == GraphemeBreak_CarriageReturn;
+        state_regional_run = 0;
+        true;
+
+    right == GraphemeBreak_LineFeed;
+        state_regional_run = 0;
+        true;
+
+    // GB6, GB7, GB8: do not break inside a Hangul syllable sequence.
+    left == GraphemeBreak_HangulL;
+        right == GraphemeBreak_HangulL;
+            false;
+
+        right == GraphemeBreak_HangulV;
+            false;
+
+        right == GraphemeBreak_HangulLV;
+            false;
+
+        right == GraphemeBreak_HangulLVT;
+            false;
+
+    left == GraphemeBreak_HangulLV || left == GraphemeBreak_HangulV;
+        right == GraphemeBreak_HangulV;
+            false;
+
+        right == GraphemeBreak_HangulT;
+            false;
+
+    left == GraphemeBreak_HangulLVT || left == GraphemeBreak_HangulT;
+        right == GraphemeBreak_HangulT;
+            false;
+
+    // GB9: do not break before extending characters or the joiner.
+    right == GraphemeBreak_Extend;
+        false;
+
+    right == GraphemeBreak_ZeroWidthJoiner;
+        state_in_emoji_sequence = left == GraphemeBreak_ExtendedPictographic;
+        false;
+
+    // GB9a: do not break before a spacing mark.
+    right == GraphemeBreak_SpacingMarkBreak;
+        false;
+
+    // GB9b: do not break after a prepending character.
+    left == GraphemeBreak_Prepend;
+        false;
+
+    // GB11: do not break within an emoji joiner sequence.
+    left == GraphemeBreak_ZeroWidthJoiner;
+        right == GraphemeBreak_ExtendedPictographic;
+            state_in_emoji_sequence;
+                state_in_emoji_sequence = false;
+                false;
+
+    // GB12 and GB13: break between a pair of regional indicators, but not in
+    // the middle of one flag.
+    left == GraphemeBreak_RegionalIndicator && right == GraphemeBreak_RegionalIndicator;
+        state_regional_run += 1;
+        state_regional_run % 2 == 1;
+            false;
+
+        state_regional_run = 0;
+        true;
+
+    state_regional_run = 0;
+
+    // GB999: otherwise break everywhere.
+    true;
+
+    // Split a scalar run into clusters, each described by a half open index range.
+
+    out ;
+    scalars_empty;
+        out;
+
+    state ;
+    state_reset;
+    begin = 0;
+    index = 1;
+    index < scalars_size;
+        before = scalars_at , index - 1;
+        after = scalars_at , index;
+        breaks_between , props , state , before , after;
+            out_push_back , Step , begin , index , true;
+            begin = index;
+
+        index++;
+
+    out_push_back , Step , begin , scalars_size , true;
+    out;
+
+    scalars_empty;
+        0;
+
+    state ;
+    state_reset;
+    count = 1;
+    index = 1;
+    index < scalars_size;
+        breaks_between , props , state , scalars_at , index - 1 , scalars_at , index;
+            count++;
+
+        index++;
+
+    count;
+
+    // The index just past the cluster that starts at from.
+
+    from >= scalars_size;
+        scalars_size;
+
+    state ;
+    state_reset;
+    index = from + 1;
+    index < scalars_size;
+        breaks_between , props , state , scalars_at , index - 1 , scalars_at , index;
+            index;
+
+        index++;
+
+    scalars_size;
+
+// Walking backwards is harder because the rules are not symmetric; the honest
+// implementation rescans from the start of a bounded window.
+
+    from <= 0;
+        0;
+
+    window = from - 64;
+    window < 0;
+        window = 0;
+
+    candidate = window;
+    cursor = window;
+    cursor < from;
+        step = next_grapheme , props , scalars , cursor;
+        step >= from;
+            cursor;
+
+        candidate = cursor;
+        cursor = step;
+
+    candidate;
+
+    // --- Word segmentation ---------------------------------------------------
+
+    rows ;
+    rows_push_back , WordRange , 9 , 9 , WordBreak_WhiteSpaceWord;                // tab
+    rows_push_back , WordRange , 10 , 10 , WordBreak_LineFeedWord;                // line feed
+    rows_push_back , WordRange , 11 , 12 , WordBreak_NewlineWord;                 // 0x0B .. 0x0C
+    rows_push_back , WordRange , 13 , 13 , WordBreak_CarriageReturnWord;          // carriage return
+    rows_push_back , WordRange , 32 , 32 , WordBreak_WhiteSpaceWord;              // space
+    rows_push_back , WordRange , 34 , 34 , WordBreak_DoubleQuoteWord;             // 0x0022
+    rows_push_back , WordRange , 39 , 39 , WordBreak_SingleQuoteWord;             // 0x0027 apostrophe
+    rows_push_back , WordRange , 44 , 44 , WordBreak_MidNum;                      // comma
+    rows_push_back , WordRange , 46 , 46 , WordBreak_MidNumLet;                   // full stop
+    rows_push_back , WordRange , 48 , 57 , WordBreak_Numeric;                     // 0 .. 9
+    rows_push_back , WordRange , 58 , 58 , WordBreak_MidLetter;                   // colon
+    rows_push_back , WordRange , 59 , 59 , WordBreak_MidNum;                      // semicolon
+    rows_push_back , WordRange , 65 , 90 , WordBreak_ALetter;                     // A .. Z
+    rows_push_back , WordRange , 95 , 95 , WordBreak_ExtendNumLet;                // underscore
+    rows_push_back , WordRange , 97 , 122 , WordBreak_ALetter;                    // a .. z
+    rows_push_back , WordRange , 133 , 133 , WordBreak_NewlineWord;               // 0x0085
+    rows_push_back , WordRange , 160 , 160 , WordBreak_WhiteSpaceWord;            // 0x00A0
+    rows_push_back , WordRange , 173 , 173 , WordBreak_FormatWord;                // 0x00AD
+    rows_push_back , WordRange , 183 , 183 , WordBreak_MidLetter;                 // 0x00B7 middle dot
+    rows_push_back , WordRange , 192 , 214 , WordBreak_ALetter;                   // 0x00C0 .. 0x00D6
+    rows_push_back , WordRange , 216 , 246 , WordBreak_ALetter;                   // 0x00D8 .. 0x00F6
+    rows_push_back , WordRange , 248 , 591 , WordBreak_ALetter;                   // 0x00F8 .. 0x024F
+    rows_push_back , WordRange , 768 , 879 , WordBreak_ExtendWord;                // 0x0300 .. 0x036F
+    rows_push_back , WordRange , 894 , 894 , WordBreak_MidNum;                    // 0x037E greek semicolon
+    rows_push_back , WordRange , 902 , 1023 , WordBreak_ALetter;                  // greek
+    rows_push_back , WordRange , 1024 , 1327 , WordBreak_ALetter;                 // cyrillic
+    rows_push_back , WordRange , 1425 , 1474 , WordBreak_ExtendWord;              // hebrew marks
+    rows_push_back , WordRange , 1488 , 1514 , WordBreak_HebrewLetter;            // 0x05D0 .. 0x05EA
+    rows_push_back , WordRange , 1536 , 1541 , WordBreak_FormatWord;              // 0x0600 .. 0x0605
+    rows_push_back , WordRange , 1548 , 1548 , WordBreak_MidNum;                  // 0x060C
+    rows_push_back , WordRange , 1569 , 1610 , WordBreak_ALetter;                 // arabic letters
+    rows_push_back , WordRange , 1611 , 1631 , WordBreak_ExtendWord;              // arabic marks
+    rows_push_back , WordRange , 1632 , 1641 , WordBreak_Numeric;                 // arabic digits
+    rows_push_back , WordRange , 2304 , 2381 , WordBreak_ALetter;                 // devanagari
+    rows_push_back , WordRange , 2406 , 2415 , WordBreak_Numeric;                 // devanagari digits
+    rows_push_back , WordRange , 8192 , 8202 , WordBreak_WhiteSpaceWord;          // 0x2000 .. 0x200A
+    rows_push_back , WordRange , 8203 , 8203 , WordBreak_FormatWord;              // 0x200B
+    rows_push_back , WordRange , 8204 , 8204 , WordBreak_ExtendWord;              // 0x200C
+    rows_push_back , WordRange , 8205 , 8205 , WordBreak_ZeroWidthJoinerWord;     // 0x200D
+    rows_push_back , WordRange , 8206 , 8207 , WordBreak_FormatWord;              // 0x200E .. 0x200F
+    rows_push_back , WordRange , 8216 , 8217 , WordBreak_MidNumLet;               // 0x2018 .. 0x2019
+    rows_push_back , WordRange , 8228 , 8228 , WordBreak_MidNumLet;               // 0x2024
+    rows_push_back , WordRange , 8232 , 8233 , WordBreak_NewlineWord;             // 0x2028 .. 0x2029
+    rows_push_back , WordRange , 8255 , 8256 , WordBreak_ExtendNumLet;            // 0x203F .. 0x2040
+    rows_push_back , WordRange , 8287 , 8287 , WordBreak_WhiteSpaceWord;          // 0x205F
+    rows_push_back , WordRange , 8288 , 8303 , WordBreak_FormatWord;              // 0x2060 .. 0x206F
+    rows_push_back , WordRange , 8400 , 8432 , WordBreak_ExtendWord;              // 0x20D0 .. 0x20F0
+    rows_push_back , WordRange , 12288 , 12288 , WordBreak_WhiteSpaceWord;        // 0x3000
+    rows_push_back , WordRange , 12441 , 12442 , WordBreak_ExtendWord;            // 0x3099 .. 0x309A
+    rows_push_back , WordRange , 12448 , 12543 , WordBreak_Katakana;              // 0x30A0 .. 0x30FF
+    rows_push_back , WordRange , 65024 , 65039 , WordBreak_ExtendWord;            // 0xFE00 .. 0xFE0F
+    rows_push_back , WordRange , 65075 , 65076 , WordBreak_ExtendNumLet;          // 0xFE33 .. 0xFE34
+    rows_push_back , WordRange , 65279 , 65279 , WordBreak_FormatWord;            // 0xFEFF
+    rows_push_back , WordRange , 65296 , 65305 , WordBreak_Numeric;               // 0xFF10 .. 0xFF19
+    rows_push_back , WordRange , 65313 , 65338 , WordBreak_ALetter;               // 0xFF21 .. 0xFF3A
+    rows_push_back , WordRange , 65345 , 65370 , WordBreak_ALetter;               // 0xFF41 .. 0xFF5A
+    rows_push_back , WordRange , 127462 , 127487 , WordBreak_RegionalWord;        // 0x1F1E6 .. 0x1F1FF
+    rows;
+
+    low = 0;
+    high = rows_size - 1;
+    low <= high;
+        middle = low + high - low >> 1;
+        row = rows_at , middle;
+        scalar < row_first;
+            high = middle - 1;
+
+            scalar > row_last;
+                low = middle + 1;
+
+                row_property;
+
+    WordBreak_Any;
+
+    find_word_property , props_words , scalar;
+
+    property == WordBreak_ALetter;
+        true;
+
+    property == WordBreak_HebrewLetter;
+
+    property == WordBreak_MidLetter;
+        true;
+
+    property == WordBreak_MidNumLet;
+        true;
+
+    property == WordBreak_SingleQuoteWord;
+
+    property == WordBreak_MidNum;
+        true;
+
+    property == WordBreak_MidNumLet;
+
+    property == WordBreak_ExtendWord;
+        true;
+
+    property == WordBreak_FormatWord;
+        true;
+
+    property == WordBreak_ZeroWidthJoinerWord;
+
+// Word boundary test with one code point of lookahead on each side, which is
+// what rules WB6, WB7, WB11 and WB12 need in order to keep a mid letter glued
+// to the letters around it.
+
+    left = word_property , props , before;
+    right = word_property , props , after;
+    far_left = word_property , props , before2;
+    far_right = word_property , props , after2;
+
+    // WB3: do not break inside a carriage return line feed pair.
+    left == WordBreak_CarriageReturnWord && right == WordBreak_LineFeedWord;
+        false;
+
+    // WB3a and WB3b: break before and after newlines.
+    left == WordBreak_NewlineWord || left == WordBreak_CarriageReturnWord || left == WordBreak_LineFeedWord;
+        true;
+
+    right == WordBreak_NewlineWord || right == WordBreak_CarriageReturnWord || right == WordBreak_LineFeedWord;
+        true;
+
+    // WB4: ignore format and extend characters entirely.
+    is_ignorable_word_property , right;
+        false;
+
+    // WB5: do not break between letters.
+    is_word_letter , left && is_word_letter , right;
+        false;
+
+    // WB6 and WB7: a mid letter between two letters does not break.
+    is_word_letter , left && is_mid_letter , right && is_word_letter , far_right;
+        false;
+
+    is_mid_letter , left && is_word_letter , right && is_word_letter , far_left;
+        false;
+
+    // WB7a, WB7b and WB7c: the Hebrew apostrophe and quotation rules.
+    left == WordBreak_HebrewLetter && right == WordBreak_SingleQuoteWord;
+        false;
+
+    left == WordBreak_HebrewLetter && right == WordBreak_DoubleQuoteWord && far_right == WordBreak_HebrewLetter;
+        false;
+
+    left == WordBreak_DoubleQuoteWord && right == WordBreak_HebrewLetter && far_left == WordBreak_HebrewLetter;
+        false;
+
+    // WB8 to WB10: digits and letters cling together.
+    left == WordBreak_Numeric && right == WordBreak_Numeric;
+        false;
+
+    is_word_letter , left && right == WordBreak_Numeric;
+        false;
+
+    left == WordBreak_Numeric && is_word_letter , right;
+        false;
+
+    // WB11 and WB12: a mid number between two digits does not break.
+    left == WordBreak_Numeric && is_mid_number , right && far_right == WordBreak_Numeric;
+        false;
+
+    is_mid_number , left && right == WordBreak_Numeric && far_left == WordBreak_Numeric;
+        false;
+
+    // WB13: katakana runs together.
+    left == WordBreak_Katakana && right == WordBreak_Katakana;
+        false;
+
+    // WB13a and WB13b: the connector punctuation rules.
+    left == WordBreak_ExtendNumLet;
+        is_word_letter , right || right == WordBreak_Numeric || right == WordBreak_Katakana;
+            false;
+
+        right == WordBreak_ExtendNumLet;
+            false;
+
+    right == WordBreak_ExtendNumLet;
+        is_word_letter , left || left == WordBreak_Numeric || left == WordBreak_Katakana;
+            false;
+
+    // WB15 and WB16: a flag is two regional indicators.
+    left == WordBreak_RegionalWord && right == WordBreak_RegionalWord;
+        false;
+
+    // WB999: otherwise break.
+    true;
+
+    index < 0 || index >= scalars_size;
+        0;
+
+    scalars_at , index;
+
+    out ;
+    scalars_empty;
+        out;
+
+    begin = 0;
+    index = 1;
+    index < scalars_size;
+        before2 = peek_scalar , scalars , index - 2;
+        before = peek_scalar , scalars , index - 1;
+        after = peek_scalar , scalars , index;
+        after2 = peek_scalar , scalars , index + 1;
+        word_breaks_between , props , before2 , before , after , after2;
+            out_push_back , Step , begin , index , true;
+            begin = index;
+
+        index++;
+
+    out_push_back , Step , begin , scalars_size , true;
+    out;
+
+// Only the runs that contain at least one letter or digit, which is what a
+// word count or a spell checker wants.
+
+    out ;
+    candidates = word_steps , props , scalars;
+    step , candidates;
+        interesting = false;
+        i , range , step_begin , step_end;
+            scalar = scalars_at , i;
+            props_is_letter , scalar || props_is_number , scalar;
+                interesting = true;
+
+        interesting;
+            out_push_back , Step , step_begin , step_end , true;
+
+    out;
+
+    steps = word_steps_filtered , props , scalars;
+    steps_size;
+
+// --- Normalisation sketch ------------------------------------------------
+//
+// A working but deliberately small implementation of canonical decomposition
+// and recomposition. The table below is a sample of UnicodeData column six:
+// enough Latin, Greek and Cyrillic to normalise European text, plus a few
+// compatibility entries so the NFKD path has something to do.
+
+    rows ;
+
+    // Latin-1 letters with a single diacritic.
+    rows_push_back , DecompositionRow , 192 , 65 , 768 , false , "A grave";        // 0x00C0
+    rows_push_back , DecompositionRow , 193 , 65 , 769 , false , "A acute";        // 0x00C1
+    rows_push_back , DecompositionRow , 194 , 65 , 770 , false , "A circumflex";   // 0x00C2
+    rows_push_back , DecompositionRow , 195 , 65 , 771 , false , "A tilde";        // 0x00C3
+    rows_push_back , DecompositionRow , 196 , 65 , 776 , false , "A diaeresis";    // 0x00C4
+    rows_push_back , DecompositionRow , 197 , 65 , 778 , false , "A ring";         // 0x00C5
+    rows_push_back , DecompositionRow , 199 , 67 , 807 , false , "C cedilla";      // 0x00C7
+    rows_push_back , DecompositionRow , 200 , 69 , 768 , false , "E grave";        // 0x00C8
+    rows_push_back , DecompositionRow , 201 , 69 , 769 , false , "E acute";        // 0x00C9
+    rows_push_back , DecompositionRow , 202 , 69 , 770 , false , "E circumflex";   // 0x00CA
+    rows_push_back , DecompositionRow , 203 , 69 , 776 , false , "E diaeresis";    // 0x00CB
+    rows_push_back , DecompositionRow , 204 , 73 , 768 , false , "I grave";        // 0x00CC
+    rows_push_back , DecompositionRow , 205 , 73 , 769 , false , "I acute";        // 0x00CD
+    rows_push_back , DecompositionRow , 206 , 73 , 770 , false , "I circumflex";   // 0x00CE
+    rows_push_back , DecompositionRow , 207 , 73 , 776 , false , "I diaeresis";    // 0x00CF
+    rows_push_back , DecompositionRow , 209 , 78 , 771 , false , "N tilde";        // 0x00D1
+    rows_push_back , DecompositionRow , 210 , 79 , 768 , false , "O grave";        // 0x00D2
+    rows_push_back , DecompositionRow , 211 , 79 , 769 , false , "O acute";        // 0x00D3
+    rows_push_back , DecompositionRow , 212 , 79 , 770 , false , "O circumflex";   // 0x00D4
+    rows_push_back , DecompositionRow , 213 , 79 , 771 , false , "O tilde";        // 0x00D5
+    rows_push_back , DecompositionRow , 214 , 79 , 776 , false , "O diaeresis";    // 0x00D6
+    rows_push_back , DecompositionRow , 217 , 85 , 768 , false , "U grave";        // 0x00D9
+    rows_push_back , DecompositionRow , 218 , 85 , 769 , false , "U acute";        // 0x00DA
+    rows_push_back , DecompositionRow , 219 , 85 , 770 , false , "U circumflex";   // 0x00DB
+    rows_push_back , DecompositionRow , 220 , 85 , 776 , false , "U diaeresis";    // 0x00DC
+    rows_push_back , DecompositionRow , 221 , 89 , 769 , false , "Y acute";        // 0x00DD
+    rows_push_back , DecompositionRow , 224 , 97 , 768 , false , "a grave";        // 0x00E0
+    rows_push_back , DecompositionRow , 225 , 97 , 769 , false , "a acute";        // 0x00E1
+    rows_push_back , DecompositionRow , 226 , 97 , 770 , false , "a circumflex";   // 0x00E2
+    rows_push_back , DecompositionRow , 227 , 97 , 771 , false , "a tilde";        // 0x00E3
+    rows_push_back , DecompositionRow , 228 , 97 , 776 , false , "a diaeresis";    // 0x00E4
+    rows_push_back , DecompositionRow , 229 , 97 , 778 , false , "a ring";         // 0x00E5
+    rows_push_back , DecompositionRow , 231 , 99 , 807 , false , "c cedilla";      // 0x00E7
+    rows_push_back , DecompositionRow , 232 , 101 , 768 , false , "e grave";       // 0x00E8
+    rows_push_back , DecompositionRow , 233 , 101 , 769 , false , "e acute";       // 0x00E9
+    rows_push_back , DecompositionRow , 234 , 101 , 770 , false , "e circumflex";  // 0x00EA
+    rows_push_back , DecompositionRow , 235 , 101 , 776 , false , "e diaeresis";   // 0x00EB
+    rows_push_back , DecompositionRow , 236 , 105 , 768 , false , "i grave";       // 0x00EC
+    rows_push_back , DecompositionRow , 237 , 105 , 769 , false , "i acute";       // 0x00ED
+    rows_push_back , DecompositionRow , 238 , 105 , 770 , false , "i circumflex";  // 0x00EE
+    rows_push_back , DecompositionRow , 239 , 105 , 776 , false , "i diaeresis";   // 0x00EF
+    rows_push_back , DecompositionRow , 241 , 110 , 771 , false , "n tilde";       // 0x00F1
+    rows_push_back , DecompositionRow , 242 , 111 , 768 , false , "o grave";       // 0x00F2
+    rows_push_back , DecompositionRow , 243 , 111 , 769 , false , "o acute";       // 0x00F3
+    rows_push_back , DecompositionRow , 244 , 111 , 770 , false , "o circumflex";  // 0x00F4
+    rows_push_back , DecompositionRow , 245 , 111 , 771 , false , "o tilde";       // 0x00F5
+    rows_push_back , DecompositionRow , 246 , 111 , 776 , false , "o diaeresis";   // 0x00F6
+    rows_push_back , DecompositionRow , 249 , 117 , 768 , false , "u grave";       // 0x00F9
+    rows_push_back , DecompositionRow , 250 , 117 , 769 , false , "u acute";       // 0x00FA
+    rows_push_back , DecompositionRow , 251 , 117 , 770 , false , "u circumflex";  // 0x00FB
+    rows_push_back , DecompositionRow , 252 , 117 , 776 , false , "u diaeresis";   // 0x00FC
+    rows_push_back , DecompositionRow , 253 , 121 , 769 , false , "y acute";       // 0x00FD
+    rows_push_back , DecompositionRow , 255 , 121 , 776 , false , "y diaeresis";   // 0x00FF
+
+    // Latin Extended-A, a representative slice.
+    rows_push_back , DecompositionRow , 256 , 65 , 772 , false , "A macron";       // 0x0100
+    rows_push_back , DecompositionRow , 257 , 97 , 772 , false , "a macron";       // 0x0101
+    rows_push_back , DecompositionRow , 258 , 65 , 774 , false , "A breve";        // 0x0102
+    rows_push_back , DecompositionRow , 259 , 97 , 774 , false , "a breve";        // 0x0103
+    rows_push_back , DecompositionRow , 260 , 65 , 808 , false , "A ogonek";       // 0x0104
+    rows_push_back , DecompositionRow , 261 , 97 , 808 , false , "a ogonek";       // 0x0105
+    rows_push_back , DecompositionRow , 262 , 67 , 769 , false , "C acute";        // 0x0106
+    rows_push_back , DecompositionRow , 263 , 99 , 769 , false , "c acute";        // 0x0107
+    rows_push_back , DecompositionRow , 268 , 67 , 780 , false , "C caron";        // 0x010C
+    rows_push_back , DecompositionRow , 269 , 99 , 780 , false , "c caron";        // 0x010D
+    rows_push_back , DecompositionRow , 270 , 68 , 780 , false , "D caron";        // 0x010E
+    rows_push_back , DecompositionRow , 271 , 100 , 780 , false , "d caron";       // 0x010F
+    rows_push_back , DecompositionRow , 274 , 69 , 772 , false , "E macron";       // 0x0112
+    rows_push_back , DecompositionRow , 275 , 101 , 772 , false , "e macron";      // 0x0113
+    rows_push_back , DecompositionRow , 282 , 69 , 780 , false , "E caron";        // 0x011A
+    rows_push_back , DecompositionRow , 283 , 101 , 780 , false , "e caron";       // 0x011B
+    rows_push_back , DecompositionRow , 286 , 71 , 774 , false , "G breve";        // 0x011E
+    rows_push_back , DecompositionRow , 287 , 103 , 774 , false , "g breve";       // 0x011F
+    rows_push_back , DecompositionRow , 304 , 73 , 775 , false , "I dot above";    // 0x0130
+    rows_push_back , DecompositionRow , 350 , 83 , 807 , false , "S cedilla";      // 0x015E
+    rows_push_back , DecompositionRow , 351 , 115 , 807 , false , "s cedilla";     // 0x015F
+    rows_push_back , DecompositionRow , 352 , 83 , 780 , false , "S caron";        // 0x0160
+    rows_push_back , DecompositionRow , 353 , 115 , 780 , false , "s caron";       // 0x0161
+    rows_push_back , DecompositionRow , 356 , 84 , 780 , false , "T caron";        // 0x0164
+    rows_push_back , DecompositionRow , 357 , 116 , 780 , false , "t caron";       // 0x0165
+    rows_push_back , DecompositionRow , 366 , 85 , 778 , false , "U ring";         // 0x016E
+    rows_push_back , DecompositionRow , 367 , 117 , 778 , false , "u ring";        // 0x016F
+    rows_push_back , DecompositionRow , 376 , 89 , 776 , false , "Y diaeresis";    // 0x0178
+    rows_push_back , DecompositionRow , 377 , 90 , 769 , false , "Z acute";        // 0x0179
+    rows_push_back , DecompositionRow , 378 , 122 , 769 , false , "z acute";       // 0x017A
+    rows_push_back , DecompositionRow , 379 , 90 , 775 , false , "Z dot above";    // 0x017B
+    rows_push_back , DecompositionRow , 380 , 122 , 775 , false , "z dot above";   // 0x017C
+    rows_push_back , DecompositionRow , 381 , 90 , 780 , false , "Z caron";        // 0x017D
+    rows_push_back , DecompositionRow , 382 , 122 , 780 , false , "z caron";       // 0x017E
+
+    // Greek, including the two that decompose twice over.
+    rows_push_back , DecompositionRow , 902 , 913 , 769 , false , "Alpha tonos";   // 0x0386
+    rows_push_back , DecompositionRow , 904 , 917 , 769 , false , "Epsilon tonos"; // 0x0388
+    rows_push_back , DecompositionRow , 905 , 919 , 769 , false , "Eta tonos";     // 0x0389
+    rows_push_back , DecompositionRow , 906 , 921 , 769 , false , "Iota tonos";    // 0x038A
+    rows_push_back , DecompositionRow , 908 , 927 , 769 , false , "Omicron tonos"; // 0x038C
+    rows_push_back , DecompositionRow , 910 , 933 , 769 , false , "Upsilon tonos"; // 0x038E
+    rows_push_back , DecompositionRow , 911 , 937 , 769 , false , "Omega tonos";   // 0x038F
+    rows_push_back , DecompositionRow , 912 , 970 , 769 , false , "iota dialytika tonos"; // 0x0390
+    rows_push_back , DecompositionRow , 938 , 921 , 776 , false , "Iota dialytika";// 0x03AA
+    rows_push_back , DecompositionRow , 939 , 933 , 776 , false , "Upsilon dialytika"; // 0x03AB
+    rows_push_back , DecompositionRow , 940 , 945 , 769 , false , "alpha tonos";   // 0x03AC
+    rows_push_back , DecompositionRow , 941 , 949 , 769 , false , "epsilon tonos"; // 0x03AD
+    rows_push_back , DecompositionRow , 942 , 951 , 769 , false , "eta tonos";     // 0x03AE
+    rows_push_back , DecompositionRow , 943 , 953 , 769 , false , "iota tonos";    // 0x03AF
+    rows_push_back , DecompositionRow , 944 , 971 , 769 , false , "upsilon dialytika tonos"; // 0x03B0
+    rows_push_back , DecompositionRow , 970 , 953 , 776 , false , "iota dialytika";// 0x03CA
+    rows_push_back , DecompositionRow , 971 , 965 , 776 , false , "upsilon dialytika"; // 0x03CB
+
+    // Cyrillic.
+    rows_push_back , DecompositionRow , 1025 , 1045 , 776 , false , "IO";          // 0x0401
+    rows_push_back , DecompositionRow , 1027 , 1043 , 769 , false , "GJE";         // 0x0403
+    rows_push_back , DecompositionRow , 1031 , 1030 , 776 , false , "YI";          // 0x0407
+    rows_push_back , DecompositionRow , 1036 , 1050 , 769 , false , "KJE";         // 0x040C
+    rows_push_back , DecompositionRow , 1038 , 1059 , 774 , false , "short U";     // 0x040E
+    rows_push_back , DecompositionRow , 1104 , 1077 , 776 , false , "io";          // 0x0450
+    rows_push_back , DecompositionRow , 1105 , 1077 , 776 , false , "io";          // 0x0451
+    rows_push_back , DecompositionRow , 1107 , 1075 , 769 , false , "gje";         // 0x0453
+    rows_push_back , DecompositionRow , 1111 , 1110 , 776 , false , "yi";          // 0x0457
+    rows_push_back , DecompositionRow , 1118 , 1091 , 774 , false , "short u";     // 0x045E
+
+    // Singleton canonical decompositions: the second field is zero.
+    rows_push_back , DecompositionRow , 8486 , 937 , 0 , false , "ohm to Omega";   // 0x2126
+    rows_push_back , DecompositionRow , 8490 , 75 , 0 , false , "kelvin to K";     // 0x212A
+    rows_push_back , DecompositionRow , 8491 , 197 , 0 , false , "angstrom to A ring"; // 0x212B
+    rows_push_back , DecompositionRow , 8592 , 8592 , 0 , false , "identity guard";// 0x2190
+
+    // Compatibility decompositions, used only by the NFKD path.
+    rows_push_back , DecompositionRow , 160 , 32 , 0 , true , "no break space";    // 0x00A0
+    rows_push_back , DecompositionRow , 178 , 50 , 0 , true , "superscript two";   // 0x00B2
+    rows_push_back , DecompositionRow , 179 , 51 , 0 , true , "superscript three"; // 0x00B3
+    rows_push_back , DecompositionRow , 185 , 49 , 0 , true , "superscript one";   // 0x00B9
+    rows_push_back , DecompositionRow , 8216 , 39 , 0 , true , "left quote";       // 0x2018
+    rows_push_back , DecompositionRow , 8217 , 39 , 0 , true , "right quote";      // 0x2019
+    rows_push_back , DecompositionRow , 8220 , 34 , 0 , true , "left double quote";// 0x201C
+    rows_push_back , DecompositionRow , 8221 , 34 , 0 , true , "right double quote"; // 0x201D
+    rows_push_back , DecompositionRow , 8230 , 46 , 0 , true , "ellipsis";         // 0x2026
+    rows_push_back , DecompositionRow , 64256 , 102 , 102 , true , "ligature ff";  // 0xFB00
+    rows_push_back , DecompositionRow , 64257 , 102 , 105 , true , "ligature fi";  // 0xFB01
+    rows_push_back , DecompositionRow , 64258 , 102 , 108 , true , "ligature fl";  // 0xFB02
+
+    rows;
+
+    index = 0;
+    row , rows;
+        row_source == scalar;
+            index;
+
+        index++;
+
+    -1;
+
+// The reverse lookup used by recomposition: given a starter and a following
+// mark, is there a single code point that spells the pair?
+
+    row , rows;
+        row_compatibility;
+            // Compatibility decompositions never recompose.
+            row;
+
+            row_first == starter && row_second == mark;
+                row_source;
+
+    -1;
+
+    // Hangul syllables decompose arithmetically rather than by table.
+
+    is_hangul_syllable , scalar == false;
+        false;
+
+    index = scalar - HANGUL_SYLLABLE_FIRST;
+    lead = HANGUL_L_FIRST + index / HANGUL_NV_COUNT;
+    vowel = HANGUL_V_FIRST + index % HANGUL_NV_COUNT / HANGUL_T_COUNT;
+    trail = HANGUL_T_FIRST + index % HANGUL_T_COUNT;
+    sink_push_back , lead;
+    sink_push_back , vowel;
+    index % HANGUL_T_COUNT != 0;
+        sink_push_back , trail;
+
+    true;
+
+    // L plus V forms an LV syllable.
+    first >= HANGUL_L_FIRST && first < HANGUL_L_FIRST + HANGUL_L_COUNT;
+        second >= HANGUL_V_FIRST && second < HANGUL_V_FIRST + HANGUL_V_COUNT;
+            lead = first - HANGUL_L_FIRST;
+            vowel = second - HANGUL_V_FIRST;
+            HANGUL_SYLLABLE_FIRST + lead * HANGUL_V_COUNT + vowel * HANGUL_T_COUNT;
+
+    // LV plus T forms an LVT syllable.
+    is_hangul_syllable , first;
+        first - HANGUL_SYLLABLE_FIRST % HANGUL_T_COUNT == 0;
+            second > HANGUL_T_FIRST && second < HANGUL_T_FIRST + HANGUL_T_COUNT;
+                first + second - HANGUL_T_FIRST;
+
+    -1;
+
+// Recursively expand one scalar. The recursion is bounded because every
+// decomposition strictly reduces the code point of the starter.
+
+    depth > 8;
+        sink_push_back , scalar;
+
+    hangul_decompose , scalar , sink;
+
+    index = find_decomposition , props_decompositions , scalar;
+    index < 0;
+        sink_push_back , scalar;
+
+    row = props_decompositions_at , index;
+    row_compatibility && compatibility == false;
+        sink_push_back , scalar;
+
+    row_first == scalar;
+        // A self referential row would loop forever; treat it as a leaf.
+        sink_push_back , scalar;
+
+    decompose_scalar , props , row_first , compatibility , sink , depth + 1;
+    row_second != 0;
+        decompose_scalar , props , row_second , compatibility , sink , depth + 1;
+
+// Canonical ordering: a stable insertion sort over each run of non starters,
+// keyed on the combining class.
+
+    index = 1;
+    index < scalars_size;
+        current = scalars_at , index;
+        current_class = props_combining_of , current;
+        current_class == 0;
+            index++;
+
+            probe = index;
+            moved = false;
+            probe > 0;
+                previous = scalars_at , probe - 1;
+                previous_class = props_combining_of , previous;
+                previous_class == 0;
+                    probe = 0;
+
+                    previous_class > current_class;
+                        swap , scalars_at , probe - 1 , scalars_at , probe;
+                        probe--;
+                        moved = true;
+
+                        probe = 0;
+
+            moved;
+                index > 0;
+
+            index++;
+
+    out ;
+    out_reserve , scalars_size * 2;
+    scalar , scalars;
+        decompose_scalar , props , scalar , compatibility , out , 0;
+
+    canonical_order , props , out;
+    out;
+
+// Recomposition, the second half of NFC. Walk the decomposed run keeping the
+// index of the last starter; whenever a mark can be composed onto it, replace
+// the starter and drop the mark.
+
+    out ;
+    scalars_empty;
+        out;
+
+    starter_index = -1;
+    last_class = -1;
+
+    scalar , scalars;
+        current_class = props_combining_of , scalar;
+
+        starter_index >= 0;
+            blocked = last_class >= current_class && last_class > 0;
+            blocked == false;
+                starter = out_at , starter_index;
+                composed = hangul_compose , starter , scalar;
+                composed < 0;
+                    composed = find_composition , props_decompositions , starter , scalar;
+
+                composed >= 0;
+                    out_at , starter_index = composed;
+                    // The mark is absorbed, so the class of the previous
+                    // character is unchanged.
+
+        current_class == 0;
+            starter_index = out_size;
+            last_class = 0;
+
+            last_class = current_class;
+
+        out_push_back , scalar;
+
+    out;
+
+    form == NormalForm_None;
+        utf32_encode , scalars;
+
+    form == NormalForm_Nfd;
+        decompose , props , scalars , false;
+
+    form == NormalForm_Nfkd;
+        decompose , props , scalars , true;
+
+    form == NormalForm_Nfc;
+        expanded = decompose , props , scalars , false;
+        compose , props , expanded;
+
+    expanded = decompose , props , scalars , true;
+    compose , props , expanded;
+
+// A quick check that answers yes, no or maybe without doing the work. Only the
+// definite answers are useful; maybe means the caller has to normalise.
+
+    last_class = 0;
+    scalar , scalars;
+        current_class = props_combining_of , scalar;
+        last_class > current_class && current_class != 0;
+            0;                          // definitely not normalised
+
+        find_decomposition , props_decompositions , scalar >= 0;
+            form == NormalForm_Nfd || form == NormalForm_Nfkd;
+                0;
+
+            2;                          // maybe
+
+        last_class = current_class;
+
+    1;                                  // definitely normalised
+
+    // Compare two runs under canonical equivalence.
+
+    a = decompose , props , left , false;
+    b = decompose , props , right , false;
+    a_size != b_size;
+        false;
+
+    i , range , 0 , a_size;
+        a_at , i != b_at , i;
+            false;
+
+    true;
+
+// --- Display width -------------------------------------------------------
+//
+// Terminal column counting. Combining marks take no columns, East Asian wide
+// and fullwidth characters take two, and the ambiguous class takes one or two
+// depending on a locale flag the caller supplies.
+
+// <U+0007> style rendering
+
+    rows ;
+
+    // Zero width: the marks and the invisible formatting characters.
+    rows_push_back , WidthRange , 768 , 879 , WidthClass_ZeroWidth;          // 0x0300 .. 0x036F
+    rows_push_back , WidthRange , 1155 , 1161 , WidthClass_ZeroWidth;        // 0x0483 .. 0x0489
+    rows_push_back , WidthRange , 1425 , 1469 , WidthClass_ZeroWidth;        // 0x0591 .. 0x05BD
+    rows_push_back , WidthRange , 1611 , 1631 , WidthClass_ZeroWidth;        // 0x064B .. 0x065F
+    rows_push_back , WidthRange , 2304 , 2306 , WidthClass_ZeroWidth;        // 0x0900 .. 0x0902
+    rows_push_back , WidthRange , 2364 , 2364 , WidthClass_ZeroWidth;        // 0x093C
+    rows_push_back , WidthRange , 2369 , 2376 , WidthClass_ZeroWidth;        // 0x0941 .. 0x0948
+    rows_push_back , WidthRange , 2381 , 2381 , WidthClass_ZeroWidth;        // 0x094D
+    rows_push_back , WidthRange , 3633 , 3633 , WidthClass_ZeroWidth;        // 0x0E31
+    rows_push_back , WidthRange , 3636 , 3642 , WidthClass_ZeroWidth;        // 0x0E34 .. 0x0E3A
+    rows_push_back , WidthRange , 3655 , 3662 , WidthClass_ZeroWidth;        // 0x0E47 .. 0x0E4E
+    rows_push_back , WidthRange , 8203 , 8207 , WidthClass_ZeroWidth;        // 0x200B .. 0x200F
+    rows_push_back , WidthRange , 8234 , 8238 , WidthClass_ZeroWidth;        // 0x202A .. 0x202E
+    rows_push_back , WidthRange , 8288 , 8303 , WidthClass_ZeroWidth;        // 0x2060 .. 0x206F
+    rows_push_back , WidthRange , 8400 , 8432 , WidthClass_ZeroWidth;        // 0x20D0 .. 0x20F0
+    rows_push_back , WidthRange , 65024 , 65039 , WidthClass_ZeroWidth;      // 0xFE00 .. 0xFE0F
+    rows_push_back , WidthRange , 65056 , 65071 , WidthClass_ZeroWidth;      // 0xFE20 .. 0xFE2F
+    rows_push_back , WidthRange , 65279 , 65279 , WidthClass_ZeroWidth;      // 0xFEFF
+    rows_push_back , WidthRange , 917504 , 921599 , WidthClass_ZeroWidth;    // 0xE0000 .. 0xE0FFF
+
+    // Ambiguous: one column in a Western font, two in an East Asian one.
+    rows_push_back , WidthRange , 161 , 161 , WidthClass_Ambiguous;          // 0x00A1
+    rows_push_back , WidthRange , 164 , 164 , WidthClass_Ambiguous;          // 0x00A4
+    rows_push_back , WidthRange , 167 , 168 , WidthClass_Ambiguous;          // 0x00A7 .. 0x00A8
+    rows_push_back , WidthRange , 170 , 170 , WidthClass_Ambiguous;          // 0x00AA
+    rows_push_back , WidthRange , 174 , 174 , WidthClass_Ambiguous;          // 0x00AE
+    rows_push_back , WidthRange , 176 , 180 , WidthClass_Ambiguous;          // 0x00B0 .. 0x00B4
+    rows_push_back , WidthRange , 182 , 186 , WidthClass_Ambiguous;          // 0x00B6 .. 0x00BA
+    rows_push_back , WidthRange , 188 , 191 , WidthClass_Ambiguous;          // 0x00BC .. 0x00BF
+    rows_push_back , WidthRange , 198 , 198 , WidthClass_Ambiguous;          // 0x00C6
+    rows_push_back , WidthRange , 208 , 208 , WidthClass_Ambiguous;          // 0x00D0
+    rows_push_back , WidthRange , 215 , 216 , WidthClass_Ambiguous;          // 0x00D7 .. 0x00D8
+    rows_push_back , WidthRange , 222 , 225 , WidthClass_Ambiguous;          // 0x00DE .. 0x00E1
+    rows_push_back , WidthRange , 230 , 230 , WidthClass_Ambiguous;          // 0x00E6
+    rows_push_back , WidthRange , 232 , 234 , WidthClass_Ambiguous;          // 0x00E8 .. 0x00EA
+    rows_push_back , WidthRange , 236 , 237 , WidthClass_Ambiguous;          // 0x00EC .. 0x00ED
+    rows_push_back , WidthRange , 240 , 240 , WidthClass_Ambiguous;          // 0x00F0
+    rows_push_back , WidthRange , 242 , 243 , WidthClass_Ambiguous;          // 0x00F2 .. 0x00F3
+    rows_push_back , WidthRange , 247 , 250 , WidthClass_Ambiguous;          // 0x00F7 .. 0x00FA
+    rows_push_back , WidthRange , 252 , 252 , WidthClass_Ambiguous;          // 0x00FC
+    rows_push_back , WidthRange , 254 , 254 , WidthClass_Ambiguous;          // 0x00FE
+    rows_push_back , WidthRange , 8208 , 8208 , WidthClass_Ambiguous;        // 0x2010
+    rows_push_back , WidthRange , 8211 , 8214 , WidthClass_Ambiguous;        // 0x2013 .. 0x2016
+    rows_push_back , WidthRange , 8216 , 8217 , WidthClass_Ambiguous;        // 0x2018 .. 0x2019
+    rows_push_back , WidthRange , 8220 , 8221 , WidthClass_Ambiguous;        // 0x201C .. 0x201D
+    rows_push_back , WidthRange , 8224 , 8226 , WidthClass_Ambiguous;        // 0x2020 .. 0x2022
+    rows_push_back , WidthRange , 8230 , 8230 , WidthClass_Ambiguous;        // 0x2026
+    rows_push_back , WidthRange , 8240 , 8240 , WidthClass_Ambiguous;        // 0x2030
+    rows_push_back , WidthRange , 8592 , 8601 , WidthClass_Ambiguous;        // 0x2190 .. 0x2199
+    rows_push_back , WidthRange , 9312 , 9449 , WidthClass_Ambiguous;        // 0x2460 .. 0x24E9
+    rows_push_back , WidthRange , 9472 , 9727 , WidthClass_Ambiguous;        // 0x2500 .. 0x25FF
+    rows_push_back , WidthRange , 9757 , 9757 , WidthClass_Ambiguous;        // 0x261D
+    rows_push_back , WidthRange , 57344 , 63743 , WidthClass_Ambiguous;      // private use
+
+    // Wide: the East Asian blocks proper.
+    rows_push_back , WidthRange , 4352 , 4447 , WidthClass_Wide;             // 0x1100 .. 0x115F jamo
+    rows_push_back , WidthRange , 8986 , 8987 , WidthClass_Wide;             // 0x231A .. 0x231B watch
+    rows_push_back , WidthRange , 9193 , 9196 , WidthClass_Wide;             // 0x23E9 .. 0x23EC
+    rows_push_back , WidthRange , 9725 , 9726 , WidthClass_Wide;             // 0x25FD .. 0x25FE
+    rows_push_back , WidthRange , 9800 , 9811 , WidthClass_Wide;             // 0x2648 .. 0x2653 zodiac
+    rows_push_back , WidthRange , 11904 , 12019 , WidthClass_Wide;           // 0x2E80 .. 0x2EF3 radicals
+    rows_push_back , WidthRange , 12032 , 12245 , WidthClass_Wide;           // 0x2F00 .. 0x2FD5 kangxi
+    rows_push_back , WidthRange , 12272 , 12287 , WidthClass_Wide;           // 0x2FF0 .. 0x2FFF ideographic
+    rows_push_back , WidthRange , 12288 , 12351 , WidthClass_FullWidth;      // 0x3000 .. 0x303F cjk punctuation
+    rows_push_back , WidthRange , 12352 , 12447 , WidthClass_Wide;           // 0x3040 .. 0x309F hiragana
+    rows_push_back , WidthRange , 12448 , 12543 , WidthClass_Wide;           // 0x30A0 .. 0x30FF katakana
+    rows_push_back , WidthRange , 12544 , 12591 , WidthClass_Wide;           // 0x3100 .. 0x312F bopomofo
+    rows_push_back , WidthRange , 12592 , 12687 , WidthClass_Wide;           // 0x3130 .. 0x318F hangul compat
+    rows_push_back , WidthRange , 12688 , 12771 , WidthClass_Wide;           // 0x3190 .. 0x31A3
+    rows_push_back , WidthRange , 12800 , 13054 , WidthClass_Wide;           // 0x3200 .. 0x32FE enclosed
+    rows_push_back , WidthRange , 13056 , 19903 , WidthClass_Wide;           // 0x3300 .. 0x4DBF
+    rows_push_back , WidthRange , 19968 , 40959 , WidthClass_Wide;           // 0x4E00 .. 0x9FFF unified
+    rows_push_back , WidthRange , 40960 , 42127 , WidthClass_Wide;           // 0xA000 .. 0xA4CF yi
+    rows_push_back , WidthRange , 44032 , 55203 , WidthClass_Wide;           // 0xAC00 .. 0xD7A3 hangul
+    rows_push_back , WidthRange , 63744 , 64255 , WidthClass_Wide;           // 0xF900 .. 0xFAFF compat
+    rows_push_back , WidthRange , 65040 , 65049 , WidthClass_Wide;           // 0xFE10 .. 0xFE19 vertical
+    rows_push_back , WidthRange , 65072 , 65131 , WidthClass_Wide;           // 0xFE30 .. 0xFE6B
+    rows_push_back , WidthRange , 65281 , 65376 , WidthClass_FullWidth;      // 0xFF01 .. 0xFF60
+    rows_push_back , WidthRange , 65377 , 65439 , WidthClass_HalfWidth;      // 0xFF61 .. 0xFF9F halfwidth kana
+    rows_push_back , WidthRange , 65504 , 65510 , WidthClass_FullWidth;      // 0xFFE0 .. 0xFFE6
+    rows_push_back , WidthRange , 94176 , 94180 , WidthClass_Wide;           // 0x16FE0 .. 0x16FE4
+    rows_push_back , WidthRange , 119552 , 119638 , WidthClass_Wide;         // 0x1D300 .. 0x1D356
+    rows_push_back , WidthRange , 126980 , 126980 , WidthClass_Wide;         // 0x1F004 mahjong
+    rows_push_back , WidthRange , 127183 , 127183 , WidthClass_Wide;         // 0x1F0CF
+    rows_push_back , WidthRange , 127374 , 127374 , WidthClass_Wide;         // 0x1F18E
+    rows_push_back , WidthRange , 127462 , 127487 , WidthClass_Wide;         // 0x1F1E6 regional
+    rows_push_back , WidthRange , 127744 , 128591 , WidthClass_Wide;         // 0x1F300 .. 0x1F64F emoji
+    rows_push_back , WidthRange , 128640 , 128767 , WidthClass_Wide;         // 0x1F680 .. 0x1F6FF transport
+    rows_push_back , WidthRange , 129280 , 129535 , WidthClass_Wide;         // 0x1F980 .. 0x1FA7F
+    rows_push_back , WidthRange , 131072 , 196605 , WidthClass_Wide;         // 0x20000 .. 0x2FFFD
+    rows_push_back , WidthRange , 196608 , 262141 , WidthClass_Wide;         // 0x30000 .. 0x3FFFD
+
+    rows;
+
+    low = 0;
+    high = rows_size - 1;
+    low <= high;
+        middle = low + high - low >> 1;
+        row = rows_at , middle;
+        scalar < row_first;
+            high = middle - 1;
+
+            scalar > row_last;
+                low = middle + 1;
+
+                row_width;
+
+    WidthClass_Neutral;
+
+// The caller decides how the ambiguous class renders; a terminal running in a
+// CJK locale wants two columns, everything else wants one.
+
+    scalar == 0;
+        0;
+
+    scalar == 9;
+        options_tab_stop;
+
+    props_is_control , scalar;
+        options_control_is_escape;
+            WIDTH_CONTROL_ESCAPE;
+
+        0;
+
+    scalar <= MAX_ASCII;
+        WIDTH_NARROW;
+
+    width = find_width_class , props_widths , scalar;
+    width == WidthClass_ZeroWidth;
+        WIDTH_ZERO;
+
+    width == WidthClass_Wide || width == WidthClass_FullWidth;
+        WIDTH_WIDE;
+
+    width == WidthClass_Ambiguous;
+        options_ambiguous_is_wide;
+            WIDTH_WIDE;
+
+        WIDTH_NARROW;
+
+    props_is_mark , scalar;
+        WIDTH_ZERO;
+
+    props_is_format , scalar;
+        WIDTH_ZERO;
+
+    WIDTH_NARROW;
+
+// A whole cluster occupies the width of its widest member, not the sum: a base
+// letter plus three accents is still one column.
+
+    widest = 0;
+    i , range , step_begin , step_end;
+        width = scalar_width , props , scalars_at , i , options;
+        width > widest;
+            widest = width;
+
+    widest;
+
+    total = 0;
+    clusters = grapheme_steps , props , scalars;
+    step , clusters;
+        total += cluster_width , props , scalars , step , options;
+
+    total;
+
+// Truncate to a column budget, cutting only at cluster boundaries so that no
+// accent is ever separated from its base.
+
+    out ;
+    used = 0;
+    clusters = grapheme_steps , props , scalars;
+    step , clusters;
+        width = cluster_width , props , scalars , step , options;
+        used + width > budget;
+            out;
+
+        i , range , step_begin , step_end;
+            out_push_back , scalars_at , i;
+
+        used += width;
+
+    out;
+
+// Pad on the right to a fixed column count, which is what a table formatter
+// needs once the strings stop being ASCII.
+
+    out = utf32_encode , scalars;
+    used = text_width , props , scalars , options;
+    used < target;
+        out_push_back , 32;                     // space
+        used++;
+
+    out;
+
+    width == WidthClass_Narrow; "Na";
+    width == WidthClass_Wide; "W";
+    width == WidthClass_FullWidth; "F";
+    width == WidthClass_HalfWidth; "H";
+    width == WidthClass_Ambiguous; "A";
+    width == WidthClass_ZeroWidth; "Z";
+    "N";
+
+// --- Iteration helpers ---------------------------------------------------
+//
+// Three cursors over the same byte buffer, at three levels of granularity.
+// Each one is a plain struct with a next() that returns false at the end,
+// because that is the shape the rest of the codebase expects of an iterator.
+
+// A cursor over the code points of a UTF-8 byte buffer.
+
+        offset = 0;
+        current = 0;
+        current_length = 0;
+        error = DecodeError_None;
+        position = Position;
+
+        offset >= bytes_size;
+
+        offset >= bytes_size;
+            current = 0;
+            current_length = 0;
+            false;
+
+        step = decode_at , bytes , offset;
+        error = step_error;
+        step_error == DecodeError_None;
+            current = step_value;
+            current_length = step_length;
+
+            current = REPLACEMENT;
+            current_length = 1;
+            step_length > 0;
+                current_length = step_length;
+
+        position_advance_scalar , current , current_length;
+        offset += current_length;
+        true;
+
+        // Look at the next scalar without consuming it.
+
+        offset >= bytes_size;
+            -1;
+
+        step = decode_at , bytes , offset;
+        step_error != DecodeError_None;
+            REPLACEMENT;
+
+        step_value;
+
+    // Step back over the previous scalar. Uses the continuation byte test
+    // rather than remembering the last length, so it works after a seek.
+
+        offset <= 0;
+            false;
+
+        index = offset - 1;
+        steps = 0;
+        index > 0 && steps < UTF8_MAX_LENGTH;
+            bytes_at , index & CONT_MASK != CONT_MARK;
+                offset = index;
+                step = decode_at , bytes , index;
+                current = step_value;
+                current_length = step_length;
+                true;
+
+            index--;
+            ++steps;
+
+        offset = 0;
+        true;
+
+        offset = sequence_start , bytes , byte_offset;
+
+        out ;
+        next;
+            out_push_back , current;
+
+        out;
+
+// A cursor over grapheme clusters, built on top of a decoded scalar run
+// because the break rules need lookahead that a byte cursor cannot give.
+
+        offset = 0;
+        begin = 0;
+        end = 0;
+        state_reset;
+
+        offset >= scalars_size;
+
+        offset >= scalars_size;
+            begin = offset;
+            end = offset;
+            false;
+
+        begin = offset;
+        index = offset + 1;
+        index < scalars_size;
+            breaks_between , props , state , scalars_at , index - 1 , scalars_at , index;
+                end = index;
+                offset = index;
+                true;
+
+            ++index;
+
+        end = scalars_size;
+        offset = end;
+        true;
+
+        out ;
+        i , range , begin , end;
+            out_push_back , scalars_at , i;
+
+        out;
+
+        end - begin;
+
+    // The base character of the current cluster, that is the first scalar that
+    // is not a mark.
+
+        i , range , begin , end;
+            scalar = scalars_at , i;
+            props_is_mark , scalar == false;
+                scalar;
+
+        end > begin;
+            scalars_at , begin;
+
+        0;
+
+        // A cursor over words, which skips the runs that hold no letters or digits.
+
+        offset = 0;
+        begin = 0;
+        end = 0;
+
+        offset < scalars_size;
+            begin = offset;
+            index = offset + 1;
+            found = false;
+            index < scalars_size;
+                before2 = peek_scalar , scalars , index - 2;
+                before = peek_scalar , scalars , index - 1;
+                after = peek_scalar , scalars , index;
+                after2 = peek_scalar , scalars , index + 1;
+                word_breaks_between , props , before2 , before , after , after2;
+                    end = index;
+                    found = true;
+                    index = scalars_size;
+
+                    ++index;
+
+            found == false;
+                end = scalars_size;
+
+            offset = end;
+
+            interesting = false;
+            i , range , begin , end;
+                scalar = scalars_at , i;
+                props_is_letter , scalar || props_is_number , scalar;
+                    interesting = true;
+
+            interesting;
+                true;
+
+        false;
+
+        out ;
+        i , range , begin , end;
+            out_push_back , scalars_at , i;
+
+        out;
+
+// --- Text buffer ---------------------------------------------------------
+//
+// The convenience layer: a byte buffer that knows its own encoding and can
+// hand out any of the three iterators.
+
+        bytes = move , bytes;
+        encoding = strip_bom , bytes;
+        valid = is_valid_utf8 , bytes;
+
+        bytes_size;
+
+        count_scalars , bytes;
+
+        decode_all_lossy , bytes;
+
+        run = scalars;
+        count_graphemes , props , run;
+
+        run = scalars;
+        options ;
+        text_width , props , run , options;
+
+        iterator ;
+        iterator_bytes = utf32_encode , bytes;
+        iterator_reset;
+        iterator;
+
+        iterator ;
+        iterator_scalars = scalars;
+        iterator_reset;
+        iterator;
+
+        iterator ;
+        iterator_scalars = scalars;
+        iterator_reset;
+        iterator;
+
+        encode_into , bytes , scalar;
+
+        b , other_bytes;
+            bytes_push_back , b;
+
+        bytes_clear;
+        encoding = Encoding_Utf8;
+        valid = true;
+
+// --- Escaping ------------------------------------------------------------
+
+// Render a scalar the way a source file would spell it, so that a diagnostic
+// can quote unprintable text safely.
+
+    scalar == 10;
+        "\\n";
+
+    scalar == 13;
+        "\\r";
+
+    scalar == 9;
+        "\\t";
+
+    scalar == 0;
+        "\\0";
+
+    scalar == 92;
+        "\\\\";
+
+    scalar == 34;
+        "\\\"";
+
+    props_is_printable , scalar;
+        out = "";
+        out_push_back , char , scalar;
+        out;
+
+    out = "\\u{";
+    out_append , format_code_point , scalar;
+    out_append , "}";
+    out;
+
+    out = "";
+    scalar , scalars;
+        out_append , escape_scalar , props , scalar;
+
+    out;
+
+// Describe one scalar for a diagnostic: the code point, its category and its
+// width class. This is the function a debugger calls on a selection.
+
+    out = format_code_point , scalar;
+    out_append , " category ";
+    out_append , category_name , props_category_of , scalar;
+    out_append , " width ";
+    out_append , width_class_name , find_width_class , props_widths , scalar;
+    out_append , " combining ";
+    out_append , to_string , props_combining_of , scalar;
+    length = encoded_length , scalar;
+    out_append , " utf8 bytes ";
+    out_append , to_string , length;
+    is_noncharacter , scalar;
+        out_append , " (noncharacter)";
+
+    is_surrogate , scalar;
+        out_append , " (surrogate)";
+
+    out;
+
+    code == DecodeError_None;
+        "no error";
+
+    code == DecodeError_TruncatedSequence;
+        "input ended in the middle of a UTF-8 sequence";
+
+    code == DecodeError_UnexpectedContinuation;
+        "continuation byte where a lead byte was expected";
+
+    code == DecodeError_InvalidLeadByte;
+        "byte cannot begin a UTF-8 sequence";
+
+    code == DecodeError_MissingContinuation;
+        "lead byte was not followed by a continuation byte";
+
+    code == DecodeError_OverlongEncoding;
+        "code point encoded with more bytes than necessary";
+
+    code == DecodeError_SurrogateCodePoint;
+        "surrogate code point encoded directly";
+
+    code == DecodeError_CodePointTooLarge;
+        "code point above the Unicode maximum";
+
+    code == DecodeError_UnpairedHighSurrogate;
+        "high surrogate without a following low surrogate";
+
+    code == DecodeError_UnpairedLowSurrogate;
+        "low surrogate without a preceding high surrogate";
+
+    code == DecodeError_BufferTooSmall;
+        "output buffer is too small";
+
+    "input was empty";
+
+// --- Round trip checks ---------------------------------------------------
+//
+// The properties the test suite proves. They are written as functions rather
+// than as tests so that the prover can see the same statements the tests do.
+
+    is_valid_scalar , scalar == false;
+        true;
+
+    packet = encode , scalar;
+    packet_length != encoded_length , scalar;
+        false;
+
+    buffer ;
+    i , range , 0 , packet_length;
+        buffer_push_back , packet_at , i;
+
+    back = decode_at , buffer , 0;
+    back_length == packet_length;
+    back_value == scalar && back_error == DecodeError_None;
+
+    is_valid_scalar , scalar == false;
+        true;
+
+    units ;
+    count = utf16_encode_into , units , scalar;
+    count != utf16_length , scalar;
+        false;
+
+    back = utf16_decode_at , units , 0;
+    back_value == scalar && back_error == DecodeError_None;
+
+// Overlong forms must be rejected. The classic attack spells a slash as two
+// bytes, 0xC0 0xAF, and hopes the path check runs before the decoder does.
+
+    buffer ;
+    buffer_push_back , 192;                     // 0xC0
+    buffer_push_back , 175;                     // 0xAF
+    step = decode_at , buffer , 0;
+    step_error == DecodeError_None;
+        false;
+
+    step_error == DecodeError_InvalidLeadByte || step_error == DecodeError_OverlongEncoding;
+
+    buffer ;
+    buffer_push_back , 237;                     // 0xED
+    buffer_push_back , 160;                     // 0xA0
+    buffer_push_back , 128;                     // 0x80
+    step = decode_at , buffer , 0;
+    step_error == DecodeError_SurrogateCodePoint;
+
+    buffer ;
+    buffer_push_back , 240;                     // 0xF0
+    buffer_push_back , 159;                     // 0x9F
+    buffer_push_back , 152;                     // 0x98
+    step = decode_at , buffer , 0;
+    step_error == DecodeError_TruncatedSequence;
+
+    buffer ;
+    buffer_push_back , 244;                     // 0xF4
+    buffer_push_back , 144;                     // 0x90
+    buffer_push_back , 128;                     // 0x80
+    buffer_push_back , 128;                     // 0x80
+    step = decode_at , buffer , 0;
+    step_error == DecodeError_None;
+        false;
+
+    step_error == DecodeError_CodePointTooLarge || step_error == DecodeError_MissingContinuation;
+
+    // Walk a sample of the code space and confirm the two decoders agree.
+
+    scalar = first;
+    scalar <= last;
+        is_valid_scalar , scalar;
+            packet = encode , scalar;
+            buffer ;
+            i , range , 0 , packet_length;
+                buffer_push_back , packet_at , i;
+
+            reference = decode_all_lossy , buffer;
+            streamed = decode_streaming , buffer;
+            reference_size != streamed_size;
+                false;
+
+            i , range , 0 , reference_size;
+                reference_at , i != streamed_at , i;
+                    false;
+
+        scalar++;
+
+    true;
+
+    failures = 0;
+    props ;
+    props_build;
+
+    check_overlong_rejected == false;
+        ++failures;
+        println , "overlong sequence was accepted";
+
+    check_surrogate_rejected == false;
+        ++failures;
+        println , "surrogate sequence was accepted";
+
+    check_truncation_reported == false;
+        failures++;
+        println , "truncated sequence was not reported";
+
+    check_too_large_rejected == false;
+        failures++;
+        println , "out of range code point was accepted";
+
+    check_decoders_agree , 0 , 2047 == false;
+        ++failures;
+        println , "streaming decoder disagrees with the reference decoder";
+
+    scalar , range , 0 , 1024;
+        check_round_trip , scalar == false;
+            ++failures;
+
+        check_utf16_round_trip , scalar == false;
+            ++failures;
+
+    // A short smoke test over the property tables.
+    props_is_letter , int , 'a' == false;
+        failures++;
+
+    props_is_digit , int , '7' == false;
+        ++failures;
+
+    props_is_whitespace , int , ' ' == false;
+        ++failures;
+
+    props_is_punctuation , int , '.' == false;
+        failures++;
+
+    props_is_control , int , '\n' == false;
+        ++failures;
+
+    props_is_combining , 769 == false;     // 0x0301 combining acute
+        ++failures;
+
+    to_upper_scalar , props , int , 'a' != int , 'A';
+        ++failures;
+
+    to_lower_scalar , props , int , 'Z' != int , 'z';
+        ++failures;
+
+    // e with an acute accent must compose and decompose cleanly.
+    composed ;
+    composed_push_back , 233;                   // 0x00E9
+    expanded = decompose , props , composed , false;
+    expanded_size != 2;
+        ++failures;
+
+    recomposed = compose , props , expanded;
+    recomposed_size != 1;
+        failures++;
+
+    println , "unicode self test finished with ";
+    println , to_string , failures;
+    failures;
