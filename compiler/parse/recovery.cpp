@@ -167,12 +167,19 @@ static std::vector<RecoveryElement> generateCases(const SavedParserState& savedS
         }
     };
 
+    // A state may be reachable from itself, so every state is expanded at most once
+    std::bitset<std::to_underlying(State::COUNT)> consideredStates;
     std::vector<State> statesToConsider = { savedState.state };
+    consideredStates.set(std::to_underlying(savedState.state));
     do {
         State state = statesToConsider.back();
         statesToConsider.pop_back();
-        auto thens = thenStates(state);
-        statesToConsider.insert(statesToConsider.end(), thens.begin(), thens.end());
+        for (State then : thenStates(state)) {
+            if (consideredStates.test(std::to_underlying(then)))
+                continue;
+            consideredStates.set(std::to_underlying(then));
+            statesToConsider.push_back(then);
+        }
 
         if (state == State::AfterExpression) {
             static constexpr std::array continuations = {

@@ -1,6 +1,6 @@
 /* C++ code produced by gperf version 3.3 */
 /* Command-line: gperf --output=keyword_table.h -m100 ./keyword_table.gperf  */
-/* Computed positions: -k'2-3' */
+/* Computed positions: -k'1,$' */
 
 #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
       && ('%' == 37) && ('&' == 38) && ('\'' == 39) && ('(' == 40) \
@@ -39,14 +39,14 @@ namespace parse {
 struct KeywordTableEntry { const char* string; LexerToken token; };
 enum
   {
-    KEYWORD_TABLE_TOTAL_KEYWORDS = 32,
+    KEYWORD_TABLE_TOTAL_KEYWORDS = 34,
     KEYWORD_TABLE_MIN_WORD_LENGTH = 2,
     KEYWORD_TABLE_MAX_WORD_LENGTH = 10,
-    KEYWORD_TABLE_MIN_HASH_VALUE = 2,
-    KEYWORD_TABLE_MAX_HASH_VALUE = 33
+    KEYWORD_TABLE_MIN_HASH_VALUE = 3,
+    KEYWORD_TABLE_MAX_HASH_VALUE = 39
   };
 
-/* maximum key range = 32, duplicates = 0 */
+/* maximum key range = 37, duplicates = 0 */
 
 class KeywordTable
 {
@@ -61,113 +61,104 @@ KeywordTable::hash (const char *str, size_t len)
 {
   static const unsigned char asso_values[] =
     {
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34, 34, 34, 34,
-      34, 34, 34, 34, 34, 34, 34,  2, 34, 23,
-      34,  8, 30, 34, 16, 10, 34, 34, 16, 10,
-       0,  1, 15, 34,  0,  8,  4, 16, 34, 34,
-      34, 16, 34, 34, 34, 34, 34, 34
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+      40, 40, 40, 40, 40, 40, 40, 25, 27,  7,
+       8,  0,  1, 40, 22,  4, 40,  1, 17, 26,
+       0, 22,  8, 40,  4,  7,  4, 22, 15, 22,
+      40,  4, 40, 40, 40, 40, 40, 40
     };
-  unsigned int hval = len;
-
-  switch (hval)
-    {
-      default:
-        hval += asso_values[static_cast<unsigned char>(str[2])];
-#if (defined __cplusplus && (__cplusplus >= 201703L || (__cplusplus >= 201103L && defined __clang__ && __clang_major__ + (__clang_minor__ >= 9) > 3))) || (defined __STDC_VERSION__ && __STDC_VERSION__ >= 202000L && ((defined __GNUC__ && __GNUC__ >= 10) || (defined __clang__ && __clang_major__ >= 9)))
-      [[fallthrough]];
-#elif (defined __GNUC__ && __GNUC__ >= 7) || (defined __clang__ && __clang_major__ >= 10)
-      __attribute__ ((__fallthrough__));
-#endif
-      /*FALLTHROUGH*/
-      case 2:
-        hval += asso_values[static_cast<unsigned char>(str[1])];
-        break;
-    }
-  return hval;
+  return len + asso_values[static_cast<unsigned char>(str[len - 1])] + asso_values[static_cast<unsigned char>(str[0])];
 }
 
 static const unsigned char KEYWORD_TABLE_LENGTHS[] =
   {
-     0,  0,  2,  2,  3,  3,  5,  5,  7,  8,  6,  5,  6,  5,
-     4,  3,  6,  7,  6,  3,  4,  9,  6,  7,  6,  7,  8,  4,
-     4,  4,  4,  5,  2, 10
+     0,  0,  0,  2,  4,  4,  2,  2,  3,  9,  6,  3,  8,  5,
+    10,  8,  5,  6,  7,  7,  6,  6,  3,  7,  3,  4,  4,  5,
+     6,  4,  4,  4,  2,  5,  5,  6,  0,  0,  0,  7
   };
 
 static const struct KeywordTableEntry KEYWORD_TABLE_ENTRIES[] =
   {
     {"",LexerToken::Identifier}, {"",LexerToken::Identifier},
-#line 51 "./keyword_table.gperf"
+    {"",LexerToken::Identifier},
+#line 53 "./keyword_table.gperf"
     {"fn",LexerToken::Fn},
-#line 34 "./keyword_table.gperf"
-    {"do",LexerToken::Do},
+#line 36 "./keyword_table.gperf"
+    {"else",LexerToken::Else},
+#line 35 "./keyword_table.gperf"
+    {"elif",LexerToken::Elif},
+#line 40 "./keyword_table.gperf"
+    {"in",LexerToken::In},
+#line 38 "./keyword_table.gperf"
+    {"if",LexerToken::If},
 #line 37 "./keyword_table.gperf"
     {"for",LexerToken::For},
+#line 55 "./keyword_table.gperf"
+    {"namespace",LexerToken::Namespace},
+#line 43 "./keyword_table.gperf"
+    {"return",LexerToken::Return},
 #line 46 "./keyword_table.gperf"
-    {"var",LexerToken::Var},
+    {"try",LexerToken::Try},
+#line 58 "./keyword_table.gperf"
+    {"template",LexerToken::Template},
+#line 59 "./keyword_table.gperf"
+    {"trait",LexerToken::Trait},
+#line 54 "./keyword_table.gperf"
+    {"incomplete",LexerToken::Incomplete},
+#line 31 "./keyword_table.gperf"
+    {"continue",LexerToken::Continue},
 #line 30 "./keyword_table.gperf"
     {"const",LexerToken::Const},
 #line 57 "./keyword_table.gperf"
-    {"trait",LexerToken::Trait},
-#line 49 "./keyword_table.gperf"
-    {"context",LexerToken::Context},
-#line 31 "./keyword_table.gperf"
-    {"continue",LexerToken::Continue},
-#line 55 "./keyword_table.gperf"
     {"struct",LexerToken::Struct},
-#line 29 "./keyword_table.gperf"
-    {"catch",LexerToken::Catch},
-#line 43 "./keyword_table.gperf"
-    {"static",LexerToken::Static},
-#line 28 "./keyword_table.gperf"
-    {"break",LexerToken::Break},
-#line 48 "./keyword_table.gperf"
-    {"base",LexerToken::Base},
-#line 40 "./keyword_table.gperf"
-    {"let",LexerToken::Let},
-#line 45 "./keyword_table.gperf"
-    {"unique",LexerToken::Unique},
-#line 58 "./keyword_table.gperf"
-    {"virtual",LexerToken::Virtual},
-#line 41 "./keyword_table.gperf"
-    {"return",LexerToken::Return},
-#line 44 "./keyword_table.gperf"
-    {"try",LexerToken::Try},
-#line 50 "./keyword_table.gperf"
-    {"enum",LexerToken::Enum},
-#line 53 "./keyword_table.gperf"
-    {"namespace",LexerToken::Namespace},
-#line 27 "./keyword_table.gperf"
-    {"assert",LexerToken::Assert},
+#line 51 "./keyword_table.gperf"
+    {"context",LexerToken::Context},
 #line 32 "./keyword_table.gperf"
     {"destroy",LexerToken::Destroy},
-#line 42 "./keyword_table.gperf"
+#line 45 "./keyword_table.gperf"
+    {"static",LexerToken::Static},
+#line 44 "./keyword_table.gperf"
     {"shared",LexerToken::Shared},
+#line 48 "./keyword_table.gperf"
+    {"var",LexerToken::Var},
 #line 33 "./keyword_table.gperf"
     {"discard",LexerToken::Discard},
-#line 56 "./keyword_table.gperf"
-    {"template",LexerToken::Template},
-#line 54 "./keyword_table.gperf"
-    {"open",LexerToken::Open},
-#line 36 "./keyword_table.gperf"
-    {"else",LexerToken::Else},
+#line 41 "./keyword_table.gperf"
+    {"let",LexerToken::Let},
 #line 39 "./keyword_table.gperf"
     {"impl",LexerToken::Impl},
-#line 35 "./keyword_table.gperf"
-    {"elif",LexerToken::Elif},
-#line 47 "./keyword_table.gperf"
+#line 56 "./keyword_table.gperf"
+    {"open",LexerToken::Open},
+#line 49 "./keyword_table.gperf"
     {"while",LexerToken::While},
-#line 38 "./keyword_table.gperf"
-    {"if",LexerToken::If},
+#line 47 "./keyword_table.gperf"
+    {"unique",LexerToken::Unique},
+#line 42 "./keyword_table.gperf"
+    {"loop",LexerToken::Loop},
 #line 52 "./keyword_table.gperf"
-    {"incomplete",LexerToken::Incomplete}
+    {"enum",LexerToken::Enum},
+#line 50 "./keyword_table.gperf"
+    {"base",LexerToken::Base},
+#line 34 "./keyword_table.gperf"
+    {"do",LexerToken::Do},
+#line 28 "./keyword_table.gperf"
+    {"break",LexerToken::Break},
+#line 29 "./keyword_table.gperf"
+    {"catch",LexerToken::Catch},
+#line 27 "./keyword_table.gperf"
+    {"assert",LexerToken::Assert},
+    {"",LexerToken::Identifier}, {"",LexerToken::Identifier},
+    {"",LexerToken::Identifier},
+#line 60 "./keyword_table.gperf"
+    {"virtual",LexerToken::Virtual}
   };
 
 const struct KeywordTableEntry *
@@ -188,7 +179,7 @@ KeywordTable::get (const char *str, size_t len)
     }
   return static_cast<struct KeywordTableEntry *> (0);
 }
-#line 59 "./keyword_table.gperf"
+#line 61 "./keyword_table.gperf"
 
 
 }

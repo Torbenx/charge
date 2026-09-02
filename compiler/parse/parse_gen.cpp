@@ -130,8 +130,12 @@ std::string_view nameString(LexerToken token) {
         return "If";
     case LexerToken::Impl:
         return "Impl";
+    case LexerToken::In:
+        return "In";
     case LexerToken::Let:
         return "Let";
+    case LexerToken::Loop:
+        return "Loop";
     case LexerToken::Return:
         return "Return";
     case LexerToken::Shared:
@@ -227,6 +231,16 @@ std::string_view nameString(State state) {
         return "CheckElseBranch";
     case State::ElseBranch:
         return "ElseBranch";
+    case State::DoBody:
+        return "DoBody";
+    case State::AfterDoBody:
+        return "AfterDoBody";
+    case State::LoopBody:
+        return "LoopBody";
+    case State::ForVariable:
+        return "ForVariable";
+    case State::AfterLoopControl:
+        return "AfterLoopControl";
     case State::AfterSimpleVariableDeclarationId:
         return "AfterSimpleVariableDeclarationId";
     case State::AfterVariableDeclarationId:
@@ -332,7 +346,7 @@ std::span<const LexerToken> possibleTokens(State state) {
         return r;
     }
     case State::AfterExpression: {
-        static constexpr std::array r = { LexerToken::PlusPlus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::Minus, LexerToken::Star, LexerToken::Amp, LexerToken::Hat, LexerToken::Vert, LexerToken::Slash, LexerToken::Percent, LexerToken::LessLess, LexerToken::GreaterGreater, LexerToken::AmpAmp, LexerToken::VertVert, LexerToken::ExclaimEqual, LexerToken::EqualEqual, LexerToken::Less, LexerToken::LessEqual, LexerToken::Greater, LexerToken::GreaterEqual, LexerToken::PlusEqual, LexerToken::MinusEqual, LexerToken::StarEqual, LexerToken::AmpEqual, LexerToken::HatEqual, LexerToken::VertEqual, LexerToken::SlashEqual, LexerToken::PercentEqual, LexerToken::LessLessEqual, LexerToken::GreaterGreaterEqual, LexerToken::AmpAmpEqual, LexerToken::VertVertEqual, LexerToken::Point, LexerToken::ColonColon, LexerToken::LeftParen, LexerToken::LeftSquare, LexerToken::LeftBrace, LexerToken::RightParen, LexerToken::RightSquare, LexerToken::RightBrace, LexerToken::Comma, LexerToken::SemiColon, LexerToken::EqualGreater, LexerToken::Colon, LexerToken::Equal };
+        static constexpr std::array r = { LexerToken::PlusPlus, LexerToken::MinusMinus, LexerToken::Plus, LexerToken::Minus, LexerToken::Star, LexerToken::Amp, LexerToken::Hat, LexerToken::Vert, LexerToken::Slash, LexerToken::Percent, LexerToken::LessLess, LexerToken::GreaterGreater, LexerToken::AmpAmp, LexerToken::VertVert, LexerToken::ExclaimEqual, LexerToken::EqualEqual, LexerToken::Less, LexerToken::LessEqual, LexerToken::Greater, LexerToken::GreaterEqual, LexerToken::PlusEqual, LexerToken::MinusEqual, LexerToken::StarEqual, LexerToken::AmpEqual, LexerToken::HatEqual, LexerToken::VertEqual, LexerToken::SlashEqual, LexerToken::PercentEqual, LexerToken::LessLessEqual, LexerToken::GreaterGreaterEqual, LexerToken::AmpAmpEqual, LexerToken::VertVertEqual, LexerToken::In, LexerToken::Point, LexerToken::ColonColon, LexerToken::LeftParen, LexerToken::LeftSquare, LexerToken::LeftBrace, LexerToken::RightParen, LexerToken::RightSquare, LexerToken::RightBrace, LexerToken::Comma, LexerToken::SemiColon, LexerToken::EqualGreater, LexerToken::Colon, LexerToken::Equal };
         return r;
     }
     case State::CommaAfterExpressionInArguments: {
@@ -382,7 +396,7 @@ std::span<const LexerToken> possibleTokens(State state) {
         return {};
     }
     case State::Statement: {
-        static constexpr std::array r = { LexerToken::LeftBrace, LexerToken::If, LexerToken::Let, LexerToken::Var, LexerToken::Return, LexerToken::Destroy, LexerToken::Discard, LexerToken::RightBrace };
+        static constexpr std::array r = { LexerToken::LeftBrace, LexerToken::If, LexerToken::Let, LexerToken::Var, LexerToken::Return, LexerToken::Destroy, LexerToken::Discard, LexerToken::While, LexerToken::Do, LexerToken::Loop, LexerToken::For, LexerToken::Break, LexerToken::Continue, LexerToken::RightBrace };
         return r;
     }
     case State::LetStatement: {
@@ -405,12 +419,32 @@ std::span<const LexerToken> possibleTokens(State state) {
         static constexpr std::array r = { LexerToken::Colon };
         return r;
     }
+    case State::DoBody: {
+        static constexpr std::array r = { LexerToken::Colon };
+        return r;
+    }
+    case State::AfterDoBody: {
+        static constexpr std::array r = { LexerToken::While };
+        return r;
+    }
+    case State::LoopBody: {
+        static constexpr std::array r = { LexerToken::Colon };
+        return r;
+    }
+    case State::ForVariable: {
+        static constexpr std::array r = { LexerToken::Identifier, LexerToken::Var };
+        return r;
+    }
+    case State::AfterLoopControl: {
+        static constexpr std::array r = { LexerToken::SemiColon };
+        return r;
+    }
     case State::AfterSimpleVariableDeclarationId: {
         static constexpr std::array r = { LexerToken::Colon };
         return r;
     }
     case State::AfterVariableDeclarationId: {
-        static constexpr std::array r = { LexerToken::Colon, LexerToken::Equal, LexerToken::SemiColon, LexerToken::Comma, LexerToken::RightParen };
+        static constexpr std::array r = { LexerToken::Colon, LexerToken::In, LexerToken::Equal, LexerToken::SemiColon, LexerToken::Comma, LexerToken::RightParen };
         return r;
     }
     case State::VariableType: {
@@ -425,7 +459,7 @@ std::span<const LexerToken> possibleTokens(State state) {
         return {};
     }
     case State::AfterVariableModifier: {
-        static constexpr std::array r = { LexerToken::Equal, LexerToken::SemiColon, LexerToken::Comma, LexerToken::RightParen };
+        static constexpr std::array r = { LexerToken::In, LexerToken::Equal, LexerToken::SemiColon, LexerToken::Comma, LexerToken::RightParen };
         return r;
     }
     case State::AfterVariableUniqueModifier: {
@@ -641,7 +675,7 @@ std::span<const State> thenStates(State state) {
         return r;
     }
     case State::AfterStatement: {
-        static constexpr std::array r = { State::AfterDeclaration, State::CheckElseBranch, State::EnumValueDeclaration, State::Error, State::Expression, State::MemberDeclaration, State::NamespaceDeclaration, State::NoDeclaration, State::Statement, State::TemplatedDeclaration };
+        static constexpr std::array r = { State::AfterDeclaration, State::AfterDoBody, State::AfterStatement, State::CheckElseBranch, State::EnumValueDeclaration, State::Error, State::Expression, State::MemberDeclaration, State::NamespaceDeclaration, State::NoDeclaration, State::Statement, State::TemplatedDeclaration };
         return r;
     }
     case State::Statement: {
@@ -665,6 +699,26 @@ std::span<const State> thenStates(State state) {
         return r;
     }
     case State::ElseBranch: {
+        static constexpr std::array r = { State::Error };
+        return r;
+    }
+    case State::DoBody: {
+        static constexpr std::array r = { State::Error };
+        return r;
+    }
+    case State::AfterDoBody: {
+        static constexpr std::array r = { State::Error };
+        return r;
+    }
+    case State::LoopBody: {
+        static constexpr std::array r = { State::Error };
+        return r;
+    }
+    case State::ForVariable: {
+        static constexpr std::array r = { State::Error };
+        return r;
+    }
+    case State::AfterLoopControl: {
         static constexpr std::array r = { State::Error };
         return r;
     }

@@ -215,7 +215,7 @@ constexpr WordMask keywordMask() {
         keywords.push_back(word);
     });
 
-    static constexpr int_t MAX_BITS = 10;
+    static constexpr int_t MAX_BITS = 16;
     for (int_t bits = 1; bits <= MAX_BITS; bits++) {
         std::bitset<(size_t)1 << MAX_BITS> set;
         int_t shiftBits = 32 - bits;
@@ -854,12 +854,18 @@ LABEL_MAYBE_UNUSED lex$word_case:
         case toCaseValue<identifier_t>(LexerToken::Impl, "impl"):
             // lexToken
             return LexerToken::Impl;
+        case toCaseValue<identifier_t>(LexerToken::In, "in"):
+            // lexToken
+            return LexerToken::In;
         case toCaseValue<identifier_t>(LexerToken::Incomplete, "incomplete"):
             // lexToken
             return LexerToken::Incomplete;
         case toCaseValue<identifier_t>(LexerToken::Let, "let"):
             // lexToken
             return LexerToken::Let;
+        case toCaseValue<identifier_t>(LexerToken::Loop, "loop"):
+            // lexToken
+            return LexerToken::Loop;
         case toCaseValue<identifier_t>(LexerToken::Namespace, "namespace"):
             // lexToken
             return LexerToken::Namespace;
@@ -974,6 +980,16 @@ template<typename ParseOutput>
         goto check_else_branch$no_emit;
     case State::ElseBranch:
         goto else_branch$no_emit;
+    case State::DoBody:
+        goto do_body$no_emit;
+    case State::AfterDoBody:
+        goto after_do_body$no_emit;
+    case State::LoopBody:
+        goto loop_body$no_emit;
+    case State::ForVariable:
+        goto for_variable$no_emit;
+    case State::AfterLoopControl:
+        goto after_loop_control$no_emit;
     case State::AfterSimpleVariableDeclarationId:
         goto after_simple_variable_declaration_id$no_emit;
     case State::AfterVariableDeclarationId:
@@ -1063,6 +1079,8 @@ template<typename ParseOutput>
     case State::AfterDeclaration:
         goto after_declaration$no_emit;
     case State::Error:
+        VERIFY_NOT_REACHED();
+    default:
         VERIFY_NOT_REACHED();
     }
     // LinearState start
@@ -2021,6 +2039,42 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             // next statement
             goto statement$with_emit;
         }
+        // ifScope ScopeKind::WhileCondition
+        if (scopePosition[0] == ScopeKind::WhileCondition) {
+            // popScope ScopeKind::WhileCondition
+            {
+                auto result = popScope(scopePosition, ScopeKind::WhileCondition);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
+            }
+            // pushScope ScopeKind::LoopBody
+            scopePosition = pushScope(scopePosition, ScopeKind::LoopBody);
+            // emitToken TokenKind::WhileBody
+            carriedEmitTokenKind = TokenKind::WhileBody;
+            carriedEmitTokenData = 0;
+            // next statement
+            goto statement$with_emit;
+        }
+        // ifScope ScopeKind::ForRange
+        if (scopePosition[0] == ScopeKind::ForRange) {
+            // popScope ScopeKind::ForRange
+            {
+                auto result = popScope(scopePosition, ScopeKind::ForRange);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
+            }
+            // pushScope ScopeKind::LoopBody
+            scopePosition = pushScope(scopePosition, ScopeKind::LoopBody);
+            // emitToken TokenKind::ForBody
+            carriedEmitTokenKind = TokenKind::ForBody;
+            carriedEmitTokenData = 0;
+            // next statement
+            goto statement$with_emit;
+        }
         // popScope ScopeKind::LeftExpr
         {
             auto result = popScope(scopePosition, ScopeKind::LeftExpr);
@@ -2054,6 +2108,22 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
             carriedEmitTokenData = 0;
             // next after_declaration
             goto after_declaration$with_emit;
+        }
+        // ifScope ScopeKind::DoWhileCondition
+        if (scopePosition[0] == ScopeKind::DoWhileCondition) {
+            // popScope ScopeKind::DoWhileCondition
+            {
+                auto result = popScope(scopePosition, ScopeKind::DoWhileCondition);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
+            }
+            // emitToken TokenKind::ExpressionStmt
+            carriedEmitTokenKind = TokenKind::ExpressionStmt;
+            carriedEmitTokenData = 0;
+            // next after_statement
+            goto after_statement$with_emit;
         }
         // popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
         {
@@ -2475,13 +2545,54 @@ LABEL_MAYBE_UNUSED after_expression$as_then:
     case '#':
     case '$':
     case '_':
-        // -> error
-        goto error$as_then;
+        goto after_expression$word_case_with_read;
     default: {
         VERIFY_NOT_REACHED();
     }
     } // switch
     VERIFY_NOT_REACHED();
+LABEL_MAYBE_UNUSED after_expression$word_case_with_read:
+    {
+        auto wordAndPos = readWord(tokEnd, output);
+        tokEnd = wordAndPos.position;
+        this_identifier = wordAndPos.word;
+    }
+LABEL_MAYBE_UNUSED after_expression$word_case:
+    if (isIdentifierKeywordOrSpecial(this_identifier)) {
+        switch (toSwitchValue(this_identifier)) {
+        case toCaseValue<identifier_t>(LexerToken::In, "in"):
+            // popScope ScopeKind::VariableType
+            {
+                auto result = popScope(scopePosition, ScopeKind::VariableType);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
+            }
+            // popScope ScopeKind::ForVariable
+            {
+                auto result = popScope(scopePosition, ScopeKind::ForVariable);
+                if (result == nullptr) {
+                    goto pop_scope_failed;
+                }
+                scopePosition = result;
+            }
+            // pushScope ScopeKind::ForRange
+            scopePosition = pushScope(scopePosition, ScopeKind::ForRange);
+            // emitToken TokenKind::ForIn
+            carriedEmitTokenKind = TokenKind::ForIn;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
+        default:
+            if (isKeyword(this_identifier)) {
+                goto error$as_then;
+            }
+            break;
+        }
+    }
+    // -> error
+    goto error$as_then;
 
     // LinearState comma_after_expression_in_arguments
 comma_after_expression_in_arguments$no_emit:
@@ -2929,6 +3040,32 @@ after_statement$no_emit:
         }
         // next statement
         goto statement$no_emit;
+    }
+    // ifScope ScopeKind::LoopBody
+    if (scopePosition[0] == ScopeKind::LoopBody) {
+        // popScope ScopeKind::LoopBody
+        {
+            auto result = popScope(scopePosition, ScopeKind::LoopBody);
+            if (result == nullptr) {
+                goto pop_scope_failed;
+            }
+            scopePosition = result;
+        }
+        // next after_statement
+        goto after_statement$no_emit;
+    }
+    // ifScope ScopeKind::DoBody
+    if (scopePosition[0] == ScopeKind::DoBody) {
+        // popScope ScopeKind::DoBody
+        {
+            auto result = popScope(scopePosition, ScopeKind::DoBody);
+            if (result == nullptr) {
+                goto pop_scope_failed;
+            }
+            scopePosition = result;
+        }
+        // next after_do_body
+        goto after_do_body$no_emit;
     }
     // ifScope ScopeKind::CompoundStmt
     if (scopePosition[0] == ScopeKind::CompoundStmt) {
@@ -3566,6 +3703,18 @@ LABEL_MAYBE_UNUSED statement$word_case_with_read:
 LABEL_MAYBE_UNUSED statement$word_case:
     if (isIdentifierKeywordOrSpecial(this_identifier)) {
         switch (toSwitchValue(this_identifier)) {
+        case toCaseValue<identifier_t>(LexerToken::Break, "break"):
+            // emitToken TokenKind::BreakStmt
+            carriedEmitTokenKind = TokenKind::BreakStmt;
+            carriedEmitTokenData = 0;
+            // next after_loop_control
+            goto after_loop_control$with_emit;
+        case toCaseValue<identifier_t>(LexerToken::Continue, "continue"):
+            // emitToken TokenKind::ContinueStmt
+            carriedEmitTokenKind = TokenKind::ContinueStmt;
+            carriedEmitTokenData = 0;
+            // next after_loop_control
+            goto after_loop_control$with_emit;
         case toCaseValue<identifier_t>(LexerToken::Destroy, "destroy"):
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
@@ -3582,6 +3731,20 @@ LABEL_MAYBE_UNUSED statement$word_case:
             carriedEmitTokenData = 0;
             // next expression
             goto expression$with_emit;
+        case toCaseValue<identifier_t>(LexerToken::Do, "do"):
+            // emitToken TokenKind::DoStmt
+            carriedEmitTokenKind = TokenKind::DoStmt;
+            carriedEmitTokenData = 0;
+            // next do_body
+            goto do_body$with_emit;
+        case toCaseValue<identifier_t>(LexerToken::For, "for"):
+            // pushScope ScopeKind::ForVariable
+            scopePosition = pushScope(scopePosition, ScopeKind::ForVariable);
+            // emitToken TokenKind::ForStmt
+            carriedEmitTokenKind = TokenKind::ForStmt;
+            carriedEmitTokenData = 0;
+            // next for_variable
+            goto for_variable$with_emit;
         case toCaseValue<identifier_t>(LexerToken::If, "if"):
             // pushScope ScopeKind::LeftExpr
             scopePosition = pushScope(scopePosition, ScopeKind::LeftExpr);
@@ -3592,6 +3755,12 @@ LABEL_MAYBE_UNUSED statement$word_case:
         case toCaseValue<identifier_t>(LexerToken::Let, "let"):
             // next let_statement
             goto let_statement$no_emit;
+        case toCaseValue<identifier_t>(LexerToken::Loop, "loop"):
+            // emitToken TokenKind::LoopStmt
+            carriedEmitTokenKind = TokenKind::LoopStmt;
+            carriedEmitTokenData = 0;
+            // next loop_body
+            goto loop_body$with_emit;
         case toCaseValue<identifier_t>(LexerToken::Return, "return"):
             // pushScope ScopeKind::RightExpr
             scopePosition = pushScope(scopePosition, ScopeKind::RightExpr);
@@ -3603,6 +3772,14 @@ LABEL_MAYBE_UNUSED statement$word_case:
         case toCaseValue<identifier_t>(LexerToken::Var, "var"):
             // next var_statement
             goto var_statement$no_emit;
+        case toCaseValue<identifier_t>(LexerToken::While, "while"):
+            // pushScope ScopeKind::WhileCondition
+            scopePosition = pushScope(scopePosition, ScopeKind::WhileCondition);
+            // emitToken TokenKind::WhileStmt
+            carriedEmitTokenKind = TokenKind::WhileStmt;
+            carriedEmitTokenData = 0;
+            // next expression
+            goto expression$with_emit;
         default:
             if (isKeyword(this_identifier)) {
                 goto error$as_then;
@@ -3737,6 +3914,20 @@ LABEL_MAYBE_UNUSED check_else_branch$as_then:
     LABEL_MAYBE_UNUSED check_else_branch$word_case:
         if (isIdentifierKeywordOrSpecial(this_identifier)) {
             switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::Break, "break"):
+                // -> statement
+                // emitToken TokenKind::BreakStmt
+                carriedEmitTokenKind = TokenKind::BreakStmt;
+                carriedEmitTokenData = 0;
+                // next after_loop_control
+                goto after_loop_control$with_emit;
+            case toCaseValue<identifier_t>(LexerToken::Continue, "continue"):
+                // -> statement
+                // emitToken TokenKind::ContinueStmt
+                carriedEmitTokenKind = TokenKind::ContinueStmt;
+                carriedEmitTokenData = 0;
+                // next after_loop_control
+                goto after_loop_control$with_emit;
             case toCaseValue<identifier_t>(LexerToken::Destroy, "destroy"):
                 // -> statement
                 // pushScope ScopeKind::RightExpr
@@ -3755,11 +3946,27 @@ LABEL_MAYBE_UNUSED check_else_branch$as_then:
                 carriedEmitTokenData = 0;
                 // next expression
                 goto expression$with_emit;
+            case toCaseValue<identifier_t>(LexerToken::Do, "do"):
+                // -> statement
+                // emitToken TokenKind::DoStmt
+                carriedEmitTokenKind = TokenKind::DoStmt;
+                carriedEmitTokenData = 0;
+                // next do_body
+                goto do_body$with_emit;
             case toCaseValue<identifier_t>(LexerToken::Else, "else"):
                 // pushScope ScopeKind::ElseBranch
                 scopePosition = pushScope(scopePosition, ScopeKind::ElseBranch);
                 // next else_branch
                 goto else_branch$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::For, "for"):
+                // -> statement
+                // pushScope ScopeKind::ForVariable
+                scopePosition = pushScope(scopePosition, ScopeKind::ForVariable);
+                // emitToken TokenKind::ForStmt
+                carriedEmitTokenKind = TokenKind::ForStmt;
+                carriedEmitTokenData = 0;
+                // next for_variable
+                goto for_variable$with_emit;
             case toCaseValue<identifier_t>(LexerToken::If, "if"):
                 // -> statement
                 // pushScope ScopeKind::LeftExpr
@@ -3772,6 +3979,13 @@ LABEL_MAYBE_UNUSED check_else_branch$as_then:
                 // -> statement
                 // next let_statement
                 goto let_statement$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::Loop, "loop"):
+                // -> statement
+                // emitToken TokenKind::LoopStmt
+                carriedEmitTokenKind = TokenKind::LoopStmt;
+                carriedEmitTokenData = 0;
+                // next loop_body
+                goto loop_body$with_emit;
             case toCaseValue<identifier_t>(LexerToken::Return, "return"):
                 // -> statement
                 // pushScope ScopeKind::RightExpr
@@ -3785,6 +3999,15 @@ LABEL_MAYBE_UNUSED check_else_branch$as_then:
                 // -> statement
                 // next var_statement
                 goto var_statement$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::While, "while"):
+                // -> statement
+                // pushScope ScopeKind::WhileCondition
+                scopePosition = pushScope(scopePosition, ScopeKind::WhileCondition);
+                // emitToken TokenKind::WhileStmt
+                carriedEmitTokenKind = TokenKind::WhileStmt;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
             default:
                 if (isKeyword(this_identifier)) {
                     goto error$as_then;
@@ -3824,6 +4047,153 @@ LABEL_MAYBE_UNUSED else_branch$as_then:
             // next statement
             goto statement$with_emit;
         }
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState do_body
+do_body$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
+do_body$no_emit:
+    parseState = State::DoBody;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED do_body$as_then:
+    if (std::string_view(tokEnd, 1) == ":"sv) {
+        char next = tokEnd[1];
+        if (next != ':') {
+            tokEnd += 1;
+            // pushScope ScopeKind::DoBody
+            scopePosition = pushScope(scopePosition, ScopeKind::DoBody);
+            // next statement
+            goto statement$no_emit;
+        }
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState after_do_body
+after_do_body$no_emit:
+    parseState = State::AfterDoBody;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_do_body$as_then:
+    if (isWordFirstCharacter(tokEnd[0])) {
+    LABEL_MAYBE_UNUSED after_do_body$word_case_with_read:
+        {
+            auto wordAndPos = readWord(tokEnd, output);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+    LABEL_MAYBE_UNUSED after_do_body$word_case:
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
+            switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::While, "while"):
+                // pushScope ScopeKind::DoWhileCondition
+                scopePosition = pushScope(scopePosition, ScopeKind::DoWhileCondition);
+                // emitToken TokenKind::DoWhileStmt
+                carriedEmitTokenKind = TokenKind::DoWhileStmt;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
+            default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
+                break;
+            }
+        }
+        // -> error
+        goto error$as_then;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState loop_body
+loop_body$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
+loop_body$no_emit:
+    parseState = State::LoopBody;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED loop_body$as_then:
+    if (std::string_view(tokEnd, 1) == ":"sv) {
+        char next = tokEnd[1];
+        if (next != ':') {
+            tokEnd += 1;
+            // pushScope ScopeKind::LoopBody
+            scopePosition = pushScope(scopePosition, ScopeKind::LoopBody);
+            // next statement
+            goto statement$no_emit;
+        }
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState for_variable
+for_variable$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
+for_variable$no_emit:
+    parseState = State::ForVariable;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED for_variable$as_then:
+    if (isWordFirstCharacter(tokEnd[0])) {
+    LABEL_MAYBE_UNUSED for_variable$word_case_with_read:
+        {
+            auto wordAndPos = readWord(tokEnd, output);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+    LABEL_MAYBE_UNUSED for_variable$word_case:
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
+            switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::Var, "var"):
+                // next var_parameter
+                goto var_parameter$no_emit;
+            default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
+                break;
+            }
+        }
+        // emitToken TokenKind::LetValueDecl
+        carriedEmitTokenKind = TokenKind::LetValueDecl;
+        carriedEmitTokenData = packData1(TokenKind::LetValueDecl, this_identifier);
+        // next after_variable_declaration_id
+        goto after_variable_declaration_id$with_emit;
+    }
+    // then error
+    goto error$as_then;
+
+    // LinearState after_loop_control
+after_loop_control$with_emit:
+    emitToken(carriedEmitTokenKind, tokBegin, carriedEmitTokenData, output);
+after_loop_control$no_emit:
+    parseState = State::AfterLoopControl;
+    if (tokenLimit == 0)
+        goto reached_token_limit;
+    tokenLimit -= 1;
+    tokEnd = inlineAdvancer(tokEnd, output);
+    tokBegin = tokEnd;
+LABEL_MAYBE_UNUSED after_loop_control$as_then:
+    if (std::string_view(tokEnd, 1) == ";"sv) {
+        tokEnd += 1;
+        // next after_statement
+        goto after_statement$no_emit;
     }
     // then error
     goto error$as_then;
@@ -3931,6 +4301,42 @@ LABEL_MAYBE_UNUSED after_variable_declaration_id$as_then:
         carriedEmitTokenData = 0;
         // next after_parameters
         goto after_parameters$with_emit;
+    }
+    if (isWordFirstCharacter(tokEnd[0])) {
+    LABEL_MAYBE_UNUSED after_variable_declaration_id$word_case_with_read:
+        {
+            auto wordAndPos = readWord(tokEnd, output);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+    LABEL_MAYBE_UNUSED after_variable_declaration_id$word_case:
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
+            switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::In, "in"):
+                // popScope ScopeKind::ForVariable
+                {
+                    auto result = popScope(scopePosition, ScopeKind::ForVariable);
+                    if (result == nullptr) {
+                        goto pop_scope_failed;
+                    }
+                    scopePosition = result;
+                }
+                // pushScope ScopeKind::ForRange
+                scopePosition = pushScope(scopePosition, ScopeKind::ForRange);
+                // emitToken TokenKind::ForIn
+                carriedEmitTokenKind = TokenKind::ForIn;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
+            default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
+                break;
+            }
+        }
+        // -> error
+        goto error$as_then;
     }
     // then error
     goto error$as_then;
@@ -4092,6 +4498,56 @@ LABEL_MAYBE_UNUSED after_variable_modifier$as_then:
         // next after_parameters
         goto after_parameters$with_emit;
     }
+    if (isWordFirstCharacter(tokEnd[0])) {
+    LABEL_MAYBE_UNUSED after_variable_modifier$word_case_with_read:
+        {
+            auto wordAndPos = readWord(tokEnd, output);
+            tokEnd = wordAndPos.position;
+            this_identifier = wordAndPos.word;
+        }
+    LABEL_MAYBE_UNUSED after_variable_modifier$word_case:
+        if (isIdentifierKeywordOrSpecial(this_identifier)) {
+            switch (toSwitchValue(this_identifier)) {
+            case toCaseValue<identifier_t>(LexerToken::If, "if"):
+                // pushScope ScopeKind::VariableType
+                scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+                // -> expression
+                // pushScope ScopeKind::IfExpr
+                scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
+                // next expression
+                goto expression$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::In, "in"):
+                // popScope ScopeKind::ForVariable
+                {
+                    auto result = popScope(scopePosition, ScopeKind::ForVariable);
+                    if (result == nullptr) {
+                        goto pop_scope_failed;
+                    }
+                    scopePosition = result;
+                }
+                // pushScope ScopeKind::ForRange
+                scopePosition = pushScope(scopePosition, ScopeKind::ForRange);
+                // emitToken TokenKind::ForIn
+                carriedEmitTokenKind = TokenKind::ForIn;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
+            default:
+                if (isKeyword(this_identifier)) {
+                    goto error$as_then;
+                }
+                break;
+            }
+        }
+        // pushScope ScopeKind::VariableType
+        scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
+        // -> expression
+        // emitToken TokenKind::IdentifierExpr
+        carriedEmitTokenKind = TokenKind::IdentifierExpr;
+        carriedEmitTokenData = packData1(TokenKind::IdentifierExpr, this_identifier);
+        // next after_expression
+        goto after_expression$with_emit;
+    }
     // pushScope ScopeKind::VariableType
     scopePosition = pushScope(scopePosition, ScopeKind::VariableType);
     // then expression
@@ -4140,6 +4596,31 @@ LABEL_MAYBE_UNUSED after_variable_unique_modifier$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
                 // next expression
                 goto expression$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::In, "in"):
+                // -> after_reference_modifier
+                // ifScope ScopeKind::ReturnType
+                if (scopePosition[0] == ScopeKind::ReturnType) {
+                    // then after_return_type_modifier
+                    // -> expression
+                    // -> error
+                    goto error$as_then;
+                }
+                // -> after_variable_modifier
+                // popScope ScopeKind::ForVariable
+                {
+                    auto result = popScope(scopePosition, ScopeKind::ForVariable);
+                    if (result == nullptr) {
+                        goto pop_scope_failed;
+                    }
+                    scopePosition = result;
+                }
+                // pushScope ScopeKind::ForRange
+                scopePosition = pushScope(scopePosition, ScopeKind::ForRange);
+                // emitToken TokenKind::ForIn
+                carriedEmitTokenKind = TokenKind::ForIn;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
             default:
                 if (isKeyword(this_identifier)) {
                     goto error$as_then;
@@ -4214,6 +4695,31 @@ LABEL_MAYBE_UNUSED after_variable_shared_modifier$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
                 // next expression
                 goto expression$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::In, "in"):
+                // -> after_reference_modifier
+                // ifScope ScopeKind::ReturnType
+                if (scopePosition[0] == ScopeKind::ReturnType) {
+                    // then after_return_type_modifier
+                    // -> expression
+                    // -> error
+                    goto error$as_then;
+                }
+                // -> after_variable_modifier
+                // popScope ScopeKind::ForVariable
+                {
+                    auto result = popScope(scopePosition, ScopeKind::ForVariable);
+                    if (result == nullptr) {
+                        goto pop_scope_failed;
+                    }
+                    scopePosition = result;
+                }
+                // pushScope ScopeKind::ForRange
+                scopePosition = pushScope(scopePosition, ScopeKind::ForRange);
+                // emitToken TokenKind::ForIn
+                carriedEmitTokenKind = TokenKind::ForIn;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
             default:
                 if (isKeyword(this_identifier)) {
                     goto error$as_then;
@@ -4283,6 +4789,31 @@ LABEL_MAYBE_UNUSED after_variable_const_modifier$as_then:
                 scopePosition = pushScope(scopePosition, ScopeKind::IfExpr);
                 // next expression
                 goto expression$no_emit;
+            case toCaseValue<identifier_t>(LexerToken::In, "in"):
+                // -> after_reference_modifier
+                // ifScope ScopeKind::ReturnType
+                if (scopePosition[0] == ScopeKind::ReturnType) {
+                    // then after_return_type_modifier
+                    // -> expression
+                    // -> error
+                    goto error$as_then;
+                }
+                // -> after_variable_modifier
+                // popScope ScopeKind::ForVariable
+                {
+                    auto result = popScope(scopePosition, ScopeKind::ForVariable);
+                    if (result == nullptr) {
+                        goto pop_scope_failed;
+                    }
+                    scopePosition = result;
+                }
+                // pushScope ScopeKind::ForRange
+                scopePosition = pushScope(scopePosition, ScopeKind::ForRange);
+                // emitToken TokenKind::ForIn
+                carriedEmitTokenKind = TokenKind::ForIn;
+                carriedEmitTokenData = 0;
+                // next expression
+                goto expression$with_emit;
             case toCaseValue<identifier_t>(LexerToken::Shared, "shared"):
                 // next after_reference_modifier
                 goto after_reference_modifier$no_emit;

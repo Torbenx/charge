@@ -176,6 +176,13 @@ SwitchState after_expression() then error
         emitToken TokenKind::LogicalOrUpdateStmt
         next expression
 
+    keyword in
+        popScope ScopeKind::VariableType
+        popScope ScopeKind::ForVariable
+        pushScope ScopeKind::ForRange
+        emitToken TokenKind::ForIn
+        next expression
+
     punctuation .
         next member_access
     punctuation ::
@@ -255,6 +262,10 @@ SwitchState after_expression() then error
             popScope ScopeKind::BaseTypeExpr
             emitToken TokenKind::EmptyNode
             next after_declaration
+        ifScope ScopeKind::DoWhileCondition
+            popScope ScopeKind::DoWhileCondition
+            emitToken TokenKind::ExpressionStmt
+            next after_statement
         popScope ScopeKind::LeftExpr, ScopeKind::RightExpr, ScopeKind::VariableType
         emitToken TokenKind::ExpressionStmt
         next after_statement
@@ -282,6 +293,16 @@ SwitchState after_expression() then error
             popScope ScopeKind::LeftExpr
             pushScope ScopeKind::IfBranch
             emitToken TokenKind::IfStmt
+            next statement
+        ifScope ScopeKind::WhileCondition
+            popScope ScopeKind::WhileCondition
+            pushScope ScopeKind::LoopBody
+            emitToken TokenKind::WhileBody
+            next statement
+        ifScope ScopeKind::ForRange
+            popScope ScopeKind::ForRange
+            pushScope ScopeKind::LoopBody
+            emitToken TokenKind::ForBody
             next statement
         popScope ScopeKind::LeftExpr
         pushScope ScopeKind::ContextFunction
@@ -390,6 +411,12 @@ LinearState after_statement() then error
         ifScope ScopeKind::ElseBranch
             popScope ScopeKind::ElseBranch
             next statement         # TODO: This is not correct for nested ifs or outside a compound statement
+        ifScope ScopeKind::LoopBody
+            popScope ScopeKind::LoopBody
+            next after_statement # Re-dispatch, so nested loop bodies unwind into the enclosing scope
+        ifScope ScopeKind::DoBody
+            popScope ScopeKind::DoBody
+            next after_do_body
         ifScope ScopeKind::CompoundStmt
             next statement
         ifScope ScopeKind::ContextFunction
@@ -421,6 +448,27 @@ SwitchState statement() then expression
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::DiscardStmt
         next expression
+
+    keyword while
+        pushScope ScopeKind::WhileCondition
+        emitToken TokenKind::WhileStmt
+        next expression
+    keyword do
+        emitToken TokenKind::DoStmt
+        next do_body
+    keyword loop
+        emitToken TokenKind::LoopStmt
+        next loop_body
+    keyword for
+        pushScope ScopeKind::ForVariable
+        emitToken TokenKind::ForStmt
+        next for_variable
+    keyword break
+        emitToken TokenKind::BreakStmt
+        next after_loop_control
+    keyword continue
+        emitToken TokenKind::ContinueStmt
+        next after_loop_control
 
     punctuation }
         ifScope ScopeKind::IfBranch, ScopeKind::ElseBranch
@@ -456,6 +504,34 @@ LinearState else_branch() then error
         emitToken TokenKind::ElseStmt
         next statement
 
+# --- Loops
+
+LinearState do_body() then error
+    punctuation :
+        pushScope ScopeKind::DoBody
+        next statement
+LinearState after_do_body() then error
+    keyword while
+        pushScope ScopeKind::DoWhileCondition
+        emitToken TokenKind::DoWhileStmt
+        next expression
+
+LinearState loop_body() then error
+    punctuation :
+        pushScope ScopeKind::LoopBody
+        next statement
+
+LinearState for_variable() then error
+    identifier
+        emitToken TokenKind::LetValueDecl
+        next after_variable_declaration_id
+    keyword var
+        next var_parameter
+
+LinearState after_loop_control() then error
+    punctuation ;
+        next after_statement
+
 # --- Variable declaration
 
 LinearState after_simple_variable_declaration_id() then after_variable_declaration_id
@@ -467,6 +543,11 @@ LinearState after_variable_declaration_id() then error
     punctuation :
         emitToken TokenKind::VariableType, sema::VariableKind::Let
         next variable_type
+    keyword in
+        popScope ScopeKind::ForVariable
+        pushScope ScopeKind::ForRange
+        emitToken TokenKind::ForIn
+        next expression
     punctuation =
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::AssignStmt
@@ -508,6 +589,11 @@ LinearState after_reference_modifier() then after_variable_modifier
         ifScope ScopeKind::ReturnType
             then after_return_type_modifier
 LinearState after_variable_modifier() then expression
+    keyword in
+        popScope ScopeKind::ForVariable
+        pushScope ScopeKind::ForRange
+        emitToken TokenKind::ForIn
+        next expression
     punctuation =
         pushScope ScopeKind::RightExpr
         emitToken TokenKind::AssignStmt

@@ -19,7 +19,9 @@ inline constexpr ConstWordStringTable words {
     wordWithId("for", KEYWORD_WORD_ID),
     wordWithId("if", KEYWORD_WORD_ID),
     wordWithId("impl", KEYWORD_WORD_ID),
+    wordWithId("in", KEYWORD_WORD_ID),
     wordWithId("let", KEYWORD_WORD_ID),
+    wordWithId("loop", KEYWORD_WORD_ID),
     wordWithId("return", KEYWORD_WORD_ID),
     wordWithId("shared", KEYWORD_WORD_ID),
     wordWithId("static", KEYWORD_WORD_ID),
@@ -136,7 +138,9 @@ enum class LexerToken : uint8_t {
     For, // for
     If, // if
     Impl, // impl
+    In, // in
     Let, // let
+    Loop, // loop
     Return, // return
     Shared, // shared
     Static, // static
@@ -242,7 +246,9 @@ inline constexpr EnumTable<LexerToken, std::string_view> fixedSpelling = {
         { LexerToken::For, "for" },
         { LexerToken::If, "if" },
         { LexerToken::Impl, "impl" },
+        { LexerToken::In, "in" },
         { LexerToken::Let, "let" },
+        { LexerToken::Loop, "loop" },
         { LexerToken::Return, "return" },
         { LexerToken::Shared, "shared" },
         { LexerToken::Static, "static" },
@@ -286,6 +292,11 @@ enum class State : uint8_t {
     AfterReturn,
     CheckElseBranch,
     ElseBranch,
+    DoBody,
+    AfterDoBody,
+    LoopBody,
+    ForVariable,
+    AfterLoopControl,
     AfterSimpleVariableDeclarationId,
     AfterVariableDeclarationId,
     VariableType,
@@ -331,6 +342,7 @@ enum class State : uint8_t {
     StaticOpenVariableDeclaration,
     AfterDeclaration,
     Error,
+    COUNT,
 };
 std::string_view nameString(State);
 

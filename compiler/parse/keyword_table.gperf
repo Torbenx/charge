@@ -37,7 +37,9 @@ else,LexerToken::Else
 for,LexerToken::For
 if,LexerToken::If
 impl,LexerToken::Impl
+in,LexerToken::In
 let,LexerToken::Let
+loop,LexerToken::Loop
 return,LexerToken::Return
 shared,LexerToken::Shared
 static,LexerToken::Static

@@ -24,4 +24,11 @@ namespace n: /* expect-recovery { */ }
 template(p) static var split_between_cases1 = bar;
 namespace n /* expect-recovery : */ { }
 template(p) static var split_between_cases2 = bar;
+fn loops(): {
+    while a /* expect-recovery : */ ! b;
+    for x /* expect-recovery in */ list: { }
+    do: b; /* expect-recovery while */ a;
+    loop: { /* expect-recovery skip=1 */ break }
+}
+
 namespace n: { /* expect-recovery } */

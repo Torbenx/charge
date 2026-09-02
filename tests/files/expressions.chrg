@@ -157,4 +157,86 @@ return;
 // expect-token DestroyStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
 destroy a;
 
+//; while loops
+// expect-token WhileStmt; expect-token IdentifierExpr; expect-token WhileBody
+// expect-token IdentifierExpr; expect-token ExpressionStmt
+while a: b;
+
+// expect-token WhileStmt; expect-token IdentifierExpr; expect-token CompareGreaterExpr; expect-token NumericLiteralExpr
+// expect-token WhileBody; expect-token CompoundStmt
+// expect-token IdentifierExpr; expect-token SubtractionUpdateStmt; expect-token NumericLiteralExpr; expect-token ExpressionStmt
+// expect-token EmptyNode
+while x > 0: { x -= 1; }
+
+// expect-token WhileStmt; expect-token IdentifierExpr; expect-token WhileBody; expect-token CompoundStmt; expect-token EmptyNode
+while a: { }
+
+//; do-while loops
+// expect-token DoStmt; expect-token CompoundStmt
+// expect-token IdentifierExpr; expect-token SubtractionUpdateStmt; expect-token NumericLiteralExpr; expect-token ExpressionStmt
+// expect-token EmptyNode
+// expect-token DoWhileStmt; expect-token IdentifierExpr; expect-token CompareGreaterExpr; expect-token NumericLiteralExpr
+// expect-token ExpressionStmt
+do: { x -= 1; } while x > 0;
+
+// expect-token DoStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token DoWhileStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+do: b; while a;
+
+//; plain loops
+// expect-token LoopStmt; expect-token CompoundStmt
+// expect-token IdentifierExpr; expect-token CompareLessEqualExpr; expect-token NumericLiteralExpr; expect-token IfStmt; expect-token BreakStmt
+// expect-token IdentifierExpr; expect-token SubtractionUpdateStmt; expect-token NumericLiteralExpr; expect-token ExpressionStmt
+// expect-token EmptyNode
+loop: { if x <= 0: break; x -= 1; }
+
+// expect-token LoopStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+loop: b;
+
+//; range-for loops
+// expect-token ForStmt; expect-token LetValueDecl
+// expect-token VariableType; expect-token IdentifierExpr
+// expect-token ForIn; expect-token IdentifierExpr
+// expect-token ForBody; expect-token CompoundStmt; expect-token EmptyNode
+for x: &const type in type_list: { }
+
+// expect-token ForStmt; expect-token LetValueDecl; expect-token ForIn; expect-token IdentifierExpr
+// expect-token ForBody; expect-token IdentifierExpr; expect-token ExpressionStmt
+for x in list: b;
+
+// expect-token ForStmt; expect-token LetValueDecl; expect-token VariableType; expect-token IdentifierExpr
+// expect-token ForIn; expect-token IdentifierExpr; expect-token ForBody; expect-token CompoundStmt; expect-token EmptyNode
+for x: type in list: { }
+
+// expect-token ForStmt; expect-token LetValueDecl; expect-token VariableType
+// expect-token ForIn; expect-token IdentifierExpr; expect-token ForBody; expect-token CompoundStmt; expect-token EmptyNode
+for x: &unique in list: { }
+
+// expect-token ForStmt; expect-token VarValueDecl; expect-token ForIn; expect-token IdentifierExpr
+// expect-token ForBody; expect-token CompoundStmt; expect-token EmptyNode
+for var x in list: { }
+
+//; break and continue
+// expect-token LoopStmt; expect-token CompoundStmt; expect-token ContinueStmt; expect-token EmptyNode
+loop: { continue; }
+
+// expect-token WhileStmt; expect-token IdentifierExpr; expect-token WhileBody; expect-token BreakStmt
+while a: break;
+
+//; nested loops
+// expect-token CompoundStmt
+// expect-token WhileStmt; expect-token IdentifierExpr; expect-token WhileBody
+// expect-token WhileStmt; expect-token IdentifierExpr; expect-token WhileBody
+// expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token EmptyNode
+{ while a: while b: c; d; }
+
+// expect-token LoopStmt; expect-token CompoundStmt
+// expect-token ForStmt; expect-token LetValueDecl; expect-token ForIn; expect-token IdentifierExpr; expect-token ForBody
+// expect-token DoStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token DoWhileStmt; expect-token IdentifierExpr; expect-token ExpressionStmt
+// expect-token EmptyNode
+loop: { for x in list: do: b; while a; }
+
 }

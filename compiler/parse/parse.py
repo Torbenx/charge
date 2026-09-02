@@ -25,7 +25,9 @@ keywords = [
     "for",
     "if",
     "impl",
+    "in",
     "let",
+    "loop",
     "return",
     "shared",
     "static",
@@ -1137,6 +1139,9 @@ for state in states:
             line("VERIFY_NOT_REACHED();")
         else:
             line("goto " + state.name + "$no_emit;")
+line("default:")
+with indent():
+    line("VERIFY_NOT_REACHED();")
 line("}")
 
 assert onlyUsedAsThen(errorState)
@@ -1307,6 +1312,7 @@ line("enum class State : uint8_t {")
 with indent():
     for state in states:
         line(stateCppName(state.name) + ",")
+    line("COUNT,")
 line("};")
 line("std::string_view nameString(State);")
 lineNoIndent()

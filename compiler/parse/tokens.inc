@@ -105,6 +105,17 @@ TOKEN(DestroyStmt, Destroy, None, None)
 TOKEN(DiscardStmt, Discard, None, None)
 TOKEN(EmptyReturnStmt, Return, None, None)
 
+TOKEN(WhileStmt, While, None, None)
+TOKEN(WhileBody, Colon, None, None)
+TOKEN(DoStmt, Do, None, None)
+TOKEN(DoWhileStmt, While, None, None)
+TOKEN(LoopStmt, Loop, None, None)
+TOKEN(ForStmt, For, None, None)
+TOKEN(ForIn, In, None, None)
+TOKEN(ForBody, Colon, None, None)
+TOKEN(BreakStmt, Break, None, None)
+TOKEN(ContinueStmt, Continue, None, None)
+
 // ------ declarations ------
 TOKEN(NamespaceDecl, Identifier, Word, DeclarationValue)
 MARKER(ProgramDeclsBegin)

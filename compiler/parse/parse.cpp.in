@@ -215,7 +215,7 @@ constexpr WordMask keywordMask() {
         keywords.push_back(word);
     });
 
-    static constexpr int_t MAX_BITS = 10;
+    static constexpr int_t MAX_BITS = 16;
     for (int_t bits = 1; bits <= MAX_BITS; bits++) {
         std::bitset<(size_t)1 << MAX_BITS> set;
         int_t shiftBits = 32 - bits;

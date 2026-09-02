@@ -59,7 +59,7 @@
 		"controls": {
 			"patterns": [
 				{
-					"match": "\\b(if|elif|else|return|break|continue|for|loop|while|catch|try|inspect|assert|prove|assume|destroy|discard)\\b",
+					"match": "\\b(if|elif|else|return|break|continue|for|loop|while|do|catch|try|inspect|assert|prove|assume|destroy|discard)\\b",
 					"captures": {
 						"1": {
 							"name": "keyword.control.charge"
