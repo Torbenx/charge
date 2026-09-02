@@ -136,6 +136,7 @@ const char* lexPatternTable(const char* sourcePosition, LexerOutput& output);
 const char* lexTableHybrid(const char* sourcePosition, LexerOutput& output);
 const char* lexSwitchAndTable(const char* sourcePosition, LexerOutput& output);
 const char* lexExpr1State(const char* sourcePosition, LexerOutput& output);
+const char* lexExpr2State(const char* sourcePosition, LexerOutput& output);
 }
 
 template<MeasurementMethod method>
@@ -160,6 +161,8 @@ static void withImpl(std::string_view impl, auto callback) {
         callback(BenchmarkImpl<Lexer<parse::lexSwitchAndTable>, LexerOutput, method> {});
     else if (impl == "expr-1state")
         callback(BenchmarkImpl<Lexer<parse::lexExpr1State>, LexerOutput, method> {});
+    else if (impl == "expr-2state")
+        callback(BenchmarkImpl<Lexer<parse::lexExpr2State>, LexerOutput, method> {});
     else if (impl == "baseline")
         callback(BenchmarkImpl<NoParser, parse::NoOutput, method> {});
     else
@@ -229,6 +232,7 @@ BENCHMARK_NAMED(benchmarkImpl, pattern-table);
 BENCHMARK_NAMED(benchmarkImpl, sema);
 
 BENCHMARK_NAMED(benchmarkExprImpl, expr-1state);
+BENCHMARK_NAMED(benchmarkExprImpl, expr-2state);
 BENCHMARK_NAMED(benchmarkExprImpl, switch-and-branch);
 BENCHMARK_NAMED(benchmarkExprImpl, table-hybrid);
 BENCHMARK_NAMED(benchmarkExprImpl, pattern-table);
@@ -244,7 +248,7 @@ TEST(Charge, ExpressionLexerMatchesSwitchAndBranch) {
         LexerOutput expected(source);
         LexerOutput actual(source);
         EXPECT_EQ(parse::lexSwitchAndBranch(source.data(), expected), source.end());
-        EXPECT_EQ(parse::lexExpr1State(source.data(), actual), source.end());
+        EXPECT_EQ(parse::lexExpr2State(source.data(), actual), source.end());
 
         ASSERT_EQ(actual.tokens.size(), expected.tokens.size()) << fileName;
         for (int_t i = 0; i < expected.tokens.size(); i++) {
@@ -289,7 +293,7 @@ int charge_main(int argc, char** argv) {
         ->required()
         ->check(CLI::IsMember({ "sema", "simple", "no-output", "baseline",
             "switch-and-branch", "switch-and-pattern-table", "pattern-table",
-            "table-2char", "table-hybrid", "switch-and-table", "expr-1state" }));
+            "table-2char", "table-hybrid", "switch-and-table", "expr-1state", "expr-2state" }));
     std::string benchmarkFile;
     benchmark.add_option("file", benchmarkFile)->required()->check(CLI::ReadPermissions);
     int benchmarkRepeats = 1;
