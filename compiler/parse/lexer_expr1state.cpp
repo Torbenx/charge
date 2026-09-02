@@ -2,11 +2,20 @@ namespace parse {
 
 const char* lexExpr1State(const char* sourcePosition, SimpleTokenBuffer<LexerToken>& output) {
     using Token = LexerToken;
+
+    const char* tokBegin = sourcePosition;
+    Token tok = Token::Invalid;
+
+    goto state$no_emit;
+
     for (;;) {
+        output.tokens.push_back({ tok, locationInCurrentLine(tokBegin, output) });
+
+    state$no_emit:
         sourcePosition = skipWhitespace(sourcePosition);
 
-        const char* tokBegin = sourcePosition;
-        Token tok = Token::Invalid;
+        tokBegin = sourcePosition;
+        tok = Token::Invalid;
 
         switch (sourcePosition[0]) {
         case '\0':
@@ -15,7 +24,7 @@ const char* lexExpr1State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case '\n': {
             sourcePosition += 1;
             output.addLine(sourcePosition);
-            continue;
+            goto state$no_emit;
         }
         case '\r': {
             if (sourcePosition[1] == '\n')
@@ -23,7 +32,7 @@ const char* lexExpr1State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             else
                 sourcePosition += 1;
             output.addLine(sourcePosition);
-            continue;
+            goto state$no_emit;
         }
         case '\'': {
             tok = Token::CharacterLiteral;
@@ -47,11 +56,11 @@ const char* lexExpr1State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 }
                 sourcePosition += 2;
                 output.whitespace.push_back({ { WhitespaceKind::BlockComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
-                continue;
+                goto state$no_emit;
             } else if (sourcePosition[1] == '/') {
                 sourcePosition = skipToEndOfLine(sourcePosition + 2);
                 output.whitespace.push_back({ { WhitespaceKind::LineComment, locationInCurrentLine(tokBegin, output) }, uint32_t(sourcePosition - tokBegin) });
-                continue;
+                goto state$no_emit;
             } else if (sourcePosition[1] == '=') {
                 tok = Token::SlashEqual;
                 sourcePosition += 2;
@@ -312,7 +321,6 @@ const char* lexExpr1State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             dbgln("{:.12}", sourcePosition);
             VERIFY_NOT_REACHED();
         }
-        output.tokens.push_back({ tok, locationInCurrentLine(tokBegin, output) });
     }
 }
 
