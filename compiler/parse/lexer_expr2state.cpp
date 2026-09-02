@@ -41,14 +41,14 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         case '\"': {
             tok = LexerToken::StringLiteral;
             sourcePosition = skipToEndOfStringLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\"');
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         case '/': {
             if (sourcePosition[1] == '*') {
@@ -70,7 +70,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Slash;
                 sourcePosition += 1;
             }
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         case '<': {
             if (sourcePosition[1] == '=') {
@@ -93,7 +93,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Less;
                 sourcePosition += 1;
             }
-            goto expression$with_emit;
+            goto error$with_emit;
         }
             // clang-format off
         case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j': case 'k': case 'l': case 'm':
@@ -104,7 +104,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             auto [end, token] = readWord(sourcePosition, parse::NoOutput());
             tok = token;
             sourcePosition = end;
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
             // clang-format on
@@ -117,7 +117,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 else
                     break;
             }
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         // always one character punctuations
         case '(': {
@@ -138,27 +138,27 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case ']': {
             tok = Token::RightSquare;
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto error$with_emit;
         }
         case '{': {
             tok = Token::LeftBrace;
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto error$with_emit;
         }
         case '}': {
             tok = Token::RightBrace;
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto error$with_emit;
         }
         case ',': {
             tok = Token::Comma;
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         case '.': {
             tok = Token::Point;
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         case '~': {
             tok = Token::Tilde;
@@ -168,48 +168,52 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case ';': {
             tok = Token::SemiColon;
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto error$with_emit;
         }
         // only followed by equal
         case '!': {
             if (sourcePosition[1] == '=') {
                 tok = Token::ExclaimEqual;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else {
                 tok = Token::Exclaim;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto expression$with_emit;
         }
         case '*': {
             if (sourcePosition[1] == '=') {
                 tok = Token::StarEqual;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else {
                 tok = Token::Star;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto expression$with_emit;
         }
         case '^': {
             if (sourcePosition[1] == '=') {
                 tok = Token::HatEqual;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else {
                 tok = Token::Hat;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto expression$with_emit;
         }
         case '%': {
             if (sourcePosition[1] == '=') {
                 tok = Token::PercentEqual;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else {
                 tok = Token::Percent;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto expression$with_emit;
         }
         // & | >
         case '&': {
@@ -217,18 +221,21 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 if (sourcePosition[2] == '=') {
                     tok = Token::AmpAmpEqual;
                     sourcePosition += 3;
+                    goto error$with_emit;
                 } else {
                     tok = Token::AmpAmp;
                     sourcePosition += 2;
+                    goto error$with_emit;
                 }
             } else if (sourcePosition[1] == '=') {
                 tok = Token::AmpEqual;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else {
                 tok = Token::Amp;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto expression$with_emit;
         }
         case '|': {
             if (sourcePosition[1] == '|') {
@@ -246,7 +253,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Vert;
                 sourcePosition += 1;
             }
-            goto expression$with_emit;
+            goto error$with_emit;
         }
         case '>': {
             if (sourcePosition[1] == '>') {
@@ -264,37 +271,42 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Greater;
                 sourcePosition += 1;
             }
-            goto expression$with_emit;
+            goto error$with_emit;
         }
 
         case '+': {
             if (sourcePosition[1] == '+') {
                 tok = Token::PlusPlus;
                 sourcePosition += 2;
+                goto expression$with_emit;
             } else if (sourcePosition[1] == '=') {
                 tok = Token::PlusEqual;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else {
                 tok = Token::Plus;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto expression$with_emit;
         }
         case '-': {
             if (sourcePosition[1] == '-') {
                 tok = Token::MinusMinus;
                 sourcePosition += 2;
+                goto expression$with_emit;
             } else if (sourcePosition[1] == '=') {
                 tok = Token::MinusEqual;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else if (sourcePosition[1] == '>') {
                 tok = Token::MinusGreater;
                 sourcePosition += 2;
+                goto error$with_emit;
             } else {
                 tok = Token::Minus;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto expression$with_emit;
         }
         case '=': {
             if (sourcePosition[1] == '=') {
@@ -307,7 +319,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Equal;
                 sourcePosition += 1;
             }
-            goto expression$with_emit;
+            goto error$with_emit;
         }
         case ':': {
             if (sourcePosition[1] == ':') {
@@ -317,7 +329,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Colon;
                 sourcePosition += 1;
             }
-            goto expression$with_emit;
+            goto error$with_emit;
         }
         default:
             dbgln("{:.12}", sourcePosition);
@@ -358,14 +370,14 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             sourcePosition = skipToEndOfCharacterLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\'');
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto error$with_emit;
         }
         case '\"': {
             tok = LexerToken::StringLiteral;
             sourcePosition = skipToEndOfStringLiteral(sourcePosition);
             VERIFY(sourcePosition[0] == '\"');
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto error$with_emit;
         }
         case '/': {
             if (sourcePosition[1] == '*') {
@@ -387,7 +399,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Slash;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '<': {
             if (sourcePosition[1] == '=') {
@@ -410,7 +422,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Less;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
             // clang-format off
         case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j': case 'k': case 'l': case 'm':
@@ -421,7 +433,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             auto [end, token] = readWord(sourcePosition, parse::NoOutput());
             tok = token;
             sourcePosition = end;
-            goto after_expression$with_emit;
+            goto error$with_emit;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
             // clang-format on
@@ -434,13 +446,13 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 else
                     break;
             }
-            goto after_expression$with_emit;
+            goto error$with_emit;
         }
         // always one character punctuations
         case '(': {
             tok = Token::LeftParen;
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case ')': {
             tok = Token::RightParen;
@@ -450,7 +462,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case '[': {
             tok = Token::LeftSquare;
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case ']': {
             tok = Token::RightSquare;
@@ -460,7 +472,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case '{': {
             tok = Token::LeftBrace;
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '}': {
             tok = Token::RightBrace;
@@ -470,33 +482,34 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case ',': {
             tok = Token::Comma;
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '.': {
             tok = Token::Point;
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '~': {
             tok = Token::Tilde;
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto error$with_emit;
         }
         case ';': {
             tok = Token::SemiColon;
             sourcePosition += 1;
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         // only followed by equal
         case '!': {
             if (sourcePosition[1] == '=') {
                 tok = Token::ExclaimEqual;
                 sourcePosition += 2;
+                goto expression$with_emit;
             } else {
                 tok = Token::Exclaim;
                 sourcePosition += 1;
+                goto error$with_emit;
             }
-            goto after_expression$with_emit;
         }
         case '*': {
             if (sourcePosition[1] == '=') {
@@ -506,7 +519,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Star;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '^': {
             if (sourcePosition[1] == '=') {
@@ -516,7 +529,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Hat;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '%': {
             if (sourcePosition[1] == '=') {
@@ -526,7 +539,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Percent;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         // & | >
         case '&': {
@@ -545,7 +558,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Amp;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '|': {
             if (sourcePosition[1] == '|') {
@@ -563,7 +576,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Vert;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case '>': {
             if (sourcePosition[1] == '>') {
@@ -581,37 +594,42 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Greater;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
 
         case '+': {
             if (sourcePosition[1] == '+') {
                 tok = Token::PlusPlus;
                 sourcePosition += 2;
+                goto after_expression$with_emit;
             } else if (sourcePosition[1] == '=') {
                 tok = Token::PlusEqual;
                 sourcePosition += 2;
+                goto expression$with_emit;
             } else {
                 tok = Token::Plus;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto after_expression$with_emit;
         }
         case '-': {
             if (sourcePosition[1] == '-') {
                 tok = Token::MinusMinus;
                 sourcePosition += 2;
+                goto after_expression$with_emit;
             } else if (sourcePosition[1] == '=') {
                 tok = Token::MinusEqual;
                 sourcePosition += 2;
+                goto expression$with_emit;
             } else if (sourcePosition[1] == '>') {
                 tok = Token::MinusGreater;
                 sourcePosition += 2;
+                goto expression$with_emit;
             } else {
                 tok = Token::Minus;
                 sourcePosition += 1;
+                goto expression$with_emit;
             }
-            goto after_expression$with_emit;
         }
         case '=': {
             if (sourcePosition[1] == '=') {
@@ -624,7 +642,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Equal;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto expression$with_emit;
         }
         case ':': {
             if (sourcePosition[1] == ':') {
@@ -634,7 +652,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
                 tok = Token::Colon;
                 sourcePosition += 1;
             }
-            goto after_expression$with_emit;
+            goto error$with_emit;
         }
         default:
             dbgln("{:.12}", sourcePosition);
