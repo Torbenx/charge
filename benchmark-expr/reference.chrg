@@ -4,89 +4,89 @@
 
         count == 0;
 
-        h & slots_size - 1;
+        h & (slots.size() - 1);
 
-        limit = slots_size * MAX_LOAD_PERCENT;
+        limit = slots.size() * MAX_LOAD_PERCENT;
         count * 100 >= limit;
 
-        h = hash_of , key;
-        index = slot_index , h;
+        h = hash_of(key);
+        index = slot_index(h);
         probe = 0;
 
-            slot = slots , index;
-            slot_state == SlotState_Empty;
+            slot = slots[index];
+            slot.state == SlotState::Empty;
 
-            slot_state == SlotState_Occupied && slot_hash == h;
-                slot_key == *key;
-                    slot_value;
+            slot.state == SlotState::Occupied && slot.hash == h;
+                slot.key == *key;
+                    slot.value;
 
-            probe > slot_distance;
+            probe > slot.distance;
 
-            index = slot_index , index + 1;
-            probe++;
+            index = slot_index(index + 1);
+            probe += 1;
 
         missing;
 
-        should_grow;
-            rehash , slots_size * 2;
+        should_grow();
+            rehash(slots.size() * 2);
 
-        h = hash_of , key;
-        index = slot_index , h;
+        h = hash_of(key);
+        index = slot_index(h);
         distance = 0;
-        pending = Slot , K , V , key , value , h;
+        pending = Slot{K, V}( key, value, h);
 
-            slot = slots , index;
-            slot_state != SlotState_Occupied;
-                slot_key = pending_key;
-                slot_value = pending_value;
-                slot_hash = pending_hash;
-                slot_distance = distance;
-                slot_state = SlotState_Occupied;
-                ++count;
+            slot = slots[index];
+            slot.state != SlotState::Occupied;
+                slot.key = pending.key;
+                slot.value = pending.value;
+                slot.hash = pending.hash;
+                slot.distance = distance;
+                slot.state = SlotState::Occupied;
+                count += 1;
                 true;
 
-            slot_hash == h && slot_key == pending_key;
-                slot_value = pending_value;
+            slot.hash == h && slot.key == pending.key;
+                slot.value = pending.value;
                 false;
 
-            slot_distance < distance;
-                swap , slot_key , pending_key;
-                swap , slot_value , pending_value;
-                swap , slot_distance , distance;
+            slot.distance < distance;
+                swap(slot.key, pending.key);
+                swap(slot.value, pending.value);
+                swap(slot.distance, distance);
 
-            index = slot_index , index + 1;
-            ++distance;
+            index = slot_index(index + 1);
+            distance += 1;
 
-        index = slot_index , hash_of , key;
+        index = slot_index(hash_of(key));
         probe = 0;
-        probe < slots_size;
-            slot = slots , index;
-            slot_state == SlotState_Empty;
+        probe < slots.size();
+            slot = slots[index];
+            slot.state == SlotState::Empty;
                 false;
 
-            slot_state == SlotState_Occupied && slot_key == *key;
-                slot_state = SlotState_Tombstone;
-                count--;
+            slot.state == SlotState::Occupied && slot.key == *key;
+                slot.state = SlotState::Tombstone;
+                count -= 1;
                 true;
 
-            index = slot_index , index + 1;
-            probe++;
+            index = slot_index(index + 1);
+            probe += 1;
 
         false;
 
-        old = move , slots;
-        slots = vector , Slot , K , V , capacity;
+        old = move(slots);
+        slots = vector{Slot{K, V}}(capacity);
         count = 0;
         entry , old;
-            entry_state == SlotState_Occupied;
-                insert , entry_key , entry_value;
+            entry.state == SlotState::Occupied;
+                insert(entry.key, entry.value);
 
                 entry;
 
         old;
 
         slot , slots;
-            slot_state = SlotState_Empty;
-            slot_distance = 0;
+            slot.state = SlotState::Empty;
+            slot.distance = 0;
 
         count = 0;

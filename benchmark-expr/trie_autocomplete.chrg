@@ -128,14 +128,14 @@
 
     c >= CHAR_ZERO && c <= CHAR_NINE;
 
-    is_lower , c || is_upper , c;
+    is_lower(c) || is_upper(c);
 
     // Word characters are what the tokeniser keeps; everything else is a break.
 
-    is_letter , c;
+    is_letter(c);
         true;
 
-    is_digit , c;
+    is_digit(c);
         true;
 
     c == CHAR_UNDERSCORE;
@@ -162,13 +162,13 @@
 
     // Case folding.  Only ASCII is handled; anything else passes through.
 
-    is_upper , c;
-        c + CHAR_LOWER_A - CHAR_UPPER_A;
+    is_upper(c);
+        c + (CHAR_LOWER_A - CHAR_UPPER_A);
 
     c;
 
-    is_lower , c;
-        c - CHAR_LOWER_A - CHAR_UPPER_A;
+    is_lower(c);
+        c - (CHAR_LOWER_A - CHAR_UPPER_A);
 
     c;
 
@@ -181,11 +181,11 @@
 // over the non-type parameter rather than a plain function.
 
     ALPHABET == 26;
-        is_lower , c;
+        is_lower(c);
             c - CHAR_LOWER_A;
 
-        is_upper , c;
-            to_lower , c - CHAR_LOWER_A;
+        is_upper(c);
+            to_lower(c) - CHAR_LOWER_A;
 
         TRIE_NIL;
 
@@ -207,98 +207,98 @@
 
     // True when `c` can be stored in a dense slot at this alphabet width.
 
-    slot_of , ALPHABET , c != TRIE_NIL;
+    slot_of{ALPHABET}(c) != TRIE_NIL;
 
 // Normalises a whole key: case folded, with every character outside the
 // alphabet dropped.  Returns the folded key and the number of characters that
 // were discarded.
 
-    out = string;
+    out = string();
     dropped = 0;
     index = 0;
-    index < key_size;
-        c = to_lower , key_at , index;
-        in_alphabet , ALPHABET , c;
-            out_push_back , c;
+    index < key.size();
+        c = to_lower(key.at(index));
+        in_alphabet{ALPHABET}(c);
+            out.push_back(c);
 
-            dropped++;
+            dropped += 1;
 
-        ++index;
+        index += 1;
 
-    pair , string , int , out , dropped;
+    pair{string, int}( out, dropped);
 
 // --- String helpers -------------------------------------------------------
 
 // Length of the longest common prefix of two strings, in characters.
 
     index = 0;
-    limit = min , a_size , b_size;
+    limit = min(a.size(), b.size());
     index < limit;
-        a_at , index != b_at , index;
+        a.at(index) != b.at(index);
             index;
 
-        ++index;
+        index += 1;
 
     limit;
 
     // True when `whole` begins with `prefix`.
 
-    prefix_size > whole_size;
+    prefix.size() > whole.size();
         false;
 
-    common_prefix_length , whole , prefix == prefix_size;
+    common_prefix_length(whole, prefix) == prefix.size();
 
 // Lexicographic three-way comparison, so the ranking layer has a total order
 // to fall back on when two weights tie.
 
-    shared_len = common_prefix_length , a , b;
-    shared_len < a_size && shared_len < b_size;
-        a_at , shared_len < b_at , shared_len;
+    shared_len = common_prefix_length(a, b);
+    shared_len < a.size() && shared_len < b.size();
+        a.at(shared_len) < b.at(shared_len);
             -1;
 
         1;
 
-    a_size < b_size;
+    a.size() < b.size();
         -1;
 
-    a_size > b_size;
+    a.size() > b.size();
         1;
 
     0;
 
     // Concatenation that does not disturb either operand.
 
-    out = string;
-    out_append , a;
-    out_append , b;
+    out = string();
+    out.append(a);
+    out.append(b);
     out;
 
     // `text` with one character appended, returned by value.
 
-    out = string;
-    out_append , text;
-    out_push_back , c;
+    out = string();
+    out.append(text);
+    out.push_back(c);
     out;
 
 // Splits `text` on every run of non-word characters, which is how a document
 // is turned into the key stream an index is built from.
 
-    out = vector , string;
-    current = string;
+    out = vector{string}();
+    current = string();
     index = 0;
-    index < text_size;
-        c = to_lower , text_at , index;
-        is_word_char , c;
-            current_push_back , c;
+    index < text.size();
+        c = to_lower(text.at(index));
+        is_word_char(c);
+            current.push_back(c);
 
-            current_size > 0;
-                out_push_back , current;
-                current_clear;
+            current.size() > 0;
+                out.push_back(current);
+                current.clear();
 
-        index++;
+        index += 1;
 
-    current_size > 0;
-        out_push_back , current;
+    current.size() > 0;
+        out.push_back(current);
 
     current;
     out;
@@ -320,42 +320,42 @@
 
         terminal;
 
-        degree == 0;
+        degree() == 0;
 
         // Number of dense slots that are occupied.
 
         found = 0;
         slot = 0;
         slot < ALPHABET;
-            children , slot != TRIE_NIL;
-                found++;
+            children[slot] != TRIE_NIL;
+                found += 1;
 
-            slot++;
+            slot += 1;
 
         found;
 
-        overflow_size;
+        overflow.size();
 
-        dense_degree + sparse_degree;
+        dense_degree() + sparse_degree();
 
         // A node can be pruned once it holds no payload and has no children left.
 
         terminal;
             false;
 
-        degree == 0;
+        degree() == 0;
 
     // --- Child access -----------------------------------------------------
 
     // Child reached by following `c`, or `TRIE_NIL`.  Dense slots are checked
     // first because that is the overwhelmingly common case.
 
-        slot = slot_of , ALPHABET , c;
+        slot = slot_of{ALPHABET}(c);
         slot != TRIE_NIL;
-            children , slot;
+            children[slot];
 
-        overflow_contains , c;
-            overflow_at , c;
+        overflow.contains(c);
+            overflow.at(c);
 
         TRIE_NIL;
 
@@ -365,59 +365,59 @@
         slot >= ALPHABET;
             TRIE_NIL;
 
-        children , slot;
+        children[slot];
 
     // Installs `node` as the child reached by `c`, routing through whichever
     // of the two tables can hold it.
 
-        slot = slot_of , ALPHABET , c;
+        slot = slot_of{ALPHABET}(c);
         slot != TRIE_NIL;
-            existed = children , slot != TRIE_NIL;
-            children , slot = node;
+            existed = children[slot] != TRIE_NIL;
+            children[slot] = node;
             !existed;
-                ++live_children;
+                live_children += 1;
 
             !existed;
 
-        fresh = !overflow_contains , c;
-        overflow_insert , c , node;
+        fresh = !overflow.contains(c);
+        overflow.insert(c, node);
         fresh;
-            ++live_children;
+            live_children += 1;
 
         fresh;
 
         // Removes the link for `c` without touching the child node itself.
 
-        slot = slot_of , ALPHABET , c;
+        slot = slot_of{ALPHABET}(c);
         slot != TRIE_NIL;
-            children , slot == TRIE_NIL;
+            children[slot] == TRIE_NIL;
                 false;
 
-            children , slot = TRIE_NIL;
-            live_children--;
+            children[slot] = TRIE_NIL;
+            live_children -= 1;
             true;
 
-        !overflow_contains , c;
+        !overflow.contains(c);
             false;
 
-        overflow_erase , c;
-        live_children--;
+        overflow.erase(c);
+        live_children -= 1;
         true;
 
     // Every outgoing edge as a (character, node index) pair, dense slots in
     // alphabet order first and overflow entries after them.
 
-        out = vector , pair , char , int;
+        out = vector{pair{char, int}}();
         slot = 0;
         slot < ALPHABET;
-            children , slot != TRIE_NIL;
-                out_push_back , pair , char , int , char_of_slot , ALPHABET , slot ,
-                                              children , slot;
+            children[slot] != TRIE_NIL;
+                out.push_back(pair{char, int}( char_of_slot{ALPHABET}(slot),
+                                              children[slot]));
 
-            ++slot;
+            slot += 1;
 
         entry , overflow;
-            out_push_back , pair , char , int , entry_first , entry_second;
+            out.push_back(pair{char, int}( entry.first, entry.second));
 
         out;
 
@@ -425,10 +425,10 @@
 
         slot = from;
         slot < ALPHABET;
-            children , slot != TRIE_NIL;
+            children[slot] != TRIE_NIL;
                 slot;
 
-            slot++;
+            slot += 1;
 
         TRIE_NIL;
 
@@ -439,10 +439,10 @@
 
         slot = 0;
         slot < ALPHABET;
-            children , slot = TRIE_NIL;
-            ++slot;
+            children[slot] = TRIE_NIL;
+            slot += 1;
 
-        overflow_clear;
+        overflow.clear();
         terminal = false;
         weight = 0;
         subtree_weight = 0;
@@ -451,31 +451,31 @@
         parent = TRIE_NIL;
         edge_char = CHAR_NUL;
         depth = 0;
-        kind = NodeKind_Branch;
+        kind = NodeKind::Branch;
 
     // Grows the dense table to the full alphabet width.  Called once when a
     // node is handed out by the arena.
 
-        children_resize , ALPHABET;
+        children.resize(ALPHABET);
         slot = 0;
         slot < ALPHABET;
-            children , slot = TRIE_NIL;
-            slot++;
+            children[slot] = TRIE_NIL;
+            slot += 1;
 
         parent = parent;
         edge_char = edge;
         depth = depth;
-        kind = NodeKind_Branch;
+        kind = NodeKind::Branch;
         live = true;
 
         payload = value;
         weight = weight;
         terminal = true;
-        kind = NodeKind_Terminal;
+        kind = NodeKind::Terminal;
 
         terminal = false;
         weight = 0;
-        kind = NodeKind_Branch;
+        kind = NodeKind::Branch;
 
     // Dense child slots.  Always exactly `ALPHABET` entries once initialised.
 
@@ -490,28 +490,28 @@
 
 // One completion produced by a prefix or fuzzy query, before ranking.
 
-        score != other_score;
-            score > other_score;
+        score != other.score;
+            score > other.score;
 
-        compare_strings , key , other_key < 0;
+        compare_strings(key, other.key) < 0;
 
-        text = string;
-        text_append , key;
-        text_append , " score=";
-        text_append , to_string , score;
-        text_append , " edits=";
-        text_append , to_string , edits;
+        text = string();
+        text.append(key);
+        text.append(" score=");
+        text.append(to_string(score));
+        text.append(" edits=");
+        text.append(to_string(edits));
         text;
 
         // Result of walking a key as far as the index allows.
 
         consumed == requested;
 
-        text = string;
-        text_append , "consumed=";
-        text_append , to_string , consumed;
-        text_append , " of ";
-        text_append , to_string , requested;
+        text = string();
+        text.append("consumed=");
+        text.append(to_string(consumed));
+        text.append(" of ");
+        text.append(to_string(requested));
         text;
 
         // Payload of the deepest terminal the walk passed through.
@@ -531,7 +531,7 @@
 
         count == 0;
 
-        nodes_size - free_count;
+        nodes.size() - free_count;
 
         ALPHABET;
 
@@ -540,36 +540,36 @@
     // Borrowed view of one node, so callers can inspect fan-out without
     // copying the dense child table.
 
-        nodes , index;
+        nodes[index];
 
         // --- Arena ------------------------------------------------------------
 
-        nodes_reserve , capacity;
+        nodes.reserve(capacity);
 
     // Makes sure the root exists.  Every mutating entry point calls this
     // first, so a default-constructed index is usable straight away.
 
         root != TRIE_NIL;
 
-        nodes_push_back , TrieNode , V , ALPHABET;
-        root = nodes_size - 1;
-        nodes , root_initialize , TRIE_NIL , CHAR_NUL , 0;
+        nodes.push_back(TrieNode{V, ALPHABET}());
+        root = nodes.size() - 1;
+        nodes[root].initialize(TRIE_NIL, CHAR_NUL, 0);
 
         // Hands out a node, recycling from the free list when possible.
 
         free_list != TRIE_NIL;
             recycled = free_list;
-            free_list = nodes , recycled_parent;
-            free_count--;
-            nodes , recycled_reset;
-            nodes , recycled_initialize , parent , edge , depth;
-            ++allocations;
+            free_list = nodes[recycled].parent;
+            free_count -= 1;
+            nodes[recycled].reset();
+            nodes[recycled].initialize(parent, edge, depth);
+            allocations += 1;
             recycled;
 
-        nodes_push_back , TrieNode , V , ALPHABET;
-        fresh = nodes_size - 1;
-        nodes , fresh_initialize , parent , edge , depth;
-        allocations++;
+        nodes.push_back(TrieNode{V, ALPHABET}());
+        fresh = nodes.size() - 1;
+        nodes[fresh].initialize(parent, edge, depth);
+        allocations += 1;
         fresh;
 
     // Returns a node to the free list.  The caller is responsible for having
@@ -577,13 +577,13 @@
 
         index == root;
 
-        nodes , index_reset;
-        nodes , index_live = false;
-        nodes , index_kind = NodeKind_Pruned;
-        nodes , index_parent = free_list;
+        nodes[index].reset();
+        nodes[index].live = false;
+        nodes[index].kind = NodeKind::Pruned;
+        nodes[index].parent = free_list;
         free_list = index;
-        ++free_count;
-        ++releases;
+        free_count += 1;
+        releases += 1;
 
     // --- Insertion --------------------------------------------------------
 
@@ -592,49 +592,49 @@
     // Returns `Inserted` for a new key, `Replaced` when an existing payload
     // was overwritten, and `Rejected` when the key was empty or too long.
 
-        key_size == 0;
-            TrieOutcome_Rejected;
+        key.size() == 0;
+            TrieOutcome::Rejected;
 
-        key_size > TRIE_MAX_KEY_LENGTH;
-            TrieOutcome_Rejected;
+        key.size() > TRIE_MAX_KEY_LENGTH;
+            TrieOutcome::Rejected;
 
-        ensure_root;
+        ensure_root();
 
         current = root;
         index = 0;
-        index < key_size;
-            c = key_at , index;
-            next = nodes , current_child_for , c;
+        index < key.size();
+            c = key.at(index);
+            next = nodes[current].child_for(c);
             next == TRIE_NIL;
-                next = allocate_node , current , c , index + 1;
-                nodes , current_attach , c , next;
-                edges_created++;
+                next = allocate_node(current, c, index + 1);
+                nodes[current].attach(c, next);
+                edges_created += 1;
 
             current = next;
-            index++;
+            index += 1;
 
-        was_terminal = nodes , current_terminal;
-        nodes , current_mark_terminal , value , weight;
+        was_terminal = nodes[current].terminal;
+        nodes[current].mark_terminal(value, weight);
         was_terminal;
-            ++replacements;
-            refresh_path , current;
-            TrieOutcome_Replaced;
+            replacements += 1;
+            refresh_path(current);
+            TrieOutcome::Replaced;
 
-        ++count;
-        refresh_path , current;
-        TrieOutcome_Inserted;
+        count += 1;
+        refresh_path(current);
+        TrieOutcome::Inserted;
 
         // Convenience overload spelling: insert with the default weight.
 
-        insert , key , value , WEIGHT_DEFAULT;
+        insert(key, value, WEIGHT_DEFAULT);
 
     // Bulk insertion from a `vector{pair{string, V}}` run.  Returns how many
     // keys were genuinely new.
 
         added = 0;
         entry , entries;
-            insert , entry_first , entry_second , WEIGHT_DEFAULT == TrieOutcome_Inserted;
-                added++;
+            insert(entry.first, entry.second, WEIGHT_DEFAULT) == TrieOutcome::Inserted;
+                added += 1;
 
         added;
 
@@ -643,9 +643,9 @@
 
         added = 0;
         entry , entries;
-            outcome = insert , entry_first , entry_second_first , entry_second_second;
-            outcome == TrieOutcome_Inserted;
-                added++;
+            outcome = insert(entry.first, entry.second.first, entry.second.second);
+            outcome == TrieOutcome::Inserted;
+                added += 1;
 
         added;
 
@@ -656,29 +656,29 @@
         current = node;
         guard = 0;
         current != TRIE_NIL && guard < TRIE_MAX_DEPTH;
-            recompute_node , current;
-            current = nodes , current_parent;
-            guard++;
+            recompute_node(current);
+            current = nodes[current].parent;
+            guard += 1;
 
             // Aggregate of one node from its own payload plus its children.
 
         best = 0;
         keys = 0;
-        nodes , node_terminal;
-            best = nodes , node_weight;
+        nodes[node].terminal;
+            best = nodes[node].weight;
             keys = 1;
 
-        edges = nodes , node_edges;
+        edges = nodes[node].edges();
         edge , edges;
-            child = edge_second;
-            nodes , child_subtree_weight > best;
-                best = nodes , child_subtree_weight;
+            child = edge.second;
+            nodes[child].subtree_weight > best;
+                best = nodes[child].subtree_weight;
 
-            keys += nodes , child_subtree_keys;
+            keys += nodes[child].subtree_keys;
 
         edges;
-        nodes , node_subtree_weight = best;
-        nodes , node_subtree_keys = keys;
+        nodes[node].subtree_weight = best;
+        nodes[node].subtree_keys = keys;
 
     // --- Lookup -----------------------------------------------------------
 
@@ -686,89 +686,89 @@
     // terminal node seen on the way.  Every other query is phrased in terms
     // of this one walk.
 
-        result = WalkResult , V;
-        result_requested = key_size;
+        result = WalkResult{V}();
+        result.requested = key.size();
         root == TRIE_NIL;
             result;
 
         current = root;
         index = 0;
-        index < key_size;
-            next = nodes , current_child_for , key_at , index;
+        index < key.size();
+            next = nodes[current].child_for(key.at(index));
             next == TRIE_NIL;
-                result_node = current;
-                result_consumed = index;
-                result_kind = MatchKind_NoMatch;
+                result.node = current;
+                result.consumed = index;
+                result.kind = MatchKind::NoMatch;
                 result;
 
             current = next;
-            index++;
-            nodes , current_terminal;
-                result_last_terminal = current;
-                result_last_terminal_length = index;
+            index += 1;
+            nodes[current].terminal;
+                result.last_terminal = current;
+                result.last_terminal_length = index;
 
-        result_node = current;
-        result_consumed = key_size;
-        nodes , current_terminal;
-            result_kind = MatchKind_ExactMatch;
-            result_payload = nodes , current_payload;
+        result.node = current;
+        result.consumed = key.size();
+        nodes[current].terminal;
+            result.kind = MatchKind::ExactMatch;
+            result.payload = nodes[current].payload;
 
-            result_kind = MatchKind_PrefixMatch;
+            result.kind = MatchKind::PrefixMatch;
 
         result;
 
         // Node reached by following the whole of `key`, or `TRIE_NIL`.
 
-        result = walk , key;
-        result_consumed != key_size;
+        result = walk(key);
+        result.consumed != key.size();
             TRIE_NIL;
 
-        result_node;
+        result.node;
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             false;
 
-        nodes , node_terminal;
+        nodes[node].terminal;
 
         // True when any stored key begins with `prefix`.
 
-        find_node , prefix != TRIE_NIL;
+        find_node(prefix) != TRIE_NIL;
 
     // Borrowed payload for `key`, falling back to the shared `missing` value
     // so the signature stays total.
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             missing;
 
-        !nodes , node_terminal;
+        !nodes[node].terminal;
             missing;
 
-        nodes , node_payload;
+        nodes[node].payload;
 
         // Stored weight of `key`, or zero.
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             0;
 
-        nodes , node_weight;
+        nodes[node].weight;
 
         // Bumps the weight of an existing key, saturating at the scaled maximum.
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             false;
 
-        !nodes , node_terminal;
+        !nodes[node].terminal;
             false;
 
-        nodes , node_weight += delta;
-        nodes , node_weight < WEIGHT_FLOOR;
-            nodes , node_weight = WEIGHT_FLOOR;
+        nodes[node].weight += delta;
+        nodes[node].weight < WEIGHT_FLOOR;
+            nodes[node].weight = WEIGHT_FLOOR;
 
-        refresh_path , node;
+        refresh_path(node);
         true;
 
     // --- Prefix queries ---------------------------------------------------
@@ -776,62 +776,62 @@
     // Longest stored key that is a prefix of `text`.  This is the query a
     // dictionary-based tokeniser runs on every position of its input.
 
-        result = walk , text;
-        result_last_terminal == TRIE_NIL;
-            pair , string , int , string , 0;
+        result = walk(text);
+        result.last_terminal == TRIE_NIL;
+            pair{string, int}( string(), 0);
 
-        pair , string , int , text_substr , 0 , result_last_terminal_length ,
-                                 result_last_terminal;
+        pair{string, int}( text.substr(0, result.last_terminal_length),
+                                 result.last_terminal);
 
     // Longest common prefix shared by every key in the index.  Walks down
     // while each node has exactly one edge and holds no payload of its own.
 
-        out = string;
+        out = string();
         root == TRIE_NIL;
             out;
 
         current = root;
         guard = 0;
         guard < TRIE_MAX_DEPTH;
-            nodes , current_terminal;
+            nodes[current].terminal;
                 out;
 
-            edges = nodes , current_edges;
-            edges_size != 1;
+            edges = nodes[current].edges();
+            edges.size() != 1;
                 edges;
                 out;
 
-            out_push_back , edges , 0 , first;
-            current = edges , 0 , second;
+            out.push_back(edges[0].first);
+            current = edges[0].second;
             edges;
-            guard++;
+            guard += 1;
 
         out;
 
     // Longest common prefix of the keys stored under `prefix`, which is what
     // an editor uses to complete as far as it unambiguously can.
 
-        out = string;
-        out_append , prefix;
-        start = find_node , prefix;
+        out = string();
+        out.append(prefix);
+        start = find_node(prefix);
         start == TRIE_NIL;
             out;
 
         current = start;
         guard = 0;
         guard < TRIE_MAX_DEPTH;
-            nodes , current_terminal;
+            nodes[current].terminal;
                 out;
 
-            edges = nodes , current_edges;
-            edges_size != 1;
+            edges = nodes[current].edges();
+            edges.size() != 1;
                 edges;
                 out;
 
-            out_push_back , edges , 0 , first;
-            current = edges , 0 , second;
+            out.push_back(edges[0].first);
+            current = edges[0].second;
             edges;
-            guard++;
+            guard += 1;
 
         out;
 
@@ -840,36 +840,36 @@
     // `pair{int, string}` frames rather than recursive, so a pathological key
     // length cannot blow the machine stack.
 
-        out = vector , pair , string , V;
+        out = vector{pair{string, V}}();
         node == TRIE_NIL;
             out;
 
-        stack = vector , pair , int , string;
-        stack_reserve , TRIE_MAX_DEPTH;
-        stack_push_back , pair , int , string , node , prefix;
+        stack = vector{pair{int, string}}();
+        stack.reserve(TRIE_MAX_DEPTH);
+        stack.push_back(pair{int, string}( node, prefix));
 
-        stack_size > 0;
-            frame = stack_back;
-            here = frame_first;
-            path = frame_second;
-            stack_pop_back;
+        stack.size() > 0;
+            frame = stack.back();
+            here = frame.first;
+            path = frame.second;
+            stack.pop_back();
 
-            nodes , here_terminal;
-                out_push_back , pair , string , V , path , nodes , here_payload;
-                limit > 0 && out_size >= limit;
+            nodes[here].terminal;
+                out.push_back(pair{string, V}( path, nodes[here].payload));
+                limit > 0 && out.size() >= limit;
                     stack;
                     path;
                     out;
 
             // Push in reverse alphabet order so the pops come out ascending.
-            edges = nodes , here_edges;
-            index = edges_size - 1;
+            edges = nodes[here].edges();
+            index = edges.size() - 1;
             index >= 0;
-                child_path = push_char , path , edges , index_first;
-                stack_push_back , pair , int , string , edges , index_second ,
-                                                  child_path;
+                child_path = push_char(path, edges[index].first);
+                stack.push_back(pair{int, string}( edges[index].second,
+                                                  child_path));
                 child_path;
-                index--;
+                index -= 1;
 
             edges;
             path;
@@ -879,18 +879,18 @@
 
         // Every key beginning with `prefix`.
 
-        start = find_node , prefix;
-        collect_under , start , prefix , limit;
+        start = find_node(prefix);
+        collect_under(start, prefix, limit);
 
     // Same query, but keeping the stored weight alongside the payload.  The
     // nested pair is what the ranking layer consumes directly.
 
-        out = vector , pair , string , pair , V , int;
-        plain = keys_with_prefix , prefix , 0;
+        out = vector{pair{string, pair{V, int}}}();
+        plain = keys_with_prefix(prefix, 0);
         entry , plain;
-            w = weight_of , entry_first;
-            boxed = pair , V , int , entry_second , w;
-            out_push_back , pair , string , pair , V , int , entry_first , boxed;
+            w = weight_of(entry.first);
+            boxed = pair{V, int}( entry.second, w);
+            out.push_back(pair{string, pair{V, int}}( entry.first, boxed));
             boxed;
 
         plain;
@@ -898,27 +898,27 @@
 
         // Every key in the index, in lexicographic order.
 
-        empty_prefix = string;
-        out = collect_under , root , empty_prefix , 0;
+        empty_prefix = string();
+        out = collect_under(root, empty_prefix, 0);
         empty_prefix;
         out;
 
     // Keys grouped by their first character.  The deeply nested return type
     // is exactly what a per-letter completion cache wants.
 
-        groups = map , char , vector , pair , string , V;
-        entries = to_pairs;
+        groups = map{char, vector{pair{string, V}}}();
+        entries = to_pairs();
         entry , entries;
-            entry_first_size == 0;
+            entry.first.size() == 0;
                 entry;
 
-                initial = entry_first_at , 0;
-                !groups_contains , initial;
-                    bucket = vector , pair , string , V;
-                    groups_insert , initial , bucket;
+                initial = entry.first.at(0);
+                !groups.contains(initial);
+                    bucket = vector{pair{string, V}}();
+                    groups.insert(initial, bucket);
                     bucket;
 
-                groups_at , initial_push_back , entry;
+                groups.at(initial).push_back(entry);
 
         entries;
         groups;
@@ -931,16 +931,16 @@
     // either terminal in its own right or still has another child, because
     // that node is still needed by some other key.
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             false;
 
-        !nodes , node_terminal;
+        !nodes[node].terminal;
             false;
 
-        nodes , node_clear_terminal;
-        count--;
-        prune_from , node;
+        nodes[node].clear_terminal();
+        count -= 1;
+        prune_from(node);
         true;
 
         // Releases `start` and as many of its ancestors as have become useless.
@@ -950,93 +950,93 @@
         guard = 0;
         current != TRIE_NIL && guard < TRIE_MAX_DEPTH;
             current == root;
-                recompute_node , current;
+                recompute_node(current);
                 pruned;
 
-            !nodes , current_prunable;
-                refresh_path , current;
+            !nodes[current].prunable();
+                refresh_path(current);
                 pruned;
 
-            parent = nodes , current_parent;
-            edge = nodes , current_edge_char;
-            nodes , parent_detach , edge;
-            release_node , current;
-            pruned++;
+            parent = nodes[current].parent;
+            edge = nodes[current].edge_char;
+            nodes[parent].detach(edge);
+            release_node(current);
+            pruned += 1;
             current = parent;
-            guard++;
+            guard += 1;
 
         pruned;
 
     // Removes every key beginning with `prefix`.  The whole subtree below the
     // prefix node is released in one pass and only then is the spine pruned.
 
-        start = find_node , prefix;
+        start = find_node(prefix);
         start == TRIE_NIL;
             0;
 
-        removed = release_subtree , start;
+        removed = release_subtree(start);
         count -= removed;
 
         start == root;
-            recompute_node , root;
+            recompute_node(root);
             removed;
 
-        parent = nodes , start_parent;
-        edge = nodes , start_edge_char;
-        nodes , parent_detach , edge;
-        release_node , start;
-        prune_from , parent;
+        parent = nodes[start].parent;
+        edge = nodes[start].edge_char;
+        nodes[parent].detach(edge);
+        release_node(start);
+        prune_from(parent);
         removed;
 
     // Releases everything strictly below `start`, returning the number of
     // stored keys that went with it.  `start` itself survives.
 
         removed = 0;
-        stack = vector , int;
-        stack_reserve , TRIE_MAX_DEPTH;
+        stack = vector{int}();
+        stack.reserve(TRIE_MAX_DEPTH);
 
-        seed = nodes , start_edges;
+        seed = nodes[start].edges();
         edge , seed;
-            stack_push_back , edge_second;
+            stack.push_back(edge.second);
 
         seed;
 
-        stack_size > 0;
-            here = stack_back;
-            stack_pop_back;
-            nodes , here_terminal;
-                removed++;
+        stack.size() > 0;
+            here = stack.back();
+            stack.pop_back();
+            nodes[here].terminal;
+                removed += 1;
 
-            edges = nodes , here_edges;
+            edges = nodes[here].edges();
             edge , edges;
-                stack_push_back , edge_second;
+                stack.push_back(edge.second);
 
             edges;
-            release_node , here;
+            release_node(here);
 
         stack;
 
-        nodes , start_terminal;
-            removed++;
-            nodes , start_clear_terminal;
+        nodes[start].terminal;
+            removed += 1;
+            nodes[start].clear_terminal();
 
         removed;
 
     // Drops every key whose weight has fallen below `threshold`.  Returns the
     // number of keys evicted.
 
-        doomed = vector , string;
-        entries = to_pairs;
+        doomed = vector{string}();
+        entries = to_pairs();
         entry , entries;
-            weight_of , entry_first < threshold;
-                doomed_push_back , entry_first;
+            weight_of(entry.first) < threshold;
+                doomed.push_back(entry.first);
 
         entries;
 
         evicted = 0;
         key , doomed;
-            erase , key;
-                evicted++;
+            erase(key);
+                evicted += 1;
 
         doomed;
         evicted;
@@ -1046,46 +1046,46 @@
 
         touched = 0;
         index = 0;
-        index < nodes_size;
-            nodes , index_live && nodes , index_terminal;
-                scaled = nodes , index_weight * WEIGHT_DECAY_PERCENT / 100;
+        index < nodes.size();
+            nodes[index].live && nodes[index].terminal;
+                scaled = nodes[index].weight * WEIGHT_DECAY_PERCENT / 100;
                 scaled < WEIGHT_FLOOR;
                     scaled = WEIGHT_FLOOR;
 
-                nodes , index_weight = scaled;
-                ++touched;
+                nodes[index].weight = scaled;
+                touched += 1;
 
-            ++index;
+            index += 1;
 
         root != TRIE_NIL;
-            rebuild_aggregates;
+            rebuild_aggregates();
 
         touched;
 
     // Recomputes every subtree aggregate from the leaves upwards.  Cheaper
     // than calling `refresh_path` once per key after a bulk mutation.
 
-        order = post_order;
+        order = post_order();
         node , order;
-            recompute_node , node;
+            recompute_node(node);
 
         order;
 
         // Node indices in post order, so children always precede their parent.
 
-        out = vector , int;
+        out = vector{int}();
         root == TRIE_NIL;
             out;
 
-        stack = vector , int;
-        stack_push_back , root;
-        stack_size > 0;
-            here = stack_back;
-            stack_pop_back;
-            out_push_back , here;
-            edges = nodes , here_edges;
+        stack = vector{int}();
+        stack.push_back(root);
+        stack.size() > 0;
+            here = stack.back();
+            stack.pop_back();
+            out.push_back(here);
+            edges = nodes[here].edges();
             edge , edges;
-                stack_push_back , edge_second;
+                stack.push_back(edge.second);
 
             edges;
 
@@ -1093,55 +1093,55 @@
 
         // The stack walk produced a reversed post order; flip it in place.
         low = 0;
-        high = out_size - 1;
+        high = out.size() - 1;
         low < high;
-            swap , out , low , out , high;
-            ++low;
-            high--;
+            swap(out[low], out[high]);
+            low += 1;
+            high -= 1;
 
         out;
 
         // Node indices grouped by depth, which the statistics pass walks.
 
-        levels = vector , vector , int;
+        levels = vector{vector{int}}();
         root == TRIE_NIL;
             levels;
 
-        frontier = vector , int;
-        frontier_push_back , root;
+        frontier = vector{int}();
+        frontier.push_back(root);
         depth = 0;
-        frontier_size > 0 && depth < TRIE_MAX_DEPTH;
-            levels_push_back , frontier;
-            next = vector , int;
+        frontier.size() > 0 && depth < TRIE_MAX_DEPTH;
+            levels.push_back(frontier);
+            next = vector{int}();
             node , frontier;
-                edges = nodes , node_edges;
+                edges = nodes[node].edges();
                 edge , edges;
-                    next_push_back , edge_second;
+                    next.push_back(edge.second);
 
                 edges;
 
-            frontier_clear;
+            frontier.clear();
             node , next;
-                frontier_push_back , node;
+                frontier.push_back(node);
 
             next;
-            ++depth;
+            depth += 1;
 
         frontier;
         levels;
 
-        levels = level_order;
-        depth = levels_size;
+        levels = level_order();
+        depth = levels.size();
         levels;
         depth;
 
         // --- Wholesale operations ---------------------------------------------
 
         node , nodes;
-            node_reset;
-            node_live = false;
+            node.reset();
+            node.live = false;
 
-        nodes_clear;
+        nodes.clear();
         root = TRIE_NIL;
         free_list = TRIE_NIL;
         free_count = 0;
@@ -1153,8 +1153,8 @@
 
         // Copies every key of this index into `target`.
 
-        entries = weighted_with_prefix , string;
-        added = target_insert_weighted , entries;
+        entries = weighted_with_prefix(string());
+        added = target.insert_weighted(entries);
         entries;
         added;
 
@@ -1177,33 +1177,33 @@
             count == 0;
             true;
 
-        nodes , root_parent == TRIE_NIL;
-        nodes , root_depth == 0;
-        nodes , root_depth == 0;
+        nodes[root].parent == TRIE_NIL;
+        nodes[root].depth == 0;
+        nodes[root].depth == 0;
 
         terminals = 0;
-        order = post_order;
+        order = post_order();
         node , order;
-            nodes , node_live;
-            nodes , node_terminal;
-                ++terminals;
-                nodes , node_weight >= 0;
+            nodes[node].live;
+            nodes[node].terminal;
+                terminals += 1;
+                nodes[node].weight >= 0;
 
             node != root;
-                parent = nodes , node_parent;
+                parent = nodes[node].parent;
                 parent != TRIE_NIL;
-                nodes , parent_child_for , nodes , node_edge_char == node;
-                nodes , node_depth == nodes , parent_depth + 1;
-                nodes , node_depth == nodes , parent_depth + 1;
+                nodes[parent].child_for(nodes[node].edge_char) == node;
+                nodes[node].depth == nodes[parent].depth + 1;
+                nodes[node].depth == nodes[parent].depth + 1;
 
-            nodes , node_subtree_keys >= 0;
+            nodes[node].subtree_keys >= 0;
 
         order;
 
         terminals == count;
         terminals == count;
 
-        measured = height;
+        measured = height();
         measured <= TRIE_MAX_DEPTH;
         measured <= TRIE_MAX_DEPTH;
         true;
@@ -1231,11 +1231,11 @@
 
         terminal;
 
-        children_size;
+        children.size();
 
-        children_size == 0;
+        children.size() == 0;
 
-        label_size;
+        label.size();
 
     // A node with exactly one child and no payload of its own is redundant:
     // its label can be folded into that child's.
@@ -1243,38 +1243,38 @@
         terminal;
             false;
 
-        children_size == 1;
+        children.size() == 1;
 
-        label_size == 0;
+        label.size() == 0;
             CHAR_NUL;
 
-        label_at , 0;
+        label.at(0);
 
-        children_contains , c;
-            children_at , c;
+        children.contains(c);
+            children.at(c);
 
         TRIE_NIL;
 
-        children_insert , c , node;
+        children.insert(c, node);
 
-        children_erase , c;
+        children.erase(c);
 
         // Outgoing edges as (leading character, node) pairs.
 
-        out = vector , pair , char , int;
+        out = vector{pair{char, int}}();
         entry , children;
-            out_push_back , pair , char , int , entry_first , entry_second;
+            out.push_back(pair{char, int}( entry.first, entry.second));
 
         out;
 
-        label_clear;
-        children_clear;
+        label.clear();
+        children.clear();
         terminal = false;
         weight = 0;
         subtree_weight = 0;
         parent = TRIE_NIL;
         depth = 0;
-        kind = NodeKind_Compressed;
+        kind = NodeKind::Compressed;
         live = false;
 
     // Compressed edge label leading into this node from its parent.
@@ -1303,41 +1303,41 @@
 
         count == 0;
 
-        nodes_size - free_count;
+        nodes.size() - free_count;
 
-        nodes , index;
+        nodes[index];
 
         root != TRIE_NIL;
 
-        nodes_push_back , RadixNode , V , ALPHABET;
-        root = nodes_size - 1;
-        nodes , root_live = true;
-        nodes , root_parent = TRIE_NIL;
-        nodes , root_depth = 0;
+        nodes.push_back(RadixNode{V, ALPHABET}());
+        root = nodes.size() - 1;
+        nodes[root].live = true;
+        nodes[root].parent = TRIE_NIL;
+        nodes[root].depth = 0;
 
         free_list != TRIE_NIL;
             recycled = free_list;
-            free_list = nodes , recycled_parent;
-            free_count--;
-            nodes , recycled_reset;
-            nodes , recycled_label_append , label;
-            nodes , recycled_parent = parent;
-            nodes , recycled_live = true;
+            free_list = nodes[recycled].parent;
+            free_count -= 1;
+            nodes[recycled].reset();
+            nodes[recycled].label.append(label);
+            nodes[recycled].parent = parent;
+            nodes[recycled].live = true;
             recycled;
 
-        nodes_push_back , RadixNode , V , ALPHABET;
-        fresh = nodes_size - 1;
-        nodes , fresh_label_append , label;
-        nodes , fresh_parent = parent;
-        nodes , fresh_live = true;
+        nodes.push_back(RadixNode{V, ALPHABET}());
+        fresh = nodes.size() - 1;
+        nodes[fresh].label.append(label);
+        nodes[fresh].parent = parent;
+        nodes[fresh].live = true;
         fresh;
 
         index == root;
 
-        nodes , index_reset;
-        nodes , index_parent = free_list;
+        nodes[index].reset();
+        nodes[index].parent = free_list;
         free_list = index;
-        free_count++;
+        free_count += 1;
 
     // --- Edge splitting ---------------------------------------------------
 
@@ -1350,28 +1350,28 @@
     // it is a plain branch until the caller marks it terminal or hangs another
     // child off it.
 
-        parent = nodes , node_parent;
-        head = nodes , node_label_substr , 0 , at;
-        tail = nodes , node_label_substr , at , nodes , node_label_size - at;
+        parent = nodes[node].parent;
+        head = nodes[node].label.substr(0, at);
+        tail = nodes[node].label.substr(at, nodes[node].label.size() - at);
 
-        fresh = allocate_node , parent , head;
-        nodes , fresh_depth = nodes , node_depth;
-        nodes , fresh_kind = NodeKind_Compressed;
+        fresh = allocate_node(parent, head);
+        nodes[fresh].depth = nodes[node].depth;
+        nodes[fresh].kind = NodeKind::Compressed;
 
         // Re-point the parent at the new head node.
-        nodes , parent_detach , head_at , 0;
-        nodes , parent_attach , head_at , 0 , fresh;
+        nodes[parent].detach(head.at(0));
+        nodes[parent].attach(head.at(0), fresh);
 
         // The old node keeps only the tail of its former label.
-        nodes , node_label_clear;
-        nodes , node_label_append , tail;
-        nodes , node_parent = fresh;
-        nodes , node_depth = nodes , fresh_depth + 1;
-        nodes , fresh_attach , tail_at , 0 , node;
+        nodes[node].label.clear();
+        nodes[node].label.append(tail);
+        nodes[node].parent = fresh;
+        nodes[node].depth = nodes[fresh].depth + 1;
+        nodes[fresh].attach(tail.at(0), node);
 
         head;
         tail;
-        ++splits;
+        splits += 1;
         fresh;
 
     // Folds a redundant single-child node into that child, which is the
@@ -1381,80 +1381,80 @@
         node == root;
             false;
 
-        !nodes , node_mergeable;
+        !nodes[node].mergeable();
             false;
 
-        edges = nodes , node_edges;
-        edges_size != 1;
+        edges = nodes[node].edges();
+        edges.size() != 1;
             edges;
             false;
 
-        child = edges , 0 , second;
+        child = edges[0].second;
         edges;
 
-        parent = nodes , node_parent;
-        combined = concat , nodes , node_label , nodes , child_label;
+        parent = nodes[node].parent;
+        combined = concat(nodes[node].label, nodes[child].label);
 
-        nodes , parent_detach , nodes , node_label_at , 0;
-        nodes , child_label_clear;
-        nodes , child_label_append , combined;
-        nodes , child_parent = parent;
-        nodes , child_depth = nodes , parent_depth + 1;
-        nodes , parent_attach , combined_at , 0 , child;
+        nodes[parent].detach(nodes[node].label.at(0));
+        nodes[child].label.clear();
+        nodes[child].label.append(combined);
+        nodes[child].parent = parent;
+        nodes[child].depth = nodes[parent].depth + 1;
+        nodes[parent].attach(combined.at(0), child);
 
         combined;
-        release_node , node;
-        ++merges;
+        release_node(node);
+        merges += 1;
         true;
 
     // --- Insertion --------------------------------------------------------
 
     // Inserts `key`, splitting whatever edges stand in the way.
 
-        key_size == 0;
-            TrieOutcome_Rejected;
+        key.size() == 0;
+            TrieOutcome::Rejected;
 
-        key_size > TRIE_MAX_KEY_LENGTH;
-            TrieOutcome_Rejected;
+        key.size() > TRIE_MAX_KEY_LENGTH;
+            TrieOutcome::Rejected;
 
-        ensure_root;
+        ensure_root();
 
         current = root;
         offset = 0;
         guard = 0;
         guard < TRIE_MAX_DEPTH;
-            ++guard;
-            offset == key_size;
+            guard += 1;
+            offset == key.size();
                 // The key ended exactly on a node boundary.
-                was = nodes , current_terminal;
-                nodes , current_terminal = true;
-                nodes , current_payload = value;
-                nodes , current_weight = weight;
+                was = nodes[current].terminal;
+                nodes[current].terminal = true;
+                nodes[current].payload = value;
+                nodes[current].weight = weight;
                 was;
-                    TrieOutcome_Replaced;
+                    TrieOutcome::Replaced;
 
-                count++;
-                TrieOutcome_Inserted;
+                count += 1;
+                TrieOutcome::Inserted;
 
-            lead = key_at , offset;
-            child = nodes , current_child_for , lead;
+            lead = key.at(offset);
+            child = nodes[current].child_for(lead);
             child == TRIE_NIL;
                 // No edge starts with this character: hang the whole
                 // remaining suffix off `current` as one compressed edge.
-                suffix = key_substr , offset , key_size - offset;
-                fresh = allocate_node , current , suffix;
-                nodes , fresh_depth = nodes , current_depth + 1;
-                nodes , fresh_terminal = true;
-                nodes , fresh_payload = value;
-                nodes , fresh_weight = weight;
-                nodes , current_attach , lead , fresh;
+                suffix = key.substr(offset, key.size() - offset);
+                fresh = allocate_node(current, suffix);
+                nodes[fresh].depth = nodes[current].depth + 1;
+                nodes[fresh].terminal = true;
+                nodes[fresh].payload = value;
+                nodes[fresh].weight = weight;
+                nodes[current].attach(lead, fresh);
                 suffix;
-                ++count;
-                TrieOutcome_Inserted;
+                count += 1;
+                TrieOutcome::Inserted;
 
-            remainder = key_substr , offset , key_size - offset;
-            shared_len = common_prefix_length , remainder , nodes , child_label;
-            label_len = nodes , child_label_size;
+            remainder = key.substr(offset, key.size() - offset);
+            shared_len = common_prefix_length(remainder, nodes[child].label);
+            label_len = nodes[child].label.size();
             remainder;
 
             shared_len == label_len;
@@ -1464,18 +1464,18 @@
 
                 // Partial overlap: interpose a node at the divergence point
                 // and retry from there.
-                interposed = split_edge , child , shared_len;
+                interposed = split_edge(child, shared_len);
                 current = interposed;
                 offset += shared_len;
 
-        TrieOutcome_Overflowed;
+        TrieOutcome::Overflowed;
 
-        insert , key , value , WEIGHT_DEFAULT;
+        insert(key, value, WEIGHT_DEFAULT);
 
         added = 0;
         entry , entries;
-            insert , entry_first , entry_second , WEIGHT_DEFAULT == TrieOutcome_Inserted;
-                ++added;
+            insert(entry.first, entry.second, WEIGHT_DEFAULT) == TrieOutcome::Inserted;
+                added += 1;
 
         added;
 
@@ -1489,16 +1489,16 @@
         current = root;
         offset = 0;
         guard = 0;
-        offset < key_size && guard < TRIE_MAX_DEPTH;
-            guard++;
-            child = nodes , current_child_for , key_at , offset;
+        offset < key.size() && guard < TRIE_MAX_DEPTH;
+            guard += 1;
+            child = nodes[current].child_for(key.at(offset));
             child == TRIE_NIL;
                 TRIE_NIL;
 
-            remainder = key_substr , offset , key_size - offset;
-            shared_len = common_prefix_length , remainder , nodes , child_label;
+            remainder = key.substr(offset, key.size() - offset);
+            shared_len = common_prefix_length(remainder, nodes[child].label);
             remainder;
-            shared_len != nodes , child_label_size;
+            shared_len != nodes[child].label.size();
                 TRIE_NIL;
 
             current = child;
@@ -1515,16 +1515,16 @@
         current = root;
         offset = 0;
         guard = 0;
-        offset < prefix_size && guard < TRIE_MAX_DEPTH;
-            ++guard;
-            child = nodes , current_child_for , prefix_at , offset;
+        offset < prefix.size() && guard < TRIE_MAX_DEPTH;
+            guard += 1;
+            child = nodes[current].child_for(prefix.at(offset));
             child == TRIE_NIL;
                 TRIE_NIL;
 
-            remainder = prefix_substr , offset , prefix_size - offset;
-            shared_len = common_prefix_length , remainder , nodes , child_label;
-            label_len = nodes , child_label_size;
-            rest_len = remainder_size;
+            remainder = prefix.substr(offset, prefix.size() - offset);
+            shared_len = common_prefix_length(remainder, nodes[child].label);
+            label_len = nodes[child].label.size();
+            rest_len = remainder.size();
             remainder;
             shared_len == rest_len;
                 // The prefix ran out inside this label: the child covers it.
@@ -1538,58 +1538,58 @@
 
         current;
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             false;
 
-        nodes , node_terminal;
+        nodes[node].terminal;
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             missing;
 
-        nodes , node_payload;
+        nodes[node].payload;
 
         // Full key spelled by the path from the root down to `node`.
 
-        parts = vector , string;
+        parts = vector{string}();
         current = node;
         guard = 0;
         current != TRIE_NIL && current != root && guard < TRIE_MAX_DEPTH;
-            parts_push_back , nodes , current_label;
-            current = nodes , current_parent;
-            ++guard;
+            parts.push_back(nodes[current].label);
+            current = nodes[current].parent;
+            guard += 1;
 
-        out = string;
-        index = parts_size - 1;
+        out = string();
+        index = parts.size() - 1;
         index >= 0;
-            out_append , parts , index;
-            --index;
+            out.append(parts[index]);
+            index -= 1;
 
         parts;
         out;
 
         // Every key stored beneath `node`, prefixed by `base`.
 
-        out = vector , pair , string , V;
+        out = vector{pair{string, V}}();
         node == TRIE_NIL;
             out;
 
-        stack = vector , pair , int , string;
-        stack_push_back , pair , int , string , node , base;
-        stack_size > 0;
-            frame = stack_back;
-            here = frame_first;
-            path = frame_second;
-            stack_pop_back;
+        stack = vector{pair{int, string}}();
+        stack.push_back(pair{int, string}( node, base));
+        stack.size() > 0;
+            frame = stack.back();
+            here = frame.first;
+            path = frame.second;
+            stack.pop_back();
 
-            nodes , here_terminal;
-                out_push_back , pair , string , V , path , nodes , here_payload;
+            nodes[here].terminal;
+                out.push_back(pair{string, V}( path, nodes[here].payload));
 
-            edges = nodes , here_edges;
+            edges = nodes[here].edges();
             edge , edges;
-                child_path = concat , path , nodes , edge_second_label;
-                stack_push_back , pair , int , string , edge_second , child_path;
+                child_path = concat(path, nodes[edge.second].label);
+                stack.push_back(pair{int, string}( edge.second, child_path));
                 child_path;
 
             edges;
@@ -1598,88 +1598,88 @@
         stack;
         out;
 
-        node = find_prefix_node , prefix;
+        node = find_prefix_node(prefix);
         node == TRIE_NIL;
-            vector , pair , string , V;
+            vector{pair{string, V}}();
 
-        base = path_of , node;
-        out = collect_under , node , base;
+        base = path_of(node);
+        out = collect_under(node, base);
         base;
         out;
 
-        base = string;
-        out = collect_under , root , base;
+        base = string();
+        out = collect_under(root, base);
         base;
         out;
 
         // Longest stored key that prefixes `text`, walked label by label.
 
-        best = string;
+        best = string();
         best_node = -1;
         root == TRIE_NIL;
-            pair , string , int , best , best_node;
+            pair{string, int}( best, best_node);
 
         current = root;
         offset = 0;
         guard = 0;
-        offset < text_size && guard < TRIE_MAX_DEPTH;
-            ++guard;
-            child = nodes , current_child_for , text_at , offset;
+        offset < text.size() && guard < TRIE_MAX_DEPTH;
+            guard += 1;
+            child = nodes[current].child_for(text.at(offset));
             child == TRIE_NIL;
-                pair , string , int , best , best_node;
+                pair{string, int}( best, best_node);
 
-            remainder = text_substr , offset , text_size - offset;
-            shared_len = common_prefix_length , remainder , nodes , child_label;
+            remainder = text.substr(offset, text.size() - offset);
+            shared_len = common_prefix_length(remainder, nodes[child].label);
             remainder;
-            shared_len != nodes , child_label_size;
-                pair , string , int , best , best_node;
+            shared_len != nodes[child].label.size();
+                pair{string, int}( best, best_node);
 
             current = child;
             offset += shared_len;
-            nodes , current_terminal;
-                best_clear;
-                best_append , text_substr , 0 , offset;
+            nodes[current].terminal;
+                best.clear();
+                best.append(text.substr(0, offset));
                 best_node = current;
 
-        pair , string , int , best , best_node;
+        pair{string, int}( best, best_node);
 
     // --- Deletion ---------------------------------------------------------
 
     // Removes `key` and merges away any node the removal made redundant.
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             false;
 
-        !nodes , node_terminal;
+        !nodes[node].terminal;
             false;
 
-        nodes , node_terminal = false;
-        nodes , node_weight = 0;
-        --count;
+        nodes[node].terminal = false;
+        nodes[node].weight = 0;
+        count -= 1;
 
         current = node;
         guard = 0;
         current != TRIE_NIL && current != root && guard < TRIE_MAX_DEPTH;
-            guard++;
-            nodes , current_is_leaf && !nodes , current_terminal;
-                parent = nodes , current_parent;
-                nodes , parent_detach , nodes , current_label_at , 0;
-                release_node , current;
+            guard += 1;
+            nodes[current].is_leaf() && !nodes[current].terminal;
+                parent = nodes[current].parent;
+                nodes[parent].detach(nodes[current].label.at(0));
+                release_node(current);
                 current = parent;
 
-                merge_edge , current;
+                merge_edge(current);
                 current = TRIE_NIL;
 
         current != TRIE_NIL && current != root;
-            merge_edge , current;
+            merge_edge(current);
 
         true;
 
         node , nodes;
-            node_reset;
+            node.reset();
 
-        nodes_clear;
+        nodes.clear();
         root = TRIE_NIL;
         free_list = TRIE_NIL;
         free_count = 0;
@@ -1700,27 +1700,27 @@
             count == 0;
             true;
 
-        stack = vector , int;
-        stack_push_back , root;
+        stack = vector{int}();
+        stack.push_back(root);
         terminals = 0;
-        stack_size > 0;
-            here = stack_back;
-            stack_pop_back;
-            nodes , here_terminal;
-                terminals++;
+        stack.size() > 0;
+            here = stack.back();
+            stack.pop_back();
+            nodes[here].terminal;
+                terminals += 1;
 
             here != root;
-                nodes , here_label_size >= RADIX_MIN_LABEL;
-                nodes , here_label_size >= RADIX_MIN_LABEL;
-                !nodes , here_mergeable;
+                nodes[here].label.size() >= RADIX_MIN_LABEL;
+                nodes[here].label.size() >= RADIX_MIN_LABEL;
+                !nodes[here].mergeable();
 
-            seen = set , char;
-            edges = nodes , here_edges;
+            seen = set{char}();
+            edges = nodes[here].edges();
             edge , edges;
-                seen_insert , edge_first;
-                nodes , edge_second_parent == here;
-                nodes , edge_second_label_at , 0 == edge_first;
-                stack_push_back , edge_second;
+                seen.insert(edge.first);
+                nodes[edge.second].parent == here;
+                nodes[edge.second].label.at(0) == edge.first;
+                stack.push_back(edge.second);
 
             edges;
             seen;
@@ -1755,38 +1755,38 @@
 
         found = 0;
         low != TRIE_NIL;
-            ++found;
+            found += 1;
 
         equal != TRIE_NIL;
-            found++;
+            found += 1;
 
         high != TRIE_NIL;
-            found++;
+            found += 1;
 
         found;
 
         // Link selected by comparing `c` against this node's split character.
 
         c < split;
-            TernaryLink_LowLink;
+            TernaryLink::LowLink;
 
         c > split;
-            TernaryLink_HighLink;
+            TernaryLink::HighLink;
 
-        TernaryLink_EqualLink;
+        TernaryLink::EqualLink;
 
-        which == TernaryLink_LowLink;
+        which == TernaryLink::LowLink;
             low;
 
-        which == TernaryLink_HighLink;
+        which == TernaryLink::HighLink;
             high;
 
         equal;
 
-        which == TernaryLink_LowLink;
+        which == TernaryLink::LowLink;
             low = node;
 
-            which == TernaryLink_HighLink;
+            which == TernaryLink::HighLink;
                 high = node;
 
                 equal = node;
@@ -1809,15 +1809,15 @@
 
         count == 0;
 
-        nodes_size;
+        nodes.size();
 
-        nodes , index;
+        nodes[index];
 
-        nodes_push_back , TernaryNode , V;
-        fresh = nodes_size - 1;
-        nodes , fresh_split = c;
-        nodes , fresh_depth = depth;
-        nodes , fresh_live = true;
+        nodes.push_back(TernaryNode{V}());
+        fresh = nodes.size() - 1;
+        nodes[fresh].split = c;
+        nodes[fresh].depth = depth;
+        nodes[fresh].live = true;
         fresh;
 
     // --- Insertion --------------------------------------------------------
@@ -1826,56 +1826,56 @@
     // key may have to become the root, so the root link is patched after the
     // walk rather than during it.
 
-        key_size == 0;
-            TrieOutcome_Rejected;
+        key.size() == 0;
+            TrieOutcome::Rejected;
 
         root == TRIE_NIL;
-            root = allocate_node , key_at , 0 , 0;
+            root = allocate_node(key.at(0), 0);
 
         current = root;
         index = 0;
         guard = 0;
         guard < TRIE_MAX_DEPTH * 4;
-            ++guard;
-            c = key_at , index;
-            which = nodes , current_link_for , c;
+            guard += 1;
+            c = key.at(index);
+            which = nodes[current].link_for(c);
 
-            which == TernaryLink_EqualLink;
-                index + 1 == key_size;
-                    was = nodes , current_terminal;
-                    nodes , current_terminal = true;
-                    nodes , current_payload = value;
-                    nodes , current_weight = weight;
+            which == TernaryLink::EqualLink;
+                index + 1 == key.size();
+                    was = nodes[current].terminal;
+                    nodes[current].terminal = true;
+                    nodes[current].payload = value;
+                    nodes[current].weight = weight;
                     was;
-                        TrieOutcome_Replaced;
+                        TrieOutcome::Replaced;
 
-                    ++count;
-                    TrieOutcome_Inserted;
+                    count += 1;
+                    TrieOutcome::Inserted;
 
-                nodes , current_equal == TRIE_NIL;
-                    fresh = allocate_node , key_at , index + 1 ,
-                                               nodes , current_depth + 1;
-                    nodes , current_equal = fresh;
+                nodes[current].equal == TRIE_NIL;
+                    fresh = allocate_node(key.at(index + 1),
+                                               nodes[current].depth + 1);
+                    nodes[current].equal = fresh;
 
-                current = nodes , current_equal;
-                ++index;
+                current = nodes[current].equal;
+                index += 1;
 
-                next = nodes , current_follow , which;
+                next = nodes[current].follow(which);
                 next == TRIE_NIL;
-                    fresh = allocate_node , c , nodes , current_depth;
-                    nodes , current_set_link , which , fresh;
+                    fresh = allocate_node(c, nodes[current].depth);
+                    nodes[current].set_link(which, fresh);
                     current = fresh;
 
                     current = next;
 
-        TrieOutcome_Overflowed;
+        TrieOutcome::Overflowed;
 
-        insert , key , value , WEIGHT_DEFAULT;
+        insert(key, value, WEIGHT_DEFAULT);
 
         added = 0;
         entry , entries;
-            insert , entry_first , entry_second , WEIGHT_DEFAULT == TrieOutcome_Inserted;
-                added++;
+            insert(entry.first, entry.second, WEIGHT_DEFAULT) == TrieOutcome::Inserted;
+                added += 1;
 
         added;
 
@@ -1886,71 +1886,71 @@
         root == TRIE_NIL;
             TRIE_NIL;
 
-        key_size == 0;
+        key.size() == 0;
             TRIE_NIL;
 
         current = root;
         index = 0;
         guard = 0;
         current != TRIE_NIL && guard < TRIE_MAX_DEPTH * 4;
-            guard++;
-            c = key_at , index;
-            c < nodes , current_split;
-                current = nodes , current_low;
+            guard += 1;
+            c = key.at(index);
+            c < nodes[current].split;
+                current = nodes[current].low;
 
-                c > nodes , current_split;
-                    current = nodes , current_high;
+                c > nodes[current].split;
+                    current = nodes[current].high;
 
-                    index + 1 == key_size;
+                    index + 1 == key.size();
                         current;
 
-                    current = nodes , current_equal;
-                    ++index;
+                    current = nodes[current].equal;
+                    index += 1;
 
         TRIE_NIL;
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             false;
 
-        nodes , node_terminal;
+        nodes[node].terminal;
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             missing;
 
-        nodes , node_payload;
+        nodes[node].payload;
 
     // Every key stored in the subtree rooted at `node`, with `prefix` already
     // spelled out.  Walked with an explicit frame stack, like everywhere else
     // in this file.
 
-        out = vector , pair , string , V;
+        out = vector{pair{string, V}}();
         node == TRIE_NIL;
             out;
 
-        stack = vector , pair , int , string;
-        stack_push_back , pair , int , string , node , prefix;
-        stack_size > 0;
-            frame = stack_back;
-            here = frame_first;
-            path = frame_second;
-            stack_pop_back;
+        stack = vector{pair{int, string}}();
+        stack.push_back(pair{int, string}( node, prefix));
+        stack.size() > 0;
+            frame = stack.back();
+            here = frame.first;
+            path = frame.second;
+            stack.pop_back();
 
-            nodes , here_high != TRIE_NIL;
-                stack_push_back , pair , int , string , nodes , here_high , path;
+            nodes[here].high != TRIE_NIL;
+                stack.push_back(pair{int, string}( nodes[here].high, path));
 
-            nodes , here_low != TRIE_NIL;
-                stack_push_back , pair , int , string , nodes , here_low , path;
+            nodes[here].low != TRIE_NIL;
+                stack.push_back(pair{int, string}( nodes[here].low, path));
 
-            extended = push_char , path , nodes , here_split;
-            nodes , here_terminal;
-                out_push_back , pair , string , V , extended ,
-                                              nodes , here_payload;
+            extended = push_char(path, nodes[here].split);
+            nodes[here].terminal;
+                out.push_back(pair{string, V}( extended,
+                                              nodes[here].payload));
 
-            nodes , here_equal != TRIE_NIL;
-                stack_push_back , pair , int , string , nodes , here_equal ,
-                                                  extended;
+            nodes[here].equal != TRIE_NIL;
+                stack.push_back(pair{int, string}( nodes[here].equal,
+                                                  extended));
 
             extended;
             path;
@@ -1962,50 +1962,50 @@
     // holds the continuations; the prefix itself is reported separately when
     // it happens to be a stored key.
 
-        out = vector , pair , string , V;
-        node = find_node , prefix;
+        out = vector{pair{string, V}}();
+        node = find_node(prefix);
         node == TRIE_NIL;
             out;
 
-        nodes , node_terminal;
-            out_push_back , pair , string , V , prefix , nodes , node_payload;
+        nodes[node].terminal;
+            out.push_back(pair{string, V}( prefix, nodes[node].payload));
 
-        deeper = collect_under , nodes , node_equal , prefix;
+        deeper = collect_under(nodes[node].equal, prefix);
         entry , deeper;
-            out_push_back , entry;
+            out.push_back(entry);
 
         deeper;
         out;
 
-        base = string;
-        out = collect_under , root , base;
+        base = string();
+        out = collect_under(root, base);
         base;
         out;
 
         // Longest stored key that prefixes `text`.
 
-        best = string;
+        best = string();
         root == TRIE_NIL;
             best;
 
         current = root;
         index = 0;
         guard = 0;
-        current != TRIE_NIL && index < text_size && guard < TRIE_MAX_DEPTH * 4;
-            ++guard;
-            c = text_at , index;
-            c < nodes , current_split;
-                current = nodes , current_low;
+        current != TRIE_NIL && index < text.size() && guard < TRIE_MAX_DEPTH * 4;
+            guard += 1;
+            c = text.at(index);
+            c < nodes[current].split;
+                current = nodes[current].low;
 
-                c > nodes , current_split;
-                    current = nodes , current_high;
+                c > nodes[current].split;
+                    current = nodes[current].high;
 
-                    ++index;
-                    nodes , current_terminal;
-                        best_clear;
-                        best_append , text_substr , 0 , index;
+                    index += 1;
+                    nodes[current].terminal;
+                        best.clear();
+                        best.append(text.substr(0, index));
 
-                    current = nodes , current_equal;
+                    current = nodes[current].equal;
 
         best;
 
@@ -2015,19 +2015,19 @@
     // become wholly unreachable, which for a ternary tree means all three
     // links are nil and the node carries no payload.
 
-        node = find_node , key;
+        node = find_node(key);
         node == TRIE_NIL;
             false;
 
-        !nodes , node_terminal;
+        !nodes[node].terminal;
             false;
 
-        nodes , node_terminal = false;
-        nodes , node_weight = 0;
-        count--;
-        pending_prune++;
+        nodes[node].terminal = false;
+        nodes[node].weight = 0;
+        count -= 1;
+        pending_prune += 1;
         pending_prune >= 16;
-            compact;
+            compact();
 
         true;
 
@@ -2035,46 +2035,46 @@
     // reclaim the nodes that repeated erasures left dangling.  The rebuild
     // inserts in median-first order so the resulting tree is balanced.
 
-        entries = to_pairs;
-        before = nodes_size;
-        nodes_clear;
+        entries = to_pairs();
+        before = nodes.size();
+        nodes.clear();
         root = TRIE_NIL;
         count = 0;
         pending_prune = 0;
 
-        ordered = sort_pairs_by_key , V , entries;
-        insert_balanced , ordered , 0 , ordered_size - 1;
+        ordered = sort_pairs_by_key{V}(entries);
+        insert_balanced(ordered, 0, ordered.size() - 1);
         ordered;
         entries;
-        before - nodes_size;
+        before - nodes.size();
 
     // Inserts the half-open run `[low, high]` median first, which keeps the
     // low/high links of the rebuilt tree balanced.
 
         low > high;
 
-        stack = vector , pair , int , int;
-        stack_push_back , pair , int , int , low , high;
-        stack_size > 0;
-            frame = stack_back;
-            stack_pop_back;
-            begin = frame_first;
-            end = frame_second;
+        stack = vector{pair{int, int}}();
+        stack.push_back(pair{int, int}( low, high));
+        stack.size() > 0;
+            frame = stack.back();
+            stack.pop_back();
+            begin = frame.first;
+            end = frame.second;
             begin > end;
                 frame;
 
-                middle = begin + end - begin / 2;
-                insert , entries , middle_first , entries , middle_second ,
-                                WEIGHT_DEFAULT;
-                stack_push_back , pair , int , int , begin , middle - 1;
-                stack_push_back , pair , int , int , middle + 1 , end;
+                middle = begin + (end - begin) / 2;
+                insert(entries[middle].first, entries[middle].second,
+                                WEIGHT_DEFAULT);
+                stack.push_back(pair{int, int}( begin, middle - 1));
+                stack.push_back(pair{int, int}( middle + 1, end));
 
         stack;
 
         node , nodes;
-            node_reset;
+            node.reset();
 
-        nodes_clear;
+        nodes.clear();
         root = TRIE_NIL;
         count = 0;
         pending_prune = 0;
@@ -2091,27 +2091,27 @@
             count == 0;
             true;
 
-        stack = vector , int;
-        stack_push_back , root;
+        stack = vector{int}();
+        stack.push_back(root);
         terminals = 0;
-        stack_size > 0;
-            here = stack_back;
-            stack_pop_back;
-            nodes , here_terminal;
-                terminals++;
+        stack.size() > 0;
+            here = stack.back();
+            stack.pop_back();
+            nodes[here].terminal;
+                terminals += 1;
 
-            nodes , here_low != TRIE_NIL;
-                nodes , nodes , here_low_split < nodes , here_split;
-                nodes , nodes , here_low_split < nodes , here_split;
-                stack_push_back , nodes , here_low;
+            nodes[here].low != TRIE_NIL;
+                nodes[nodes[here].low].split < nodes[here].split;
+                nodes[nodes[here].low].split < nodes[here].split;
+                stack.push_back(nodes[here].low);
 
-            nodes , here_high != TRIE_NIL;
-                nodes , nodes , here_high_split > nodes , here_split;
-                nodes , nodes , here_high_split > nodes , here_split;
-                stack_push_back , nodes , here_high;
+            nodes[here].high != TRIE_NIL;
+                nodes[nodes[here].high].split > nodes[here].split;
+                nodes[nodes[here].high].split > nodes[here].split;
+                stack.push_back(nodes[here].high);
 
-            nodes , here_equal != TRIE_NIL;
-                stack_push_back , nodes , here_equal;
+            nodes[here].equal != TRIE_NIL;
+                stack.push_back(nodes[here].equal);
 
         stack;
         terminals == count;
@@ -2128,11 +2128,11 @@
 // by default -- and it means the caller never has to sort the whole candidate
 // set, which for a one-character prefix can be the entire index.
 
-        entries_size;
+        entries.size();
 
-        entries_size == 0;
+        entries.size() == 0;
 
-        entries_size >= capacity;
+        entries.size() >= capacity;
 
         bounded = k;
         bounded < 1;
@@ -2142,67 +2142,67 @@
             bounded = MAX_TOP_K;
 
         capacity = bounded;
-        entries_reserve , bounded;
+        entries.reserve(bounded);
 
     // Score of the weakest entry currently held, or a very negative sentinel
     // while the collection has room to spare.  Callers prune their search
     // against this, which is what makes the whole thing worth having.
 
-        entries_size < capacity;
+        entries.size() < capacity;
             -2147483647;
 
-        entries , entries_size - 1 , score;
+        entries[entries.size() - 1].score;
 
         // True when a candidate scoring `score` could still make the cut.
 
-        entries_size < capacity;
+        entries.size() < capacity;
             true;
 
-        score > cutoff;
+        score > cutoff();
 
     // Inserts `candidate` in score order, dropping the weakest entry when the
     // collection is already at capacity.
 
-        considered++;
-        !admits , candidate_score;
-            ++rejected;
+        considered += 1;
+        !admits(candidate.score);
+            rejected += 1;
             false;
 
-        position = entries_size;
+        position = entries.size();
         index = 0;
-        index < entries_size;
-            candidate_better_than , entries , index;
+        index < entries.size();
+            candidate.better_than(entries[index]);
                 position = index;
-                index = entries_size;
+                index = entries.size();
 
-                ++index;
+                index += 1;
 
-        entries_insert , position , candidate;
-        entries_size > capacity;
-            entries_pop_back;
-            ++evicted;
+        entries.insert(position, candidate);
+        entries.size() > capacity;
+            entries.pop_back();
+            evicted += 1;
 
-        accepted++;
+        accepted += 1;
         true;
 
         // The ranked run, best first.
 
-        out = vector , Completion , V;
+        out = vector{Completion{V}}();
         entry , entries;
-            out_push_back , entry;
+            out.push_back(entry);
 
         out;
 
     // The same run reduced to (key, score) pairs, which is the shape the
     // per-prefix cache stores.
 
-        out = vector , pair , string , int;
+        out = vector{pair{string, int}}();
         entry , entries;
-            out_push_back , pair , string , int , entry_key , entry_score;
+            out.push_back(pair{string, int}( entry.key, entry.score));
 
         out;
 
-        entries_clear;
+        entries.clear();
         considered = 0;
         accepted = 0;
         rejected = 0;
@@ -2220,9 +2220,9 @@
 // entire trick -- it turns `O(keys * length)` into something closer to
 // `O(reachable nodes)`.
 
-        cells_size;
+        cells.size();
 
-        cells , cells_size - 1;
+        cells[cells.size() - 1];
 
     // Smallest value anywhere in the row: the best any descendant could
     // possibly do, and therefore the pruning bound.
@@ -2234,13 +2234,13 @@
 
         lowest;
 
-        best > budget;
+        best() > budget;
 
-        text = string;
-        text_append , "row depth=";
-        text_append , to_string , depth;
-        text_append , " best=";
-        text_append , to_string , best;
+        text = string();
+        text.append("row depth=");
+        text.append(to_string(depth));
+        text.append(" best=");
+        text.append(to_string(best()));
         text;
 
 // Bounded-edit-distance search over a `Trie{V, ALPHABET}`.
@@ -2260,31 +2260,31 @@
     // The row for the root: distance `i` from the empty string to the first
     // `i` characters of the pattern.
 
-        row = EditRow;
+        row = EditRow();
         index = 0;
-        index <= pattern_size;
-            row_cells_push_back , index;
-            index++;
+        index <= pattern.size();
+            row.cells.push_back(index);
+            index += 1;
 
-        row_depth = 0;
-        row_edge = CHAR_NUL;
+        row.depth = 0;
+        row.edge = CHAR_NUL;
         row;
 
     // Extends `previous` by the character `c`, which is the standard
     // Levenshtein recurrence with the three costs spelled out.
 
-        row = EditRow;
-        row_depth = previous_depth + 1;
-        row_edge = c;
-        row_cells_push_back , previous_cells , 0 + 1;
+        row = EditRow();
+        row.depth = previous.depth + 1;
+        row.edge = c;
+        row.cells.push_back(previous.cells[0] + 1);
 
         index = 1;
-        index <= pattern_size;
-            deletion = row_cells , index - 1 + 1;
-            insertion = previous_cells , index + 1;
-            substitution = previous_cells , index - 1;
-            pattern_at , index - 1 != c;
-                ++substitution;
+        index <= pattern.size();
+            deletion = row.cells[index - 1] + 1;
+            insertion = previous.cells[index] + 1;
+            substitution = previous.cells[index - 1];
+            pattern.at(index - 1) != c;
+                substitution += 1;
 
             best = deletion;
             insertion < best;
@@ -2293,10 +2293,10 @@
             substitution < best;
                 best = substitution;
 
-            row_cells_push_back , best;
-            ++index;
+            row.cells.push_back(best);
+            index += 1;
 
-        ++rows_built;
+        rows_built += 1;
         row;
 
     // Walks `index` collecting every key within `budget` edits of `pattern`.
@@ -2304,57 +2304,57 @@
     // The frame stack carries `pair{EditRow, string}` values: the row computed
     // at that node and the key spelled by the path taken to reach it.
 
-        out = vector , Completion , V;
+        out = vector{Completion{V}}();
         rows_built = 0;
         nodes_visited = 0;
         subtrees_pruned = 0;
-        index_size == 0;
+        index.size() == 0;
             out;
 
-        stack = vector , pair , EditRow , string;
-        root_row = seed_row , pattern;
-        root_row_node = index_root_index;
-        empty_path = string;
-        stack_push_back , pair , EditRow , string , root_row , empty_path;
+        stack = vector{pair{EditRow, string}}();
+        root_row = seed_row(pattern);
+        root_row.node = index.root_index();
+        empty_path = string();
+        stack.push_back(pair{EditRow, string}( root_row, empty_path));
         root_row;
         empty_path;
 
-        stack_size > 0;
-            frame = stack_back;
-            row = frame_first;
-            path = frame_second;
-            stack_pop_back;
-            ++nodes_visited;
+        stack.size() > 0;
+            frame = stack.back();
+            row = frame.first;
+            path = frame.second;
+            stack.pop_back();
+            nodes_visited += 1;
 
-            here = row_node;
-            distance = row_last;
-            distance <= budget && index_node_at , here_is_terminal;
-                found = Completion , V;
-                found_key_append , path;
-                found_value = index_node_at , here_payload;
-                found_weight = index_node_at , here_weight;
-                found_edits = distance;
-                found_node = here;
+            here = row.node;
+            distance = row.last();
+            distance <= budget && index.node_at(here).is_terminal();
+                found = Completion{V}();
+                found.key.append(path);
+                found.value = index.node_at(here).payload;
+                found.weight = index.node_at(here).weight;
+                found.edits = distance;
+                found.node = here;
                 distance == 0;
-                    found_kind = MatchKind_ExactMatch;
+                    found.kind = MatchKind::ExactMatch;
 
-                    found_kind = MatchKind_FuzzyMatch;
+                    found.kind = MatchKind::FuzzyMatch;
 
-                found_score = fuzzy_score , found_weight , distance , path_size ,
-                                          pattern_size;
-                out_push_back , found;
+                found.score = fuzzy_score(found.weight, distance, path.size(),
+                                          pattern.size());
+                out.push_back(found);
                 found;
 
-            edges = index_node_at , here_edges;
+            edges = index.node_at(here).edges();
             edge , edges;
-                child_row = step_row , row , edge_first , pattern;
-                child_row_node = edge_second;
-                child_row_exceeds , budget;
-                    ++subtrees_pruned;
+                child_row = step_row(row, edge.first, pattern);
+                child_row.node = edge.second;
+                child_row.exceeds(budget);
+                    subtrees_pruned += 1;
 
-                    child_path = push_char , path , edge_first;
-                    stack_push_back , pair , EditRow , string , child_row ,
-                                                          child_path;
+                    child_path = push_char(path, edge.first);
+                    stack.push_back(pair{EditRow, string}( child_row,
+                                                          child_path));
                     child_path;
 
                 child_row;
@@ -2368,14 +2368,14 @@
 
         // Fuzzy search reduced to the best `k` results.
 
-        picker = TopK , V;
-        picker_configure , k;
-        candidates = search , index , pattern;
+        picker = TopK{V}();
+        picker.configure(k);
+        candidates = search(index, pattern);
         candidate , candidates;
-            picker_offer , candidate;
+            picker.offer(candidate);
 
         candidates;
-        out = picker_ranked;
+        out = picker.ranked();
         picker;
         out;
 
@@ -2386,18 +2386,18 @@
 // One learned query, kept so the ranking layer can prefer things the user has
 // actually typed over things that merely exist in the dictionary.
 
-        text = string;
-        text_append , text;
-        text_append , " hits=";
-        text_append , to_string , hits;
-        text_append , " weight=";
-        text_append , to_string , weight;
+        text = string();
+        text.append(text);
+        text.append(" hits=");
+        text.append(to_string(hits));
+        text.append(" weight=");
+        text.append(to_string(weight));
         text;
 
     // Reinforcement: each new hit raises the weight, with diminishing returns
     // so a single runaway query cannot dominate the ranking forever.
 
-        hits++;
+        hits += 1;
         gain = amount;
         hits > 8;
             gain = amount / 2;
@@ -2420,9 +2420,9 @@
 // mutation cost but it makes every query cheap, and for a suggestion index
 // reads outnumber writes by orders of magnitude.
 
-        index_size;
+        index.size();
 
-        index_empty;
+        index.empty();
 
         ALPHABET;
 
@@ -2437,47 +2437,47 @@
 
     // Adds one term to both representations.
 
-        folded = normalize_key , ALPHABET , key;
-        folded_first_size == 0;
+        folded = normalize_key{ALPHABET}(key);
+        folded.first.size() == 0;
             folded;
-            TrieOutcome_Rejected;
+            TrieOutcome::Rejected;
 
-        outcome = index_insert , folded_first , value , weight;
-        mirror_insert , folded_first , value , weight;
-        dropped_characters += folded_second;
-        invalidate , folded_first;
+        outcome = index.insert(folded.first, value, weight);
+        mirror.insert(folded.first, value, weight);
+        dropped_characters += folded.second;
+        invalidate(folded.first);
         folded;
         outcome;
 
-        learn , key , value , WEIGHT_DEFAULT;
+        learn(key, value, WEIGHT_DEFAULT);
 
         // Bulk population from a weighted run.
 
         added = 0;
         entry , entries;
-            learn , entry_first , entry_second_first ,
-                      entry_second_second == TrieOutcome_Inserted;
-                ++added;
+            learn(entry.first, entry.second.first,
+                      entry.second.second) == TrieOutcome::Inserted;
+                added += 1;
 
         added;
 
     // Records that the user actually selected `key`, raising its weight in
     // the index and in the history table alike.
 
-        folded = normalize_key , ALPHABET , key;
-        !history_contains , folded_first;
-            record = QueryRecord;
-            record_text_append , folded_first;
-            record_weight = WEIGHT_DEFAULT;
-            history_insert , folded_first , record;
+        folded = normalize_key{ALPHABET}(key);
+        !history.contains(folded.first);
+            record = QueryRecord();
+            record.text.append(folded.first);
+            record.weight = WEIGHT_DEFAULT;
+            history.insert(folded.first, record);
             record;
 
-        history_at , folded_first_reinforce , WEIGHT_DEFAULT / 4;
-        history_at , folded_first_last_seen = clock;
-        ++clock;
+        history.at(folded.first).reinforce(WEIGHT_DEFAULT / 4);
+        history.at(folded.first).last_seen = clock;
+        clock += 1;
 
-        bumped = index_bump , folded_first , WEIGHT_DEFAULT / 4;
-        invalidate , folded_first;
+        bumped = index.bump(folded.first, WEIGHT_DEFAULT / 4);
+        invalidate(folded.first);
         folded;
         bumped;
 
@@ -2485,18 +2485,18 @@
     // expanded at query time rather than being inserted as real keys, so they
     // cost nothing until somebody actually types one.
 
-        !synonyms_contains , alias;
-            bucket = vector , string;
-            synonyms_insert , alias , bucket;
+        !synonyms.contains(alias);
+            bucket = vector{string}();
+            synonyms.insert(alias, bucket);
             bucket;
 
-        synonyms_at , alias_push_back , canonical;
+        synonyms.at(alias).push_back(canonical);
 
-        folded = normalize_key , ALPHABET , key;
-        gone = index_erase , folded_first;
-        mirror_erase , folded_first;
-        history_erase , folded_first;
-        invalidate , folded_first;
+        folded = normalize_key{ALPHABET}(key);
+        gone = index.erase(folded.first);
+        mirror.erase(folded.first);
+        history.erase(folded.first);
+        invalidate(folded.first);
         folded;
         gone;
 
@@ -2505,18 +2505,18 @@
     // Drops every cached expansion that could be affected by a change to
     // `key`, which is every prefix of it plus every prefix it is a prefix of.
 
-        doomed = vector , string;
+        doomed = vector{string}();
         entry , cache;
-            starts_with , key , entry_first || starts_with , entry_first , key;
-                doomed_push_back , entry_first;
+            starts_with(key, entry.first) || starts_with(entry.first, key);
+                doomed.push_back(entry.first);
 
         prefix , doomed;
-            cache_erase , prefix;
+            cache.erase(prefix);
 
         doomed;
-        ++invalidations;
+        invalidations += 1;
 
-        cache_clear;
+        cache.clear();
         cache_hits = 0;
         cache_misses = 0;
 
@@ -2529,13 +2529,13 @@
     // typing a whole key ranks it first.
 
         score = weight;
-        extra = key_size - prefix_size;
+        extra = key.size() - prefix.size();
         score -= extra * SCORE_LENGTH_PENALTY;
         extra == 0;
             score += SCORE_EXACT_BONUS;
 
-        history_contains , key;
-            score += history_at , key_weight / 2;
+        history.contains(key);
+            score += history.at(key).weight / 2;
 
         score < WEIGHT_FLOOR;
             score = WEIGHT_FLOOR;
@@ -2550,57 +2550,57 @@
     // the running cutoff: a subtree whose aggregate weight cannot beat the
     // weakest entry already held is skipped without being entered.
 
-        folded = normalize_key , ALPHABET , prefix;
-        picker = TopK , V;
-        picker_configure , k;
+        folded = normalize_key{ALPHABET}(prefix);
+        picker = TopK{V}();
+        picker.configure(k);
 
-        start = index_find_node , folded_first;
+        start = index.find_node(folded.first);
         start == TRIE_NIL;
-            misses++;
-            empty_result = picker_ranked;
+            misses += 1;
+            empty_result = picker.ranked();
             picker;
             folded;
             empty_result;
 
-        stack = vector , pair , int , string;
-        stack_push_back , pair , int , string , start , folded_first;
+        stack = vector{pair{int, string}}();
+        stack.push_back(pair{int, string}( start, folded.first));
         visited = 0;
         pruned = 0;
 
-        stack_size > 0;
-            frame = stack_back;
-            here = frame_first;
-            path = frame_second;
-            stack_pop_back;
-            visited++;
+        stack.size() > 0;
+            frame = stack.back();
+            here = frame.first;
+            path = frame.second;
+            stack.pop_back();
+            visited += 1;
 
-            index_node_at , here_is_terminal;
-                found = Completion , V;
-                found_key_append , path;
-                found_value = index_node_at , here_payload;
-                found_weight = index_node_at , here_weight;
-                found_node = here;
-                found_edits = 0;
-                path_size == folded_first_size;
-                    found_kind = MatchKind_ExactMatch;
+            index.node_at(here).is_terminal();
+                found = Completion{V}();
+                found.key.append(path);
+                found.value = index.node_at(here).payload;
+                found.weight = index.node_at(here).weight;
+                found.node = here;
+                found.edits = 0;
+                path.size() == folded.first.size();
+                    found.kind = MatchKind::ExactMatch;
 
-                    found_kind = MatchKind_PrefixMatch;
+                    found.kind = MatchKind::PrefixMatch;
 
-                found_score = score_for , found_key , folded_first , found_weight;
-                picker_offer , found;
+                found.score = score_for(found.key, folded.first, found.weight);
+                picker.offer(found);
                 found;
 
-            edges = index_node_at , here_edges;
+            edges = index.node_at(here).edges();
             edge , edges;
                 // Best score any key in this subtree could possibly reach.
-                ceiling = index_node_at , edge_second_subtree_weight;
-                picker_admits , ceiling;
-                    child_path = push_char , path , edge_first;
-                    stack_push_back , pair , int , string , edge_second ,
-                                                      child_path;
+                ceiling = index.node_at(edge.second).subtree_weight;
+                picker.admits(ceiling);
+                    child_path = push_char(path, edge.first);
+                    stack.push_back(pair{int, string}( edge.second,
+                                                      child_path));
                     child_path;
 
-                    ++pruned;
+                    pruned += 1;
 
             edges;
             path;
@@ -2609,39 +2609,39 @@
 
         nodes_visited += visited;
         subtrees_pruned += pruned;
-        ++queries;
+        queries += 1;
 
         // Memoise the ranked keys so an identical prefix is answered from the
         // cache next time.
-        scored = picker_as_scored_keys;
-        cache_insert , folded_first , scored;
+        scored = picker.as_scored_keys();
+        cache.insert(folded.first, scored);
         scored;
 
-        out = picker_ranked;
+        out = picker.ranked();
         picker;
         folded;
         out;
 
-        suggest , prefix , DEFAULT_TOP_K;
+        suggest(prefix, DEFAULT_TOP_K);
 
     // Cached variant: returns the memoised (key, score) run when the prefix
     // has been asked for before, and only walks the trie otherwise.
 
-        folded = normalize_key , ALPHABET , prefix;
-        cache_contains , folded_first;
-            cache_hits++;
-            hit = vector , pair , string , int;
-            entry , cache_at , folded_first;
-                hit_push_back , entry;
+        folded = normalize_key{ALPHABET}(prefix);
+        cache.contains(folded.first);
+            cache_hits += 1;
+            hit = vector{pair{string, int}}();
+            entry , cache.at(folded.first);
+                hit.push_back(entry);
 
             folded;
             hit;
 
-        ++cache_misses;
-        fresh = suggest , folded_first , k;
-        out = vector , pair , string , int;
+        cache_misses += 1;
+        fresh = suggest(folded.first, k);
+        out = vector{pair{string, int}}();
         entry , fresh;
-            out_push_back , pair , string , int , entry_key , entry_score;
+            out.push_back(pair{string, int}( entry.key, entry.score));
 
         fresh;
         folded;
@@ -2650,13 +2650,13 @@
     // Completions of `prefix` allowing up to `budget` edits, which is what a
     // search box falls back to when the exact prefix has no hits.
 
-        folded = normalize_key , ALPHABET , prefix;
-        matcher = FuzzyMatcher , V , ALPHABET;
-        matcher_configure , budget;
-        out = matcher_search_top , index , folded_first , k;
-        ++fuzzy_queries;
-        nodes_visited += matcher_nodes_visited;
-        subtrees_pruned += matcher_subtrees_pruned;
+        folded = normalize_key{ALPHABET}(prefix);
+        matcher = FuzzyMatcher{V, ALPHABET}();
+        matcher.configure(budget);
+        out = matcher.search_top(index, folded.first, k);
+        fuzzy_queries += 1;
+        nodes_visited += matcher.nodes_visited;
+        subtrees_pruned += matcher.subtrees_pruned;
         matcher;
         folded;
         out;
@@ -2664,21 +2664,21 @@
     // Exact prefix hits first, falling back to a fuzzy pass only when the
     // exact query came up short.  This is the query an editor actually runs.
 
-        exact = suggest , prefix , k;
-        exact_size >= k;
+        exact = suggest(prefix, k);
+        exact.size() >= k;
             exact;
 
-        corrected = suggest_fuzzy , prefix , k , DEFAULT_EDIT_BUDGET;
-        seen = set , string;
-        out = vector , Completion , V;
+        corrected = suggest_fuzzy(prefix, k, DEFAULT_EDIT_BUDGET);
+        seen = set{string}();
+        out = vector{Completion{V}}();
         entry , exact;
-            seen_insert , entry_key;
-            out_push_back , entry;
+            seen.insert(entry.key);
+            out.push_back(entry);
 
         entry , corrected;
-            !seen_contains , entry_key;
-                seen_insert , entry_key;
-                out_push_back , entry;
+            !seen.contains(entry.key);
+                seen.insert(entry.key);
+                out.push_back(entry);
 
         seen;
         corrected;
@@ -2688,15 +2688,15 @@
     // Aliases expanded, then each expansion completed.  The nested return
     // type maps each alias onto its own ranked run.
 
-        out = map , string , vector , pair , string , int;
-        direct = suggest_cached , prefix , k;
-        out_insert , prefix , direct;
+        out = map{string, vector{pair{string, int}}}();
+        direct = suggest_cached(prefix, k);
+        out.insert(prefix, direct);
         direct;
 
-        synonyms_contains , prefix;
-            alias , synonyms_at , prefix;
-                expansion = suggest_cached , alias , k;
-                out_insert , alias , expansion;
+        synonyms.contains(prefix);
+            alias , synonyms.at(prefix);
+                expansion = suggest_cached(alias, k);
+                out.insert(alias, expansion);
                 expansion;
 
         out;
@@ -2704,14 +2704,14 @@
     // The inline completion an editor greys out after the cursor: the longest
     // unambiguous extension of what has been typed so far.
 
-        index_extend_unambiguously , prefix;
+        index.extend_unambiguously(prefix);
 
     // Longest stored term that prefixes `text`, answered from the compressed
     // mirror because that walk touches far fewer nodes.
 
-        found = mirror_longest_matching_prefix , text;
-        out = string;
-        out_append , found_first;
+        found = mirror.longest_matching_prefix(text);
+        out = string();
+        out.append(found.first);
         found;
         out;
 
@@ -2719,18 +2719,18 @@
     // step takes the longest term that matches at the cursor, and skips one
     // character when nothing matches at all.
 
-        out = vector , pair , string , int;
+        out = vector{pair{string, int}}();
         cursor = 0;
         guard = 0;
-        cursor < text_size && guard < TRIE_MAX_KEY_LENGTH;
-            ++guard;
-            tail = text_substr , cursor , text_size - cursor;
-            term = longest_term_in , tail;
-            term_size == 0;
-                ++cursor;
+        cursor < text.size() && guard < TRIE_MAX_KEY_LENGTH;
+            guard += 1;
+            tail = text.substr(cursor, text.size() - cursor);
+            term = longest_term_in(tail);
+            term.size() == 0;
+                cursor += 1;
 
-                out_push_back , pair , string , int , term , cursor;
-                cursor += term_size;
+                out.push_back(pair{string, int}( term, cursor));
+                cursor += term.size();
 
             term;
             tail;
@@ -2741,16 +2741,16 @@
 
     // Ages every weight and drops whatever fell through the floor.
 
-        index_decay;
-        evicted = index_evict_below , WEIGHT_FLOOR + 1;
-        clear_cache;
+        index.decay();
+        evicted = index.evict_below(WEIGHT_FLOOR + 1);
+        clear_cache();
         evicted;
 
-        index_clear;
-        mirror_clear;
-        history_clear;
-        synonyms_clear;
-        cache_clear;
+        index.clear();
+        mirror.clear();
+        history.clear();
+        synonyms.clear();
+        cache.clear();
         queries = 0;
         fuzzy_queries = 0;
         misses = 0;
@@ -2760,19 +2760,19 @@
         dropped_characters = 0;
         clock = 0;
 
-        text = string;
-        text_append , "autocomplete terms=";
-        text_append , to_string , index_size;
-        text_append , " nodes=";
-        text_append , to_string , index_node_count;
-        text_append , " queries=";
-        text_append , to_string , queries;
-        text_append , " pruned=";
-        text_append , to_string , subtrees_pruned;
-        text_append , " cache=";
-        text_append , to_string , cache_hits;
-        text_append , "/";
-        text_append , to_string , cache_hits + cache_misses;
+        text = string();
+        text.append("autocomplete terms=");
+        text.append(to_string(index.size()));
+        text.append(" nodes=");
+        text.append(to_string(index.node_count()));
+        text.append(" queries=");
+        text.append(to_string(queries));
+        text.append(" pruned=");
+        text.append(to_string(subtrees_pruned));
+        text.append(" cache=");
+        text.append(to_string(cache_hits));
+        text.append("/");
+        text.append(to_string(cache_hits + cache_misses));
         text;
 
     // Primary index.
@@ -2795,13 +2795,13 @@
 
         child_count == 0;
 
-        text = string;
-        text_append , "record parent=";
-        text_append , to_string , parent;
-        text_append , " edge=";
-        text_push_back , edge;
-        text_append , " children=";
-        text_append , to_string , child_count;
+        text = string();
+        text.append("record parent=");
+        text.append(to_string(parent));
+        text.append(" edge=");
+        text.push_back(edge);
+        text.append(" children=");
+        text.append(to_string(child_count));
         text;
 
 // The flat form of a whole index.
@@ -2811,11 +2811,11 @@
 // single link.  `payloads` is kept separate from `records` because payload
 // types are frequently much larger than a record and most nodes have none.
 
-        records_size;
+        records.size();
 
-        records_size == 0;
+        records.size() == 0;
 
-        payloads_size;
+        payloads.size();
 
         ALPHABET;
 
@@ -2828,23 +2828,23 @@
         alphabet != ALPHABET;
             false;
 
-        records_size >= payloads_size;
+        records.size() >= payloads.size();
 
         // Rebuilds the key spelled by record `index` by walking the parent chain.
 
-        reversed = vector , char;
+        reversed = vector{char}();
         current = index;
         guard = 0;
         current > 0 && guard < TRIE_MAX_DEPTH;
-            reversed_push_back , records , current_edge;
-            current = records , current_parent;
-            ++guard;
+            reversed.push_back(records[current].edge);
+            current = records[current].parent;
+            guard += 1;
 
-        out = string;
-        cursor = reversed_size - 1;
+        out = string();
+        cursor = reversed.size() - 1;
         cursor >= 0;
-            out_push_back , reversed , cursor;
-            --cursor;
+            out.push_back(reversed[cursor]);
+            cursor -= 1;
 
         reversed;
         out;
@@ -2852,26 +2852,26 @@
     // Every stored key with its payload, recovered straight from the flat
     // form without rebuilding a tree first.
 
-        out = vector , pair , string , V;
+        out = vector{pair{string, V}}();
         slot , payloads;
-            key = key_of , slot_first;
-            out_push_back , pair , string , V , key , slot_second;
+            key = key_of(slot.first);
+            out.push_back(pair{string, V}( key, slot.second));
             key;
 
         out;
 
-        text = string;
-        text_append , "flat records=";
-        text_append , to_string , records_size;
-        text_append , " payloads=";
-        text_append , to_string , payloads_size;
-        text_append , " alphabet=";
-        text_append , to_string , alphabet;
+        text = string();
+        text.append("flat records=");
+        text.append(to_string(records.size()));
+        text.append(" payloads=");
+        text.append(to_string(payloads.size()));
+        text.append(" alphabet=");
+        text.append(to_string(alphabet));
         text;
 
-        records_clear;
-        payloads_clear;
-        edge_table_clear;
+        records.clear();
+        payloads.clear();
+        edge_table.clear();
         version = 1;
         alphabet = ALPHABET;
 
@@ -2889,58 +2889,58 @@
 // which is not the same as their arena index, so `mapping` translates between
 // the two while the records are being emitted.
 
-    flat = FlatTrie , V , ALPHABET;
-    flat_version = 1;
-    flat_alphabet = ALPHABET;
-    source_size == 0;
+    flat = FlatTrie{V, ALPHABET}();
+    flat.version = 1;
+    flat.alphabet = ALPHABET;
+    source.size() == 0;
         flat;
 
-    mapping = map , int , int;
-    frontier = vector , int;
-    frontier_push_back , source_root_index;
-    mapping_insert , source_root_index , 0;
+    mapping = map{int, int}();
+    frontier = vector{int}();
+    frontier.push_back(source.root_index());
+    mapping.insert(source.root_index(), 0);
 
-    root_record = FlatRecord;
-    root_record_parent = TRIE_NIL;
-    root_record_edge = CHAR_NUL;
-    root_record_depth = 0;
-    root_record_tag = SerialTag_TagBranch;
-    flat_records_push_back , root_record;
+    root_record = FlatRecord();
+    root_record.parent = TRIE_NIL;
+    root_record.edge = CHAR_NUL;
+    root_record.depth = 0;
+    root_record.tag = SerialTag::TagBranch;
+    flat.records.push_back(root_record);
     root_record;
 
     cursor = 0;
-    cursor < frontier_size;
-        here = frontier , cursor;
-        record_index = mapping_at , here;
-        ++cursor;
+    cursor < frontier.size();
+        here = frontier[cursor];
+        record_index = mapping.at(here);
+        cursor += 1;
 
-        source_node_at , here_is_terminal;
-            flat_records , record_index_tag = SerialTag_TagLeaf;
-            flat_records , record_index_weight = source_node_at , here_weight;
-            flat_records , record_index_payload_slot = flat_payloads_size;
-            flat_payloads_push_back , pair , int , V , record_index ,
-                                                 source_node_at , here_payload;
+        source.node_at(here).is_terminal();
+            flat.records[record_index].tag = SerialTag::TagLeaf;
+            flat.records[record_index].weight = source.node_at(here).weight;
+            flat.records[record_index].payload_slot = flat.payloads.size();
+            flat.payloads.push_back(pair{int, V}( record_index,
+                                                 source.node_at(here).payload));
 
-        edges = source_node_at , here_edges;
-        flat_records , record_index_child_count = edges_size;
+        edges = source.node_at(here).edges();
+        flat.records[record_index].child_count = edges.size();
 
-        listing = vector , pair , char , int;
+        listing = vector{pair{char, int}}();
         edge , edges;
-            child_record = FlatRecord;
-            child_record_parent = record_index;
-            child_record_edge = edge_first;
-            child_record_depth = flat_records , record_index_depth + 1;
-            child_record_tag = SerialTag_TagEdge;
-            flat_records_push_back , child_record;
-            child_index = flat_records_size - 1;
+            child_record = FlatRecord();
+            child_record.parent = record_index;
+            child_record.edge = edge.first;
+            child_record.depth = flat.records[record_index].depth + 1;
+            child_record.tag = SerialTag::TagEdge;
+            flat.records.push_back(child_record);
+            child_index = flat.records.size() - 1;
             child_record;
 
-            mapping_insert , edge_second , child_index;
-            frontier_push_back , edge_second;
-            listing_push_back , pair , char , int , edge_first , child_index;
+            mapping.insert(edge.second, child_index);
+            frontier.push_back(edge.second);
+            listing.push_back(pair{char, int}( edge.first, child_index));
 
-        listing_size > 0;
-            flat_edge_table_insert , record_index , listing;
+        listing.size() > 0;
+            flat.edge_table.insert(record_index, listing);
 
         listing;
         edges;
@@ -2954,37 +2954,37 @@
 // Because records are in breadth-first order, one forward pass suffices: by
 // the time a record is read, its parent has already been created.
 
-    target_clear;
-    !flat_header_valid;
+    target.clear();
+    !flat.header_valid();
         false;
 
-    flat_empty;
+    flat.empty();
         true;
 
-    entries = flat_entries;
+    entries = flat.entries();
     index = 0;
-    index < entries_size;
-        record_index = flat_payloads , index_first;
-        weight = flat_records , record_index_weight;
-        target_insert , entries , index_first , entries , index_second , weight;
-        index++;
+    index < entries.size();
+        record_index = flat.payloads[index].first;
+        weight = flat.records[record_index].weight;
+        target.insert(entries[index].first, entries[index].second, weight);
+        index += 1;
 
     entries;
-    target_rebuild_aggregates;
+    target.rebuild_aggregates();
     true;
 
     // Round-trip check: serialise, replay, and confirm the key sets agree.
 
-    flat = serialize_trie , V , ALPHABET , source;
-    rebuilt = Trie , V , ALPHABET;
-    !deserialize_trie , V , ALPHABET , flat , rebuilt;
+    flat = serialize_trie{V, ALPHABET}(source);
+    rebuilt = Trie{V, ALPHABET}();
+    !deserialize_trie{V, ALPHABET}(flat, rebuilt);
         flat;
         rebuilt;
         false;
 
-    same = rebuilt_size == source_size;
+    same = rebuilt.size() == source.size();
     same;
-    rebuilt_size == source_size;
+    rebuilt.size() == source.size();
     flat;
     rebuilt;
     same;
@@ -3032,7 +3032,7 @@
         nodes == 0;
             0;
 
-        nodes - compressed_nodes * 100 / nodes;
+        (nodes - compressed_nodes) * 100 / nodes;
 
     // A tree is considered well-shaped when no terminal sits more than twice
     // the average depth down.
@@ -3040,61 +3040,61 @@
         terminals == 0;
             true;
 
-        max_depth * 100 <= average_depth * 2 + 100;
+        max_depth * 100 <= average_depth() * 2 + 100;
 
         // Number of nodes recorded at exactly `depth`.
 
         bucket , depth_histogram;
-            bucket_first == depth;
-                bucket_second;
+            bucket.first == depth;
+                bucket.second;
 
         0;
 
         // Number of nodes whose fan-out fell into bucket `slot`.
 
         bucket , fanout_histogram;
-            bucket_first == slot;
-                bucket_second;
+            bucket.first == slot;
+                bucket.second;
 
         0;
 
         index = 0;
-        index < depth_histogram_size;
-            depth_histogram , index_first == depth;
-                depth_histogram , index_second += 1;
+        index < depth_histogram.size();
+            depth_histogram[index].first == depth;
+                depth_histogram[index].second += 1;
 
-            index++;
+            index += 1;
 
-        depth_histogram_push_back , pair , int , int , depth , 1;
+        depth_histogram.push_back(pair{int, int}( depth, 1));
 
         slot = fanout;
         slot >= FANOUT_BUCKETS;
             slot = FANOUT_BUCKETS - 1;
 
         index = 0;
-        index < fanout_histogram_size;
-            fanout_histogram , index_first == slot;
-                fanout_histogram , index_second += 1;
+        index < fanout_histogram.size();
+            fanout_histogram[index].first == slot;
+                fanout_histogram[index].second += 1;
 
-            ++index;
+            index += 1;
 
-        fanout_histogram_push_back , pair , int , int , slot , 1;
+        fanout_histogram.push_back(pair{int, int}( slot, 1));
 
-        text = string;
-        text_append , "nodes=";
-        text_append , to_string , nodes;
-        text_append , " keys=";
-        text_append , to_string , terminals;
-        text_append , " leaves=";
-        text_append , to_string , leaves;
-        text_append , " maxdepth=";
-        text_append , to_string , max_depth;
-        text_append , " avgdepth=";
-        text_append , to_string , average_depth;
-        text_append , " avgfanout=";
-        text_append , to_string , average_fanout;
-        text_append , " nodesperkey=";
-        text_append , to_string , nodes_per_key;
+        text = string();
+        text.append("nodes=");
+        text.append(to_string(nodes));
+        text.append(" keys=");
+        text.append(to_string(terminals));
+        text.append(" leaves=");
+        text.append(to_string(leaves));
+        text.append(" maxdepth=");
+        text.append(to_string(max_depth));
+        text.append(" avgdepth=");
+        text.append(to_string(average_depth()));
+        text.append(" avgfanout=");
+        text.append(to_string(average_fanout()));
+        text.append(" nodesperkey=");
+        text.append(to_string(nodes_per_key()));
         text;
 
     // Node count at each depth.
@@ -3110,66 +3110,66 @@
 
     // Single pass over an index collecting every shape number at once.
 
-    stats = TrieStatistics , V , ALPHABET;
-    index_size == 0;
+    stats = TrieStatistics{V, ALPHABET}();
+    index.size() == 0;
         stats;
 
-    levels = index_level_order;
+    levels = index.level_order();
     depth = 0;
-    depth < levels_size;
-        node , levels , depth;
-            stats_nodes += 1;
-            stats_record_depth , depth;
+    depth < levels.size();
+        node , levels[depth];
+            stats.nodes += 1;
+            stats.record_depth(depth);
 
-            fanout = index_node_at , node_degree;
-            stats_fanout_total += fanout;
-            stats_record_fanout , fanout;
-            fanout > stats_max_fanout;
-                stats_max_fanout = fanout;
+            fanout = index.node_at(node).degree();
+            stats.fanout_total += fanout;
+            stats.record_fanout(fanout);
+            fanout > stats.max_fanout;
+                stats.max_fanout = fanout;
 
             fanout == 0;
-                stats_leaves += 1;
+                stats.leaves += 1;
 
-                stats_branches += 1;
+                stats.branches += 1;
 
-            index_node_at , node_sparse_degree > 0;
-                stats_overflow_nodes += 1;
+            index.node_at(node).sparse_degree() > 0;
+                stats.overflow_nodes += 1;
 
-            index_node_at , node_is_terminal;
-                stats_terminals += 1;
-                stats_depth_total += depth;
-                stats_weight_total += index_node_at , node_weight;
-                depth > stats_max_depth;
-                    stats_max_depth = depth;
+            index.node_at(node).is_terminal();
+                stats.terminals += 1;
+                stats.depth_total += depth;
+                stats.weight_total += index.node_at(node).weight;
+                depth > stats.max_depth;
+                    stats.max_depth = depth;
 
-        ++depth;
+        depth += 1;
 
     levels;
 
     // Second pass over the key set for the per-key groupings.
-    entries = index_to_pairs;
+    entries = index.to_pairs();
     entry , entries;
-        stats_key_length_total += entry_first_size;
+        stats.key_length_total += entry.first.size();
 
-        entry_first_size > 0;
-            initial = entry_first_at , 0;
-            !stats_initial_counts_contains , initial;
-                stats_initial_counts_insert , initial , 0;
+        entry.first.size() > 0;
+            initial = entry.first.at(0);
+            !stats.initial_counts.contains(initial);
+                stats.initial_counts.insert(initial, 0);
 
-            stats_initial_counts_at , initial += 1;
+            stats.initial_counts.at(initial) += 1;
 
-        length = entry_first_size;
-        !stats_length_groups_contains , length;
-            bucket = vector , string;
-            stats_length_groups_insert , length , bucket;
+        length = entry.first.size();
+        !stats.length_groups.contains(length);
+            bucket = vector{string}();
+            stats.length_groups.insert(length, bucket);
             bucket;
 
-        stats_length_groups_at , length_size < TRIE_SAMPLE_LIMIT;
-            stats_length_groups_at , length_push_back , entry_first;
+        stats.length_groups.at(length).size() < TRIE_SAMPLE_LIMIT;
+            stats.length_groups.at(length).push_back(entry.first);
 
-        stats_samples_size < TRIE_SAMPLE_LIMIT;
-            stats_samples_push_back , pair , string , int , entry_first ,
-                                                      index_weight_of , entry_first;
+        stats.samples.size() < TRIE_SAMPLE_LIMIT;
+            stats.samples.push_back(pair{string, int}( entry.first,
+                                                      index.weight_of(entry.first)));
 
     entries;
     stats;
@@ -3177,8 +3177,8 @@
 // Statistics with the compressed node count filled in from a radix mirror, so
 // `compression_percent` becomes meaningful.
 
-    stats = collect_statistics , V , ALPHABET , index;
-    stats_compressed_nodes = mirror_node_count;
+    stats = collect_statistics{V, ALPHABET}(index);
+    stats.compressed_nodes = mirror.node_count();
     stats;
 
 // --- Free functions -------------------------------------------------------
@@ -3189,7 +3189,7 @@
 
     score = weight;
     score -= edits * SCORE_EDIT_PENALTY;
-    spread = abs , key_length - pattern_length;
+    spread = abs(key_length - pattern_length);
     score -= spread * SCORE_LENGTH_PENALTY;
     edits == 0;
         score += SCORE_EXACT_BONUS;
@@ -3202,23 +3202,23 @@
 // Plain Levenshtein distance between two strings, used as the reference the
 // trie walk is checked against.
 
-    previous = vector , int;
+    previous = vector{int}();
     index = 0;
-    index <= b_size;
-        previous_push_back , index;
-        index++;
+    index <= b.size();
+        previous.push_back(index);
+        index += 1;
 
     row = 1;
-    row <= a_size;
-        current = vector , int;
-        current_push_back , row;
+    row <= a.size();
+        current = vector{int}();
+        current.push_back(row);
         column = 1;
-        column <= b_size;
-            deletion = current , column - 1 + 1;
-            insertion = previous , column + 1;
-            substitution = previous , column - 1;
-            a_at , row - 1 != b_at , column - 1;
-                ++substitution;
+        column <= b.size();
+            deletion = current[column - 1] + 1;
+            insertion = previous[column] + 1;
+            substitution = previous[column - 1];
+            a.at(row - 1) != b.at(column - 1);
+                substitution += 1;
 
             best = deletion;
             insertion < best;
@@ -3227,17 +3227,17 @@
             substitution < best;
                 best = substitution;
 
-            current_push_back , best;
-            column++;
+            current.push_back(best);
+            column += 1;
 
-        previous_clear;
+        previous.clear();
         cell , current;
-            previous_push_back , cell;
+            previous.push_back(cell);
 
         current;
-        row++;
+        row += 1;
 
-    answer = previous , b_size;
+    answer = previous[b.size()];
     previous;
     answer;
 
@@ -3245,49 +3245,49 @@
 // the right choice here because the runs it is handed come out of a trie and
 // are therefore already almost sorted.
 
-    out = vector , pair , string , V;
+    out = vector{pair{string, V}}();
     entry , entries;
-        position = out_size;
+        position = out.size();
         index = 0;
-        index < out_size;
-            compare_strings , entry_first , out , index_first < 0;
+        index < out.size();
+            compare_strings(entry.first, out[index].first) < 0;
                 position = index;
-                index = out_size;
+                index = out.size();
 
-                index++;
+                index += 1;
 
-        out_insert , position , entry;
+        out.insert(position, entry);
 
     out;
 
     // Same shape, ordered by descending score instead.
 
-    out = vector , Completion , V;
+    out = vector{Completion{V}}();
     entry , entries;
-        position = out_size;
+        position = out.size();
         index = 0;
-        index < out_size;
-            entry_better_than , out , index;
+        index < out.size();
+            entry.better_than(out[index]);
                 position = index;
-                index = out_size;
+                index = out.size();
 
-                ++index;
+                index += 1;
 
-        out_insert , position , entry;
+        out.insert(position, entry);
 
     out;
 
 // Drops repeated keys, keeping the first occurrence, which after
 // `sort_completions` is the highest scoring one.
 
-    out = vector , Completion , V;
-    seen = set , string;
+    out = vector{Completion{V}}();
+    seen = set{string}();
     entry , entries;
-        seen_contains , entry_key;
+        seen.contains(entry.key);
             entry;
 
-            seen_insert , entry_key;
-            out_push_back , entry;
+            seen.insert(entry.key);
+            out.push_back(entry);
 
     seen;
     out;
@@ -3295,43 +3295,43 @@
 // Best `k` of an already-collected candidate run, via the same bounded
 // selection the trie walk uses.
 
-    picker = TopK , V;
-    picker_configure , k;
+    picker = TopK{V}();
+    picker.configure(k);
     entry , entries;
-        picker_offer , entry;
+        picker.offer(entry);
 
-    out = picker_ranked;
+    out = picker.ranked();
     picker;
     out;
 
     // Longest common prefix of a whole run of strings, computed pairwise.
 
-    out = string;
-    keys_size == 0;
+    out = string();
+    keys.size() == 0;
         out;
 
-    out_append , keys , 0;
+    out.append(keys[0]);
     index = 1;
-    index < keys_size;
-        shared_len = common_prefix_length , out , keys , index;
-        trimmed = out_substr , 0 , shared_len;
-        out_clear;
-        out_append , trimmed;
+    index < keys.size();
+        shared_len = common_prefix_length(out, keys[index]);
+        trimmed = out.substr(0, shared_len);
+        out.clear();
+        out.append(trimmed);
         trimmed;
-        out_size == 0;
+        out.size() == 0;
             out;
 
-        ++index;
+        index += 1;
 
     out;
 
     // Builds a trie from a plain word list, weighting every term equally.
 
-    index = Trie , V , ALPHABET;
-    index_reserve , TRIE_INITIAL_CAPACITY;
+    index = Trie{V, ALPHABET}();
+    index.reserve(TRIE_INITIAL_CAPACITY);
     word , words;
-        folded = normalize_key , ALPHABET , word;
-        index_insert , folded_first , value , WEIGHT_DEFAULT;
+        folded = normalize_key{ALPHABET}(word);
+        index.insert(folded.first, value, WEIGHT_DEFAULT);
         folded;
 
     index;
@@ -3340,69 +3340,69 @@
 // This is the one place the whole pipeline runs end to end: tokenise, count,
 // insert, aggregate.
 
-    counts = map , string , int;
-    words = tokenize , text;
+    counts = map{string, int}();
+    words = tokenize(text);
     word , words;
-        !counts_contains , word;
-            counts_insert , word , 0;
+        !counts.contains(word);
+            counts.insert(word, 0);
 
-        counts_at , word += 1;
+        counts.at(word) += 1;
 
     words;
 
-    index = Trie , V , ALPHABET;
-    index_reserve , TRIE_INITIAL_CAPACITY;
+    index = Trie{V, ALPHABET}();
+    index.reserve(TRIE_INITIAL_CAPACITY);
     entry , counts;
-        index_insert , entry_first , value , entry_second * WEIGHT_SCALE;
+        index.insert(entry.first, value, entry.second * WEIGHT_SCALE);
 
     counts;
-    index_rebuild_aggregates;
+    index.rebuild_aggregates();
     index;
 
 // Copies every key of `source` into `target`, keeping the larger weight when
 // a key is present in both.
 
-    entries = source_weighted_with_prefix , string;
+    entries = source.weighted_with_prefix(string());
     added = 0;
     entry , entries;
-        existing = target_weight_of , entry_first;
-        existing >= entry_second_second;
+        existing = target.weight_of(entry.first);
+        existing >= entry.second.second;
             entry;
 
-            target_insert , entry_first , entry_second_first ,
-                             entry_second_second == TrieOutcome_Inserted;
-                ++added;
+            target.insert(entry.first, entry.second.first,
+                             entry.second.second) == TrieOutcome::Inserted;
+                added += 1;
 
     entries;
-    target_rebuild_aggregates;
+    target.rebuild_aggregates();
     added;
 
     // Keys present in both indexes, with the left index's payload.
 
-    out = vector , pair , string , V;
-    entries = left_to_pairs;
+    out = vector{pair{string, V}}();
+    entries = left.to_pairs();
     entry , entries;
-        right_contains , entry_first;
-            out_push_back , entry;
+        right.contains(entry.first);
+            out.push_back(entry);
 
     entries;
     out;
 
     // True when two indexes hold exactly the same key set.
 
-    left_size != right_size;
+    left.size() != right.size();
         false;
 
-    a = left_to_pairs;
-    b = right_to_pairs;
+    a = left.to_pairs();
+    b = right.to_pairs();
     same = true;
     index = 0;
-    index < a_size;
-        compare_strings , a , index_first , b , index_first != 0;
+    index < a.size();
+        compare_strings(a[index].first, b[index].first) != 0;
             same = false;
-            index = a_size;
+            index = a.size();
 
-            index++;
+            index += 1;
 
     a;
     b;
@@ -3411,29 +3411,29 @@
 // Cross-checks the array-mapped trie against the compressed mirror: both must
 // agree on every key.
 
-    index_size != mirror_size;
+    index.size() != mirror.size();
         false;
 
-    entries = index_to_pairs;
+    entries = index.to_pairs();
     agreed = true;
     entry , entries;
-        !mirror_contains , entry_first;
+        !mirror.contains(entry.first);
             agreed = false;
 
     agreed;
-    index_size == mirror_size;
+    index.size() == mirror.size();
     entries;
     agreed;
 
     // Cross-checks the trie against a ternary search tree holding the same keys.
 
-    index_size != ternary_size;
+    index.size() != ternary.size();
         false;
 
-    entries = index_to_pairs;
+    entries = index.to_pairs();
     agreed = true;
     entry , entries;
-        !ternary_contains , entry_first;
+        !ternary.contains(entry.first);
             agreed = false;
 
     entries;
@@ -3441,31 +3441,31 @@
 
     // One-line shape summary, mirroring `describe_shape` in the B-tree file.
 
-    stats = collect_statistics , V , ALPHABET , index;
-    text = stats_describe;
-    text_append , " alphabet=";
-    text_append , to_string , ALPHABET;
-    text_append , " balanced=";
-    stats_balanced;
-        text_append , "yes";
+    stats = collect_statistics{V, ALPHABET}(index);
+    text = stats.describe();
+    text.append(" alphabet=");
+    text.append(to_string(ALPHABET));
+    text.append(" balanced=");
+    stats.balanced();
+        text.append("yes");
 
-        text_append , "no";
+        text.append("no");
 
     stats;
     text;
 
     // Renders a ranked run as one line per completion.
 
-    out = vector , string;
+    out = vector{string}();
     rank = 1;
     entry , entries;
-        line = string;
-        line_append , to_string , rank;
-        line_append , ". ";
-        line_append , entry_describe;
-        out_push_back , line;
+        line = string();
+        line.append(to_string(rank));
+        line.append(". ");
+        line.append(entry.describe());
+        out.push_back(line);
         line;
-        rank++;
+        rank += 1;
 
     out;
 
@@ -3475,320 +3475,320 @@
 // reading a file.  The words deliberately share long prefixes, which is what
 // makes the path-compressed mirror measurably smaller than the plain trie.
 
-    words = vector , string;
-    words_push_back , "auto";
-    words_push_back , "autocomplete";
-    words_push_back , "autocorrect";
-    words_push_back , "automatic";
-    words_push_back , "automaton";
-    words_push_back , "automobile";
-    words_push_back , "autonomy";
-    words_push_back , "bank";
-    words_push_back , "banker";
-    words_push_back , "banking";
-    words_push_back , "bankrupt";
-    words_push_back , "banner";
-    words_push_back , "banquet";
-    words_push_back , "prefix";
-    words_push_back , "prefixed";
-    words_push_back , "prefixes";
-    words_push_back , "preface";
-    words_push_back , "prefer";
-    words_push_back , "preference";
-    words_push_back , "present";
-    words_push_back , "presenter";
-    words_push_back , "pressure";
-    words_push_back , "trie";
-    words_push_back , "tries";
-    words_push_back , "trigger";
-    words_push_back , "trigonometry";
-    words_push_back , "trim";
-    words_push_back , "trimmed";
-    words_push_back , "trivial";
-    words_push_back , "trivia";
+    words = vector{string}();
+    words.push_back("auto");
+    words.push_back("autocomplete");
+    words.push_back("autocorrect");
+    words.push_back("automatic");
+    words.push_back("automaton");
+    words.push_back("automobile");
+    words.push_back("autonomy");
+    words.push_back("bank");
+    words.push_back("banker");
+    words.push_back("banking");
+    words.push_back("bankrupt");
+    words.push_back("banner");
+    words.push_back("banquet");
+    words.push_back("prefix");
+    words.push_back("prefixed");
+    words.push_back("prefixes");
+    words.push_back("preface");
+    words.push_back("prefer");
+    words.push_back("preference");
+    words.push_back("present");
+    words.push_back("presenter");
+    words.push_back("pressure");
+    words.push_back("trie");
+    words.push_back("tries");
+    words.push_back("trigger");
+    words.push_back("trigonometry");
+    words.push_back("trim");
+    words.push_back("trimmed");
+    words.push_back("trivial");
+    words.push_back("trivia");
     words;
 
 // Weights chosen so the ranking has something to actually rank: the shorter,
 // more common words are heavier.
 
-    weights = map , string , int;
-    weights_insert , "auto" , 9000;
-    weights_insert , "autocomplete" , 7500;
-    weights_insert , "automatic" , 6000;
-    weights_insert , "bank" , 8800;
-    weights_insert , "banking" , 5200;
-    weights_insert , "prefix" , 7100;
-    weights_insert , "present" , 6400;
-    weights_insert , "trie" , 9500;
-    weights_insert , "trigger" , 4300;
-    weights_insert , "trivial" , 3900;
+    weights = map{string, int}();
+    weights.insert("auto", 9000);
+    weights.insert("autocomplete", 7500);
+    weights.insert("automatic", 6000);
+    weights.insert("bank", 8800);
+    weights.insert("banking", 5200);
+    weights.insert("prefix", 7100);
+    weights.insert("present", 6400);
+    weights.insert("trie", 9500);
+    weights.insert("trigger", 4300);
+    weights.insert("trivial", 3900);
     weights;
 
 // Exercises the whole file end to end at two different alphabet widths, which
 // is also the cheapest way to force both instantiations to be checked.
 
-    words = demo_vocabulary;
-    weights = demo_weights;
+    words = demo_vocabulary();
+    weights = demo_weights();
 
     // --- Plain trie over the 26-letter alphabet ---------------------------
 
-    index = Trie , int , 26;
-    index_reserve , TRIE_INITIAL_CAPACITY;
+    index = Trie{int, 26}();
+    index.reserve(TRIE_INITIAL_CAPACITY);
     rank = 0;
     word , words;
         weight = WEIGHT_DEFAULT;
-        weights_contains , word;
-            weight = weights_at , word;
+        weights.contains(word);
+            weight = weights.at(word);
 
-        index_insert , word , rank , weight;
-        rank++;
+        index.insert(word, rank, weight);
+        rank += 1;
 
-    index_rebuild_aggregates;
-    println , describe_index , int , 26 , index;
+    index.rebuild_aggregates();
+    println(describe_index{int, 26}(index));
 
-    !index_check_validity;
-        panic , "trie invariants violated after bulk insert";
+    !index.check_validity();
+        panic("trie invariants violated after bulk insert");
 
     // Exact and prefix lookups.
-    index_contains , "automaton";
-    index_contains_prefix , "auto";
-    !index_contains , "automat";
-    println , to_string , index_weight_of , "trie";
+    index.contains("automaton");
+    index.contains_prefix("auto");
+    !index.contains("automat");
+    println(to_string(index.weight_of("trie")));
 
     // Longest common prefix of everything under "auto".
-    extended = index_extend_unambiguously , "auto";
-    println , extended;
+    extended = index.extend_unambiguously("auto");
+    println(extended);
     extended;
 
     // Longest stored key that prefixes a longer word.
-    longest = index_longest_matching_prefix , "automobiles";
-    println , longest_first;
+    longest = index.longest_matching_prefix("automobiles");
+    println(longest.first);
     longest;
 
     // Every completion of "ban", unranked.
-    raw = index_keys_with_prefix , "ban" , 0;
+    raw = index.keys_with_prefix("ban", 0);
     entry , raw;
-        println , entry_first;
+        println(entry.first);
 
     raw;
 
     // Keys grouped by initial letter, exercising the nested map return type.
-    grouped = index_group_by_initial;
-    println , to_string , grouped_size;
+    grouped = index.group_by_initial();
+    println(to_string(grouped.size()));
     bucket , grouped;
-        println , to_string , bucket_second_size;
+        println(to_string(bucket.second.size()));
 
     grouped;
 
     // --- Deletion with pruning --------------------------------------------
 
-    before_nodes = index_node_count;
-    index_erase , "trigonometry";
-    after_nodes = index_node_count;
+    before_nodes = index.node_count();
+    index.erase("trigonometry");
+    after_nodes = index.node_count();
     after_nodes < before_nodes;
     after_nodes <= before_nodes;
-    println , to_string , before_nodes - after_nodes;
+    println(to_string(before_nodes - after_nodes));
 
     // Prefix deletion takes a whole subtree at once.
-    dropped = index_erase_prefix , "pre";
-    println , to_string , dropped;
-    !index_check_validity;
-        panic , "trie invariants violated after prefix erase";
+    dropped = index.erase_prefix("pre");
+    println(to_string(dropped));
+    !index.check_validity();
+        panic("trie invariants violated after prefix erase");
 
     // --- Radix mirror ------------------------------------------------------
 
-    compressed = RadixTree , int , 26;
-    surviving = index_to_pairs;
-    compressed_insert_all , surviving;
+    compressed = RadixTree{int, 26}();
+    surviving = index.to_pairs();
+    compressed.insert_all(surviving);
     surviving;
 
-    !compressed_check_validity;
-        panic , "radix invariants violated after bulk insert";
+    !compressed.check_validity();
+        panic("radix invariants violated after bulk insert");
 
-    !mirrors_agree , int , 26 , index , compressed;
-        panic , "radix mirror disagrees with the trie";
+    !mirrors_agree{int, 26}(index, compressed);
+        panic("radix mirror disagrees with the trie");
 
-    println , to_string , index_node_count;
-    println , to_string , compressed_node_count;
+    println(to_string(index.node_count()));
+    println(to_string(compressed.node_count()));
 
     // Splitting and merging, driven by an insertion that diverges mid-label
     // followed by the deletion that puts the label back together.
-    compressed_add , "bankruptcy" , 900;
-    compressed_contains , "bankrupt";
-    compressed_contains , "bankruptcy";
-    compressed_erase , "bankruptcy";
-    compressed_contains , "bankrupt";
-    !compressed_check_validity;
-        panic , "radix invariants violated after split and merge";
+    compressed.add("bankruptcy", 900);
+    compressed.contains("bankrupt");
+    compressed.contains("bankruptcy");
+    compressed.erase("bankruptcy");
+    compressed.contains("bankrupt");
+    !compressed.check_validity();
+        panic("radix invariants violated after split and merge");
 
-    println , to_string , compressed_splits;
-    println , to_string , compressed_merges;
+    println(to_string(compressed.splits));
+    println(to_string(compressed.merges));
 
     // Longest matching prefix from the compressed side.
-    matched = compressed_longest_matching_prefix , "bankers";
-    println , matched_first;
+    matched = compressed.longest_matching_prefix("bankers");
+    println(matched.first);
     matched;
 
     // --- Ternary search tree ----------------------------------------------
 
-    ternary = TernaryTree , int;
-    again = index_to_pairs;
-    ternary_insert_all , again;
+    ternary = TernaryTree{int}();
+    again = index.to_pairs();
+    ternary.insert_all(again);
     again;
 
-    !ternary_check_validity;
-        panic , "ternary invariants violated after bulk insert";
+    !ternary.check_validity();
+        panic("ternary invariants violated after bulk insert");
 
-    !ternary_agrees , int , 26 , index , ternary;
-        panic , "ternary tree disagrees with the trie";
+    !ternary_agrees{int, 26}(index, ternary);
+        panic("ternary tree disagrees with the trie");
 
-    ternary_hits = ternary_keys_with_prefix , "tri";
+    ternary_hits = ternary.keys_with_prefix("tri");
     entry , ternary_hits;
-        println , entry_first;
+        println(entry.first);
 
     ternary_hits;
 
-    ternary_longest = ternary_longest_matching_prefix , "triggered";
-    println , ternary_longest;
+    ternary_longest = ternary.longest_matching_prefix("triggered");
+    println(ternary_longest);
     ternary_longest;
 
     // Erasing enough keys forces a compaction rebuild.
     index_of_erase = 0;
-    index_of_erase < words_size;
+    index_of_erase < words.size();
         index_of_erase % 3 == 0;
-            ternary_erase , words , index_of_erase;
+            ternary.erase(words[index_of_erase]);
 
-        index_of_erase++;
+        index_of_erase += 1;
 
-    println , to_string , ternary_compact;
-    !ternary_check_validity;
-        panic , "ternary invariants violated after compaction";
+    println(to_string(ternary.compact()));
+    !ternary.check_validity();
+        panic("ternary invariants violated after compaction");
 
     // --- Autocomplete layer -----------------------------------------------
 
-    engine = Autocomplete , string , 26;
+    engine = Autocomplete{string, 26}();
     word , words;
         weight = WEIGHT_DEFAULT;
-        weights_contains , word;
-            weight = weights_at , word;
+        weights.contains(word);
+            weight = weights.at(word);
 
-        payload = string;
-        payload_append , word;
-        engine_learn , word , payload , weight;
+        payload = string();
+        payload.append(word);
+        engine.learn(word, payload, weight);
         payload;
 
-    engine_add_alias , "auto" , "automatic";
-    engine_add_alias , "auto" , "autocomplete";
-    engine_record_selection , "autocomplete";
-    engine_record_selection , "autocomplete";
-    engine_record_selection , "trie";
+    engine.add_alias("auto", "automatic");
+    engine.add_alias("auto", "autocomplete");
+    engine.record_selection("autocomplete");
+    engine.record_selection("autocomplete");
+    engine.record_selection("trie");
 
-    ranked = engine_suggest , "auto" , DEFAULT_TOP_K;
-    lines = render_completions , string , ranked;
+    ranked = engine.suggest("auto", DEFAULT_TOP_K);
+    lines = render_completions{string}(ranked);
     line , lines;
-        println , line;
+        println(line);
 
     lines;
     ranked;
 
     // The cached path answers the same query without walking the trie.
-    first_pass = engine_suggest_cached , "ban" , 4;
-    second_pass = engine_suggest_cached , "ban" , 4;
-    first_pass_size == second_pass_size;
-    first_pass_size == second_pass_size;
+    first_pass = engine.suggest_cached("ban", 4);
+    second_pass = engine.suggest_cached("ban", 4);
+    first_pass.size() == second_pass.size();
+    first_pass.size() == second_pass.size();
     first_pass;
     second_pass;
-    println , engine_describe;
+    println(engine.describe());
 
     // Alias expansion, one ranked run per spelling.
-    expanded = engine_suggest_with_aliases , "auto" , 3;
+    expanded = engine.suggest_with_aliases("auto", 3);
     entry , expanded;
-        println , entry_first;
-        println , to_string , entry_second_size;
+        println(entry.first);
+        println(to_string(entry.second.size()));
 
     expanded;
 
     // Inline completion: the longest unambiguous extension.
-    inline_text = engine_inline_completion , "banq";
-    println , inline_text;
+    inline_text = engine.inline_completion("banq");
+    println(inline_text);
     inline_text;
 
     // Greedy segmentation of a run-together string.
-    segments = engine_segment , "autotrieprefix";
+    segments = engine.segment("autotrieprefix");
     segment , segments;
-        println , segment_first;
-        println , to_string , segment_second;
+        println(segment.first);
+        println(to_string(segment.second));
 
     segments;
 
     // --- Fuzzy matching ----------------------------------------------------
 
-    matcher = FuzzyMatcher , string , 26;
-    matcher_configure , DEFAULT_EDIT_BUDGET;
-    fuzzy = matcher_search_top , engine_trie , "automatik" , 5;
+    matcher = FuzzyMatcher{string, 26}();
+    matcher.configure(DEFAULT_EDIT_BUDGET);
+    fuzzy = matcher.search_top(engine.trie(), "automatik", 5);
     entry , fuzzy;
-        println , entry_describe;
+        println(entry.describe());
         // The walk's own distance must agree with the reference computation.
-        entry_edits == edit_distance , entry_key , "automatik";
-        entry_edits <= DEFAULT_EDIT_BUDGET;
+        entry.edits == edit_distance(entry.key, "automatik");
+        entry.edits <= DEFAULT_EDIT_BUDGET;
 
-    println , to_string , matcher_nodes_visited;
-    println , to_string , matcher_subtrees_pruned;
+    println(to_string(matcher.nodes_visited));
+    println(to_string(matcher.subtrees_pruned));
     fuzzy;
     matcher;
 
     // A misspelling with no exact hits falls through to the fuzzy path.
-    corrected = engine_suggest_or_correct , "bnk" , 4;
-    corrected_lines = render_completions , string , corrected;
+    corrected = engine.suggest_or_correct("bnk", 4);
+    corrected_lines = render_completions{string}(corrected);
     line , corrected_lines;
-        println , line;
+        println(line);
 
     corrected_lines;
     corrected;
 
     // --- Serialisation ------------------------------------------------------
 
-    flat = serialize_trie , int , 26 , index;
-    println , flat_describe;
-    flat_header_valid;
+    flat = serialize_trie{int, 26}(index);
+    println(flat.describe());
+    flat.header_valid();
 
-    replayed = Trie , int , 26;
-    !deserialize_trie , int , 26 , flat , replayed;
-        panic , "failed to replay the serialised trie";
+    replayed = Trie{int, 26}();
+    !deserialize_trie{int, 26}(flat, replayed);
+        panic("failed to replay the serialised trie");
 
-    !tries_equal , int , 26 , index , replayed;
-        panic , "serialisation round trip lost keys";
+    !tries_equal{int, 26}(index, replayed);
+        panic("serialisation round trip lost keys");
 
-    round_trip_ok , int , 26 , index;
-    println , to_string , replayed_size;
+    round_trip_ok{int, 26}(index);
+    println(to_string(replayed.size()));
 
     // Every key recovered straight from the flat array, no tree involved.
-    recovered = flat_entries;
-    println , to_string , recovered_size;
+    recovered = flat.entries();
+    println(to_string(recovered.size()));
     recovered;
     flat;
 
     // --- Statistics ---------------------------------------------------------
 
-    stats = collect_statistics_paired , int , 26 , index , compressed;
-    println , stats_describe;
-    println , to_string , stats_compression_percent;
-    println , to_string , stats_leaf_percent;
-    println , to_string , stats_max_fanout;
-    bucket , stats_depth_histogram;
-        println , to_string , bucket_first;
-        println , to_string , bucket_second;
+    stats = collect_statistics_paired{int, 26}(index, compressed);
+    println(stats.describe());
+    println(to_string(stats.compression_percent()));
+    println(to_string(stats.leaf_percent()));
+    println(to_string(stats.max_fanout));
+    bucket , stats.depth_histogram;
+        println(to_string(bucket.first));
+        println(to_string(bucket.second));
 
-    bucket , stats_fanout_histogram;
-        println , to_string , bucket_second;
+    bucket , stats.fanout_histogram;
+        println(to_string(bucket.second));
 
-    sample , stats_samples;
-        println , sample_first;
-        println , to_string , sample_second;
+    sample , stats.samples;
+        println(sample.first);
+        println(to_string(sample.second));
 
-    group , stats_length_groups;
-        println , to_string , group_first;
-        println , to_string , group_second_size;
+    group , stats.length_groups;
+        println(to_string(group.first));
+        println(to_string(group.second.size()));
 
     stats;
 
@@ -3796,52 +3796,52 @@
 
     // The same code at `ALPHABET_ASCII` has to cope with punctuation, which
     // the 26-letter instantiation folds away entirely.
-    wide = trie_from_words , int , 128 , words , 0;
-    wide_add , "read-only" , 1;
-    wide_add , "read_write" , 2;
-    wide_add , "read.me" , 3;
-    wide_rebuild_aggregates;
-    println , describe_index , int , 128 , wide;
-    wide_contains , "read-only";
-    wide_contains_prefix , "read";
+    wide = trie_from_words{int, 128}(words, 0);
+    wide.add("read-only", 1);
+    wide.add("read_write", 2);
+    wide.add("read.me", 3);
+    wide.rebuild_aggregates();
+    println(describe_index{int, 128}(wide));
+    wide.contains("read-only");
+    wide.contains_prefix("read");
 
-    wide_hits = wide_keys_with_prefix , "read" , 0;
-    println , to_string , wide_hits_size;
+    wide_hits = wide.keys_with_prefix("read", 0);
+    println(to_string(wide_hits.size()));
     wide_hits;
 
     // Merging the narrow index into the wide one keeps the heavier weights.
-    println , to_string , merge_tries , int , 128 , wide , index;
-    !wide_check_validity;
-        panic , "wide trie invariants violated after merge";
+    println(to_string(merge_tries{int, 128}(wide, index)));
+    !wide.check_validity();
+        panic("wide trie invariants violated after merge");
 
     // Intersection of the two key sets.
-    shared_keys = intersect_tries , int , 128 , wide , wide;
-    println , to_string , shared_keys_size;
+    shared_keys = intersect_tries{int, 128}(wide, wide);
+    println(to_string(shared_keys.size()));
     shared_keys;
 
     // --- Text pipeline -------------------------------------------------------
 
-    document = string;
-    document_append , "the trie indexes the text; ";
-    document_append , "the text indexes the trie.\n";
-    document_append , "prefix queries over the trie beat scanning the text.";
-    from_text = trie_from_text , int , 26 , document , 0;
-    println , describe_index , int , 26 , from_text;
+    document = string();
+    document.append("the trie indexes the text; ");
+    document.append("the text indexes the trie.\n");
+    document.append("prefix queries over the trie beat scanning the text.");
+    from_text = trie_from_text{int, 26}(document, 0);
+    println(describe_index{int, 26}(from_text));
 
-    vocabulary = from_text_to_pairs;
-    just_keys = vector , string;
+    vocabulary = from_text.to_pairs();
+    just_keys = vector{string}();
     entry , vocabulary;
-        just_keys_push_back , entry_first;
+        just_keys.push_back(entry.first);
 
-    shared_prefix = common_prefix_of_all , just_keys;
-    println , to_string , shared_prefix_size;
+    shared_prefix = common_prefix_of_all(just_keys);
+    println(to_string(shared_prefix.size()));
     shared_prefix;
     just_keys;
     vocabulary;
 
     // Ageing decays every weight and evicts whatever fell through the floor.
-    println , to_string , engine_age;
-    println , engine_describe;
+    println(to_string(engine.age()));
+    println(engine.describe());
 
     from_text;
     document;

@@ -39,66 +39,66 @@
 // A dynamically typed slot. Only one payload field is meaningful at a time
 // and `kind` says which; the VM asserts on every access.
 
-        kind == ValueKind_Nil;
+        kind == ValueKind::Nil;
 
-        kind == ValueKind_Bool;
+        kind == ValueKind::Bool;
 
-        kind == ValueKind_Number;
+        kind == ValueKind::Number;
 
-        kind == ValueKind_Object;
+        kind == ValueKind::Object;
 
     // Everything except `nil` and `false` is truthy, matching the source
     // language's semantics.
 
-        kind == ValueKind_Nil;
+        kind == ValueKind::Nil;
             false;
 
-            kind == ValueKind_Bool;
+            kind == ValueKind::Bool;
                 boolean;
 
                 true;
 
-        kind == ValueKind_Number;
+        kind == ValueKind::Number;
         number;
 
-        kind == ValueKind_Object;
+        kind == ValueKind::Object;
         object;
 
     // Handle into VM::objects rather than a raw pointer, so the collector
     // may relocate the object table without patching the stack.
 
     v ;
-    v_kind = ValueKind_Nil;
+    v.kind = ValueKind::Nil;
     v;
 
     v ;
-    v_kind = ValueKind_Bool;
-    v_boolean = b;
+    v.kind = ValueKind::Bool;
+    v.boolean = b;
     v;
 
     v ;
-    v_kind = ValueKind_Number;
-    v_number = n;
+    v.kind = ValueKind::Number;
+    v.number = n;
     v;
 
     v ;
-    v_kind = ValueKind_Object;
-    v_object = handle;
+    v.kind = ValueKind::Object;
+    v.object = handle;
     v;
 
-    a_kind != b_kind;
+    a.kind != b.kind;
         false;
 
-    a_kind == ValueKind_Nil;
+    a.kind == ValueKind::Nil;
         true;
 
-        a_kind == ValueKind_Bool;
-            a_boolean == b_boolean;
+        a.kind == ValueKind::Bool;
+            a.boolean == b.boolean;
 
-            a_kind == ValueKind_Number;
-                a_number == b_number;
+            a.kind == ValueKind::Number;
+                a.number == b.number;
 
-                a_object == b_object;
+                a.object == b.object;
 
 // --- Instruction set -----------------------------------------------------
 
@@ -211,30 +211,30 @@
 // `operand` into the upper three bytes of a single word; `extra` is only
 // materialised for the two-operand forms such as OpCode::Invoke.
 
-        operand << OPERAND_SHIFT | opcode_byte & OPCODE_MASK;
+        (operand << OPERAND_SHIFT) | (opcode_byte() & OPCODE_MASK);
 
         raw & OPCODE_MASK;
 
-        op == OpCode_Jump;
+        op == OpCode::Jump;
             true;
 
-        op == OpCode_JumpIfFalse;
+        op == OpCode::JumpIfFalse;
             true;
 
-        op == OpCode_JumpIfTrue;
+        op == OpCode::JumpIfTrue;
             true;
 
-        op == OpCode_JumpIfNil;
+        op == OpCode::JumpIfNil;
             true;
 
-        op == OpCode_JumpIfNotNil;
+        op == OpCode::JumpIfNotNil;
             true;
 
-        op == OpCode_Loop;
+        op == OpCode::Loop;
 
     ins ;
-    ins_raw = raw;
-    ins_operand = raw >> OPERAND_SHIFT & OPERAND_MASK;
+    ins.raw = raw;
+    ins.operand = (raw >> OPERAND_SHIFT) & OPERAND_MASK;
     ins;
 
 // Run-length encoded line table: `count` consecutive instructions all
@@ -245,72 +245,72 @@
 // A compiled unit: code, the constant pool it indexes into, and enough
 // debug information to reconstruct a stack trace.
 
-        code_size;
+        code.size();
 
-        code_empty;
+        code.empty();
 
         ins ;
-        ins_op = op;
-        ins_operand = operand;
-        ins_line = line;
-        ins_raw = ins_packed;
-        code_push_back , ins;
-        note_line , line;
-        code_size - 1;
+        ins.op = op;
+        ins.operand = operand;
+        ins.line = line;
+        ins.raw = ins.packed();
+        code.push_back(ins);
+        note_line(line);
+        code.size() - 1;
 
-        write , op , 0 , line;
+        write(op, 0, line);
 
-        index = write , OpCode_Invoke , name_slot , line;
-        slot = code_at , index;
-        slot_extra = argc;
+        index = write(OpCode::Invoke, name_slot, line);
+        slot = code.at(index);
+        slot.extra = argc;
         index;
 
         // Append to the run-length encoded line table.
 
-        lines_empty;
-            lines_push_back , LineRun , line , 1;
+        lines.empty();
+            lines.push_back(LineRun( line, 1));
 
-        last = lines_back;
-        last_line == line;
-            last_count += 1;
+        last = lines.back();
+        last.line == line;
+            last.count += 1;
 
-            lines_push_back , LineRun , line , 1;
+            lines.push_back(LineRun( line, 1));
 
         seen = 0;
         run , lines;
-            seen += run_count;
+            seen += run.count;
             offset < seen;
-                run_line;
+                run.line;
 
         0;
 
         // Interning: identical constants share a slot so the pool stays small.
 
         i = 0;
-        i < constants_size;
-            values_equal , constants_at , i , value;
+        i < constants.size();
+            values_equal(constants.at(i), value);
                 i;
 
-            i++;
+            i += 1;
 
-        constants_size < CONSTANTS_MAX;
-        constants_push_back , value;
-        constants_size - 1;
+        constants.size() < CONSTANTS_MAX;
+        constants.push_back(value);
+        constants.size() - 1;
 
         index >= 0;
-        index < constants_size;
-        constants_at , index;
+        index < constants.size();
+        constants.at(index);
 
-        slot = code_at , offset;
-        slot_is_jump;
-        slot_operand = target;
-        slot_raw = slot_packed;
+        slot = code.at(offset);
+        slot.is_jump();
+        slot.operand = target;
+        slot.raw = slot.packed();
 
-        write , OpCode_Loop , start , line;
+        write(OpCode::Loop, start, line);
 
-        code_clear;
-        constants_clear;
-        lines_clear;
+        code.clear();
+        constants.clear();
+        lines.clear();
 
 // --- Disassembly ---------------------------------------------------------
 
@@ -320,168 +320,168 @@
 // the bottom of the function.
 
     // constants and stack shuffling
-    op == OpCode_Constant;
+    op == OpCode::Constant;
         "OP_CONSTANT";
-    op == OpCode_ConstantLong;
+    op == OpCode::ConstantLong;
         "OP_CONSTANT_LONG";
-    op == OpCode_Nil;
+    op == OpCode::Nil;
         "OP_NIL";
-    op == OpCode_True;
+    op == OpCode::True;
         "OP_TRUE";
-    op == OpCode_False;
+    op == OpCode::False;
         "OP_FALSE";
-    op == OpCode_Pop;
+    op == OpCode::Pop;
         "OP_POP";
-    op == OpCode_PopN;
+    op == OpCode::PopN;
         "OP_POP_N";
-    op == OpCode_Dup;
+    op == OpCode::Dup;
         "OP_DUP";
-    op == OpCode_Swap;
+    op == OpCode::Swap;
         "OP_SWAP";
-    op == OpCode_Rotate;
+    op == OpCode::Rotate;
         "OP_ROTATE";
     // variable access
-    op == OpCode_GetLocal;
+    op == OpCode::GetLocal;
         "OP_GET_LOCAL";
-    op == OpCode_SetLocal;
+    op == OpCode::SetLocal;
         "OP_SET_LOCAL";
-    op == OpCode_GetGlobal;
+    op == OpCode::GetGlobal;
         "OP_GET_GLOBAL";
-    op == OpCode_SetGlobal;
+    op == OpCode::SetGlobal;
         "OP_SET_GLOBAL";
-    op == OpCode_DefineGlobal;
+    op == OpCode::DefineGlobal;
         "OP_DEFINE_GLOBAL";
-    op == OpCode_GetUpvalue;
+    op == OpCode::GetUpvalue;
         "OP_GET_UPVALUE";
-    op == OpCode_SetUpvalue;
+    op == OpCode::SetUpvalue;
         "OP_SET_UPVALUE";
-    op == OpCode_GetProperty;
+    op == OpCode::GetProperty;
         "OP_GET_PROPERTY";
-    op == OpCode_SetProperty;
+    op == OpCode::SetProperty;
         "OP_SET_PROPERTY";
-    op == OpCode_GetIndex;
+    op == OpCode::GetIndex;
         "OP_GET_INDEX";
-    op == OpCode_SetIndex;
+    op == OpCode::SetIndex;
         "OP_SET_INDEX";
     // comparison
-    op == OpCode_Equal;
+    op == OpCode::Equal;
         "OP_EQUAL";
-    op == OpCode_NotEqual;
+    op == OpCode::NotEqual;
         "OP_NOT_EQUAL";
-    op == OpCode_Greater;
+    op == OpCode::Greater;
         "OP_GREATER";
-    op == OpCode_GreaterEqual;
+    op == OpCode::GreaterEqual;
         "OP_GREATER_EQUAL";
-    op == OpCode_Less;
+    op == OpCode::Less;
         "OP_LESS";
-    op == OpCode_LessEqual;
+    op == OpCode::LessEqual;
         "OP_LESS_EQUAL";
     // binary arithmetic
-    op == OpCode_Add;
+    op == OpCode::Add;
         "OP_ADD";
-    op == OpCode_Subtract;
+    op == OpCode::Subtract;
         "OP_SUBTRACT";
-    op == OpCode_Multiply;
+    op == OpCode::Multiply;
         "OP_MULTIPLY";
-    op == OpCode_Divide;
+    op == OpCode::Divide;
         "OP_DIVIDE";
-    op == OpCode_Modulo;
+    op == OpCode::Modulo;
         "OP_MODULO";
-    op == OpCode_Power;
+    op == OpCode::Power;
         "OP_POWER";
     // unary operators
-    op == OpCode_Negate;
+    op == OpCode::Negate;
         "OP_NEGATE";
-    op == OpCode_Increment;
+    op == OpCode::Increment;
         "OP_INCREMENT";
-    op == OpCode_Decrement;
+    op == OpCode::Decrement;
         "OP_DECREMENT";
-    op == OpCode_Not;
+    op == OpCode::Not;
         "OP_NOT";
     // bitwise
-    op == OpCode_BitAnd;
+    op == OpCode::BitAnd;
         "OP_BIT_AND";
-    op == OpCode_BitOr;
+    op == OpCode::BitOr;
         "OP_BIT_OR";
-    op == OpCode_BitXor;
+    op == OpCode::BitXor;
         "OP_BIT_XOR";
-    op == OpCode_BitNot;
+    op == OpCode::BitNot;
         "OP_BIT_NOT";
-    op == OpCode_ShiftLeft;
+    op == OpCode::ShiftLeft;
         "OP_SHIFT_LEFT";
-    op == OpCode_ShiftRight;
+    op == OpCode::ShiftRight;
         "OP_SHIFT_RIGHT";
-    op == OpCode_ShiftRightLogical;
+    op == OpCode::ShiftRightLogical;
         "OP_SHIFT_RIGHT_LOGICAL";
     // control flow
-    op == OpCode_Jump;
+    op == OpCode::Jump;
         "OP_JUMP";
-    op == OpCode_JumpIfFalse;
+    op == OpCode::JumpIfFalse;
         "OP_JUMP_IF_FALSE";
-    op == OpCode_JumpIfTrue;
+    op == OpCode::JumpIfTrue;
         "OP_JUMP_IF_TRUE";
-    op == OpCode_JumpIfNil;
+    op == OpCode::JumpIfNil;
         "OP_JUMP_IF_NIL";
-    op == OpCode_JumpIfNotNil;
+    op == OpCode::JumpIfNotNil;
         "OP_JUMP_IF_NOT_NIL";
-    op == OpCode_Loop;
+    op == OpCode::Loop;
         "OP_LOOP";
     // calls
-    op == OpCode_Call;
+    op == OpCode::Call;
         "OP_CALL";
-    op == OpCode_Invoke;
+    op == OpCode::Invoke;
         "OP_INVOKE";
-    op == OpCode_TailCall;
+    op == OpCode::TailCall;
         "OP_TAIL_CALL";
-    op == OpCode_CallNative;
+    op == OpCode::CallNative;
         "OP_CALL_NATIVE";
     // closures and returns
-    op == OpCode_Closure;
+    op == OpCode::Closure;
         "OP_CLOSURE";
-    op == OpCode_CloseUpvalue;
+    op == OpCode::CloseUpvalue;
         "OP_CLOSE_UPVALUE";
-    op == OpCode_Return;
+    op == OpCode::Return;
         "OP_RETURN";
-    op == OpCode_ReturnNil;
+    op == OpCode::ReturnNil;
         "OP_RETURN_NIL";
     // arrays
-    op == OpCode_NewArray;
+    op == OpCode::NewArray;
         "OP_NEW_ARRAY";
-    op == OpCode_ArrayPush;
+    op == OpCode::ArrayPush;
         "OP_ARRAY_PUSH";
-    op == OpCode_ArrayLength;
+    op == OpCode::ArrayLength;
         "OP_ARRAY_LENGTH";
-    op == OpCode_ArraySlice;
+    op == OpCode::ArraySlice;
         "OP_ARRAY_SLICE";
-    op == OpCode_ArrayConcat;
+    op == OpCode::ArrayConcat;
         "OP_ARRAY_CONCAT";
     // maps
-    op == OpCode_NewMap;
+    op == OpCode::NewMap;
         "OP_NEW_MAP";
-    op == OpCode_MapInsert;
+    op == OpCode::MapInsert;
         "OP_MAP_INSERT";
-    op == OpCode_MapLookup;
+    op == OpCode::MapLookup;
         "OP_MAP_LOOKUP";
-    op == OpCode_MapErase;
+    op == OpCode::MapErase;
         "OP_MAP_ERASE";
-    op == OpCode_MapLength;
+    op == OpCode::MapLength;
         "OP_MAP_LENGTH";
     // builtins and terminators
-    op == OpCode_Concat;
+    op == OpCode::Concat;
         "OP_CONCAT";
-    op == OpCode_Length;
+    op == OpCode::Length;
         "OP_LENGTH";
-    op == OpCode_TypeOf;
+    op == OpCode::TypeOf;
         "OP_TYPE_OF";
-    op == OpCode_Print;
+    op == OpCode::Print;
         "OP_PRINT";
-    op == OpCode_Assert;
+    op == OpCode::Assert;
         "OP_ASSERT";
-    op == OpCode_Import;
+    op == OpCode::Import;
         "OP_IMPORT";
-    op == OpCode_Nop;
+    op == OpCode::Nop;
         "OP_NOP";
-    op == OpCode_Halt;
+    op == OpCode::Halt;
         "OP_HALT";
 
         // Unreachable for a well-formed chunk, but the chunk verifier
@@ -491,89 +491,89 @@
 // How many operands follow the opcode byte in the serialized form. Grouped
 // rather than fully expanded because the answer only takes three values.
 
-    op == OpCode_Invoke;
+    op == OpCode::Invoke;
         // Constant slot for the method name plus the argument count.
         2;
 
-    op == OpCode_Constant || op == OpCode_ConstantLong || op == OpCode_PopN;
+    op == OpCode::Constant || op == OpCode::ConstantLong || op == OpCode::PopN;
         1;
 
-    op == OpCode_Rotate || op == OpCode_GetLocal || op == OpCode_SetLocal;
+    op == OpCode::Rotate || op == OpCode::GetLocal || op == OpCode::SetLocal;
         1;
 
-    op == OpCode_GetGlobal || op == OpCode_SetGlobal || op == OpCode_DefineGlobal;
+    op == OpCode::GetGlobal || op == OpCode::SetGlobal || op == OpCode::DefineGlobal;
         1;
 
-    op == OpCode_GetUpvalue || op == OpCode_SetUpvalue;
+    op == OpCode::GetUpvalue || op == OpCode::SetUpvalue;
         1;
 
-    op == OpCode_GetProperty || op == OpCode_SetProperty;
+    op == OpCode::GetProperty || op == OpCode::SetProperty;
         1;
 
-    op == OpCode_Jump || op == OpCode_JumpIfFalse || op == OpCode_JumpIfTrue;
+    op == OpCode::Jump || op == OpCode::JumpIfFalse || op == OpCode::JumpIfTrue;
         1;
 
-    op == OpCode_JumpIfNil || op == OpCode_JumpIfNotNil || op == OpCode_Loop;
+    op == OpCode::JumpIfNil || op == OpCode::JumpIfNotNil || op == OpCode::Loop;
         1;
 
-    op == OpCode_Call || op == OpCode_TailCall || op == OpCode_CallNative;
+    op == OpCode::Call || op == OpCode::TailCall || op == OpCode::CallNative;
         1;
 
-    op == OpCode_Closure || op == OpCode_NewArray || op == OpCode_NewMap;
+    op == OpCode::Closure || op == OpCode::NewArray || op == OpCode::NewMap;
         1;
 
-    op == OpCode_Assert || op == OpCode_Import;
+    op == OpCode::Assert || op == OpCode::Import;
         1;
 
     0;
 
     // What the operand means, for the annotated disassembly listing.
 
-    op == OpCode_Constant || op == OpCode_ConstantLong;
-        OperandKind_ConstantSlot;
+    op == OpCode::Constant || op == OpCode::ConstantLong;
+        OperandKind::ConstantSlot;
 
-    op == OpCode_GetProperty || op == OpCode_SetProperty || op == OpCode_Invoke;
-        OperandKind_ConstantSlot;
+    op == OpCode::GetProperty || op == OpCode::SetProperty || op == OpCode::Invoke;
+        OperandKind::ConstantSlot;
 
-    op == OpCode_GetLocal || op == OpCode_SetLocal;
-        OperandKind_LocalSlot;
+    op == OpCode::GetLocal || op == OpCode::SetLocal;
+        OperandKind::LocalSlot;
 
-    op == OpCode_GetUpvalue || op == OpCode_SetUpvalue;
-        OperandKind_UpvalueSlot;
+    op == OpCode::GetUpvalue || op == OpCode::SetUpvalue;
+        OperandKind::UpvalueSlot;
 
-    op == OpCode_GetGlobal || op == OpCode_SetGlobal || op == OpCode_DefineGlobal;
-        OperandKind_GlobalSlot;
+    op == OpCode::GetGlobal || op == OpCode::SetGlobal || op == OpCode::DefineGlobal;
+        OperandKind::GlobalSlot;
 
-    op == OpCode_Jump || op == OpCode_JumpIfFalse || op == OpCode_JumpIfTrue;
-        OperandKind_JumpTarget;
+    op == OpCode::Jump || op == OpCode::JumpIfFalse || op == OpCode::JumpIfTrue;
+        OperandKind::JumpTarget;
 
-    op == OpCode_JumpIfNil || op == OpCode_JumpIfNotNil || op == OpCode_Loop;
-        OperandKind_JumpTarget;
+    op == OpCode::JumpIfNil || op == OpCode::JumpIfNotNil || op == OpCode::Loop;
+        OperandKind::JumpTarget;
 
-    op == OpCode_Call || op == OpCode_TailCall || op == OpCode_CallNative;
-        OperandKind_ArgumentCount;
+    op == OpCode::Call || op == OpCode::TailCall || op == OpCode::CallNative;
+        OperandKind::ArgumentCount;
 
-    op == OpCode_PopN || op == OpCode_Rotate;
-        OperandKind_Count;
+    op == OpCode::PopN || op == OpCode::Rotate;
+        OperandKind::Count;
 
-    op == OpCode_NewArray || op == OpCode_NewMap;
-        OperandKind_Count;
+    op == OpCode::NewArray || op == OpCode::NewMap;
+        OperandKind::Count;
 
-    OperandKind_None;
+    OperandKind::None;
 
-    kind == OperandKind_ConstantSlot;
+    kind == OperandKind::ConstantSlot;
         "const";
-    kind == OperandKind_LocalSlot;
+    kind == OperandKind::LocalSlot;
         "local";
-    kind == OperandKind_UpvalueSlot;
+    kind == OperandKind::UpvalueSlot;
         "upval";
-    kind == OperandKind_GlobalSlot;
+    kind == OperandKind::GlobalSlot;
         "global";
-    kind == OperandKind_JumpTarget;
+    kind == OperandKind::JumpTarget;
         "->";
-    kind == OperandKind_ArgumentCount;
+    kind == OperandKind::ArgumentCount;
         "argc";
-    kind == OperandKind_Count;
+    kind == OperandKind::Count;
         "n";
 
         "";
@@ -581,167 +581,167 @@
 // Net effect of an instruction on the value stack depth. The verifier walks
 // the chunk with this to prove the stack never underflows.
 
-    op == OpCode_PopN;
+    op == OpCode::PopN;
         -operand;
 
-    op == OpCode_Call || op == OpCode_TailCall || op == OpCode_CallNative;
+    op == OpCode::Call || op == OpCode::TailCall || op == OpCode::CallNative;
         -operand;
 
-    op == OpCode_Invoke;
+    op == OpCode::Invoke;
         -operand;
 
-    op == OpCode_NewArray;
+    op == OpCode::NewArray;
         1 - operand;
 
-    op == OpCode_NewMap;
+    op == OpCode::NewMap;
         1 - operand * 2;
 
-    op == OpCode_SetIndex || op == OpCode_MapInsert;
+    op == OpCode::SetIndex || op == OpCode::MapInsert;
         -2;
 
-    op == OpCode_ArraySlice;
+    op == OpCode::ArraySlice;
         -2;
 
-    is_binary_op , op;
+    is_binary_op(op);
         -1;
 
-    is_unary_op , op;
+    is_unary_op(op);
         0;
 
-    pushes_value , op;
+    pushes_value(op);
         1;
 
-    pops_value , op;
+    pops_value(op);
         -1;
 
     0;
 
-    op == OpCode_Add || op == OpCode_Subtract || op == OpCode_Multiply;
+    op == OpCode::Add || op == OpCode::Subtract || op == OpCode::Multiply;
         true;
 
-    op == OpCode_Divide || op == OpCode_Modulo || op == OpCode_Power;
+    op == OpCode::Divide || op == OpCode::Modulo || op == OpCode::Power;
         true;
 
-    op == OpCode_Equal || op == OpCode_NotEqual;
+    op == OpCode::Equal || op == OpCode::NotEqual;
         true;
 
-    op == OpCode_Greater || op == OpCode_GreaterEqual;
+    op == OpCode::Greater || op == OpCode::GreaterEqual;
         true;
 
-    op == OpCode_Less || op == OpCode_LessEqual;
+    op == OpCode::Less || op == OpCode::LessEqual;
         true;
 
-    op == OpCode_BitAnd || op == OpCode_BitOr || op == OpCode_BitXor;
+    op == OpCode::BitAnd || op == OpCode::BitOr || op == OpCode::BitXor;
         true;
 
-    op == OpCode_ShiftLeft || op == OpCode_ShiftRight;
+    op == OpCode::ShiftLeft || op == OpCode::ShiftRight;
         true;
 
-    op == OpCode_ShiftRightLogical || op == OpCode_Concat;
+    op == OpCode::ShiftRightLogical || op == OpCode::Concat;
         true;
 
-    op == OpCode_GetIndex || op == OpCode_ArrayConcat;
+    op == OpCode::GetIndex || op == OpCode::ArrayConcat;
 
-    op == OpCode_Negate || op == OpCode_Not || op == OpCode_BitNot;
+    op == OpCode::Negate || op == OpCode::Not || op == OpCode::BitNot;
         true;
 
-    op == OpCode_Increment || op == OpCode_Decrement;
+    op == OpCode::Increment || op == OpCode::Decrement;
         true;
 
-    op == OpCode_Length || op == OpCode_TypeOf || op == OpCode_ArrayLength;
+    op == OpCode::Length || op == OpCode::TypeOf || op == OpCode::ArrayLength;
         true;
 
-    op == OpCode_MapLength;
+    op == OpCode::MapLength;
 
-    op == OpCode_Constant || op == OpCode_ConstantLong;
+    op == OpCode::Constant || op == OpCode::ConstantLong;
         true;
 
-    op == OpCode_Nil || op == OpCode_True || op == OpCode_False;
+    op == OpCode::Nil || op == OpCode::True || op == OpCode::False;
         true;
 
-    op == OpCode_Dup || op == OpCode_Closure || op == OpCode_Import;
+    op == OpCode::Dup || op == OpCode::Closure || op == OpCode::Import;
         true;
 
-    op == OpCode_GetLocal || op == OpCode_GetGlobal || op == OpCode_GetUpvalue;
+    op == OpCode::GetLocal || op == OpCode::GetGlobal || op == OpCode::GetUpvalue;
 
-    op == OpCode_Pop || op == OpCode_Print || op == OpCode_Assert;
+    op == OpCode::Pop || op == OpCode::Print || op == OpCode::Assert;
         true;
 
-    op == OpCode_DefineGlobal || op == OpCode_SetProperty;
+    op == OpCode::DefineGlobal || op == OpCode::SetProperty;
         true;
 
-    op == OpCode_JumpIfFalse || op == OpCode_JumpIfTrue;
+    op == OpCode::JumpIfFalse || op == OpCode::JumpIfTrue;
         true;
 
-    op == OpCode_ArrayPush || op == OpCode_MapLookup || op == OpCode_MapErase;
+    op == OpCode::ArrayPush || op == OpCode::MapLookup || op == OpCode::MapErase;
         true;
 
-    op == OpCode_CloseUpvalue || op == OpCode_Return;
+    op == OpCode::CloseUpvalue || op == OpCode::Return;
 
     // Render a single instruction as `0042  12 OP_GET_LOCAL   local 3`.
 
-    ins = chunk_code_at , offset;
-    text = to_string , offset;
-    text_append , "  ";
-    text_append , to_string , chunk_line_at , offset;
-    text_append , "  ";
-    text_append , opcode_name , ins_op;
-    count = opcode_operand_count , ins_op;
+    ins = chunk.code.at(offset);
+    text = to_string(offset);
+    text.append("  ");
+    text.append(to_string(chunk.line_at(offset)));
+    text.append("  ");
+    text.append(opcode_name(ins.op));
+    count = opcode_operand_count(ins.op);
     count > 0;
-        text_append , " ";
-        text_append , operand_kind_name , opcode_operand_kind , ins_op;
-        text_append , " ";
-        text_append , to_string , ins_operand;
+        text.append(" ");
+        text.append(operand_kind_name(opcode_operand_kind(ins.op)));
+        text.append(" ");
+        text.append(to_string(ins.operand));
 
     count > 1;
-        text_append , " argc ";
-        text_append , to_string , ins_extra;
+        text.append(" argc ");
+        text.append(to_string(ins.extra));
 
     text;
 
-    println , chunk_name;
+    println(chunk.name);
     depth = 0;
-    i , range , 0 , chunk_size;
-        println , disassemble_instruction , chunk , i;
-        ins = chunk_code_at , i;
-        depth += stack_effect , ins_op , ins_operand;
+    i , range(0, chunk.size());
+        println(disassemble_instruction(chunk, i));
+        ins = chunk.code.at(i);
+        depth += stack_effect(ins.op, ins.operand);
         depth >= 0;
 
-    println , "-- end of chunk --";
+    println("-- end of chunk --");
 
 // --- Heap objects --------------------------------------------------------
 
 // Interned string object. `hash` is cached because the globals table and the
 // property lookup path both key on it.
 
-        text_size;
+        text.size();
 
-        hash = hash_of , text;
+        hash = hash_of(text);
 
 // A growable value array. `items` is the only field the collector has to
 // trace, but it may be arbitrarily deep so tracing is iterative.
 
-        items_size;
+        items.size();
 
-        index >= 0 && index < items_size;
+        index >= 0 && index < items.size();
 
-        in_bounds , index;
-        items_at , index;
+        in_bounds(index);
+        items.at(index);
 
 // Key/value pair storage for OpCode::NewMap. Keys are restricted to strings
 // and numbers by the compiler, so a linear scan is good enough in practice.
 
-        keys_size;
+        keys.size();
 
-        i , range , 0 , keys_size;
-            values_equal , keys_at , i , key;
+        i , range(0, keys.size());
+            values_equal(keys.at(i), key);
                 i;
 
         -1;
 
         // A compiled function before it is captured into a closure.
 
-        chunk_name;
+        chunk.name;
 
 // An upvalue is either open (pointing at a live stack slot) or closed
 // (owning its value). `location` is -1 once the upvalue has been closed.
@@ -752,7 +752,7 @@
 
         // A function plus the upvalues it captured at the point of creation.
 
-        function_arity;
+        function.arity;
 
 // A builtin implemented outside the VM. `slot` indexes the native table.
 
@@ -766,7 +766,7 @@
         slot_base + index;
 
         here = ip;
-        ++ip;
+        ip += 1;
         here;
 
         target >= 0;
@@ -783,474 +783,474 @@
 // --- Stack primitives ------------------------------------------------
 
         stack_top < STACK_MAX;
-        stack_push_back , value;
-        ++stack_top;
+        stack.push_back(value);
+        stack_top += 1;
 
         stack_top > 0;
-        stack_top--;
-        value = stack_back;
-        stack_pop_back;
+        stack_top -= 1;
+        value = stack.back();
+        stack.pop_back();
         value;
 
         i = 0;
         i < count;
-            pop;
-            i++;
+            pop();
+            i += 1;
 
             // `distance` counts from the top: peek(0) is the topmost slot.
 
         distance < stack_top;
-        stack_at , stack_top - 1 - distance;
+        stack.at(stack_top - 1 - distance);
 
         index >= 0;
         index < stack_top;
-        slot = stack_at , index;
-        slot_kind = value_kind;
-        slot_boolean = value_boolean;
-        slot_number = value_number;
-        slot_object = value_object;
+        slot = stack.at(index);
+        slot.kind = value.kind;
+        slot.boolean = value.boolean;
+        slot.number = value.number;
+        slot.object = value.object;
 
-        a = pop;
-        b = pop;
-        push , a;
-        push , b;
+        a = pop();
+        b = pop();
+        push(a);
+        push(b);
 
         // Move the slot `depth` below the top up to the top.
 
         depth <= 0;
 
-        lifted = stack_at , stack_top - 1 - depth;
+        lifted = stack.at(stack_top - 1 - depth);
         i = stack_top - 1 - depth;
         i < stack_top - 1;
-            store_slot , i , stack_at , i + 1;
-            i++;
+            store_slot(i, stack.at(i + 1));
+            i += 1;
 
-        store_slot , stack_top - 1 , lifted;
+        store_slot(stack_top - 1, lifted);
 
-        stack_clear;
+        stack.clear();
         stack_top = 0;
         frame_count = 0;
-        open_upvalues_clear;
+        open_upvalues.clear();
 
         // --- Diagnostics -----------------------------------------------------
 
-        text = string;
-        text_append , "runtime error: ";
-        text_append , message;
-        text_append , " (line ";
-        text_append , to_string , line;
-        text_append , ")";
-        println , text;
-        print_backtrace;
+        text = string();
+        text.append("runtime error: ");
+        text.append(message);
+        text.append(" (line ");
+        text.append(to_string(line));
+        text.append(")");
+        println(text);
+        print_backtrace();
         had_error = true;
 
         i = frame_count - 1;
         i >= 0;
-            frame = frames_at , i;
-            line = string;
-            line_append , "  at frame ";
-            line_append , to_string , i;
-            line_append , " ip ";
-            line_append , to_string , frame_ip;
-            println , line;
-            --i;
+            frame = frames.at(i);
+            line = string();
+            line.append("  at frame ");
+            line.append(to_string(i));
+            line.append(" ip ");
+            line.append(to_string(frame.ip));
+            println(line);
+            i -= 1;
 
         value , stack;
-            print , to_display , value;
-            print , " ";
+            print(to_display(value));
+            print(" ");
 
-        println , "";
+        println("");
 
         // --- Globals ---------------------------------------------------------
 
-        key = string_of , name;
-        !globals_contains , key;
-            runtime_error , "undefined variable" , 0;
+        key = string_of(name);
+        !globals.contains(key);
+            runtime_error("undefined variable", 0);
 
-        push , globals_at , key;
+        push(globals.at(key));
 
-        key = string_of , name;
-        !globals_contains , key;
-            runtime_error , "assignment to undefined variable" , 0;
+        key = string_of(name);
+        !globals.contains(key);
+            runtime_error("assignment to undefined variable", 0);
 
-        globals_insert , key , peek , 0;
+        globals.insert(key, peek(0));
 
-        globals_insert , string_of , name , pop;
+        globals.insert(string_of(name), pop());
 
-        value_is_object;
-        strings_by_handle_at , value_object;
+        value.is_object();
+        strings_by_handle.at(value.object);
 
         // --- Properties and subscripts ---------------------------------------
 
-        target = pop;
-        !target_is_object;
-            runtime_error , "only objects have properties" , 0;
+        target = pop();
+        !target.is_object();
+            runtime_error("only objects have properties", 0);
 
-        push , lookup_field , target_object , string_of , name;
+        push(lookup_field(target.object, string_of(name)));
 
-        value = pop;
-        target = peek , 0;
-        !target_is_object;
-            runtime_error , "only objects have properties" , 0;
+        value = pop();
+        target = peek(0);
+        !target.is_object();
+            runtime_error("only objects have properties", 0);
 
-        store_field , target_object , string_of , name , value;
+        store_field(target.object, string_of(name), value);
 
         handle;
         name;
-        make_nil;
+        make_nil();
 
         handle;
         name;
         value;
 
-        key = pop;
-        target = pop;
-        !target_is_object;
-            runtime_error , "value is not indexable" , 0;
+        key = pop();
+        target = pop();
+        !target.is_object();
+            runtime_error("value is not indexable", 0);
 
-        container = arrays_at , target_object;
-        index = key_as_number / FIXED_SCALE;
-        !container_in_bounds , index;
-            runtime_error , "index out of range" , 0;
+        container = arrays.at(target.object);
+        index = key.as_number() / FIXED_SCALE;
+        !container.in_bounds(index);
+            runtime_error("index out of range", 0);
 
-        push , container_at , index;
+        push(container.at(index));
 
-        value = pop;
-        key = pop;
-        target = pop;
-        container = arrays_at , target_object;
-        index = key_as_number / FIXED_SCALE;
-        !container_in_bounds , index;
-            runtime_error , "index out of range" , 0;
+        value = pop();
+        key = pop();
+        target = pop();
+        container = arrays.at(target.object);
+        index = key.as_number() / FIXED_SCALE;
+        !container.in_bounds(index);
+            runtime_error("index out of range", 0);
 
-        slot = container_at , index;
-        slot_kind = value_kind;
-        slot_number = value_number;
-        slot_object = value_object;
-        push , value;
+        slot = container.at(index);
+        slot.kind = value.kind;
+        slot.number = value.number;
+        slot.object = value.object;
+        push(value);
 
         // --- Comparison ------------------------------------------------------
 
-        b = pop;
-        a = pop;
-        same = values_equal , a , b;
+        b = pop();
+        a = pop();
+        same = values_equal(a, b);
         invert;
-            push , make_bool , !same;
+            push(make_bool(!same));
 
-            push , make_bool , same;
+            push(make_bool(same));
 
-        b = pop;
-        a = pop;
-        !a_is_number || !b_is_number;
-            runtime_error , "operands must be numbers" , 0;
+        b = pop();
+        a = pop();
+        !a.is_number() || !b.is_number();
+            runtime_error("operands must be numbers", 0);
 
-        l = a_as_number;
-        r = b_as_number;
-        op == OpCode_Greater;
-            push , make_bool , l > r;
-        op == OpCode_GreaterEqual;
-            push , make_bool , l >= r;
-        op == OpCode_Less;
-            push , make_bool , l < r;
+        l = a.as_number();
+        r = b.as_number();
+        op == OpCode::Greater;
+            push(make_bool(l > r));
+        op == OpCode::GreaterEqual;
+            push(make_bool(l >= r));
+        op == OpCode::Less;
+            push(make_bool(l < r));
 
-            push , make_bool , l <= r;
+            push(make_bool(l <= r));
 
     // --- Arithmetic ------------------------------------------------------
 
     // All numbers are fixed-point with FIXED_SCALE fractional units, so
     // multiplication and division need a rescale afterwards.
 
-        b = pop;
-        a = pop;
-        !a_is_number || !b_is_number;
-            runtime_error , "operands must be numbers" , 0;
+        b = pop();
+        a = pop();
+        !a.is_number() || !b.is_number();
+            runtime_error("operands must be numbers", 0);
 
-        l = a_as_number;
-        r = b_as_number;
-        op == OpCode_Add;
-            push , make_number , l + r;
-        op == OpCode_Subtract;
-            push , make_number , l - r;
-        op == OpCode_Multiply;
-            push , make_number , l * r / FIXED_SCALE;
-        op == OpCode_Divide;
-            push , make_number , l * FIXED_SCALE / r;
-        op == OpCode_Modulo;
-            push , make_number , l % r;
+        l = a.as_number();
+        r = b.as_number();
+        op == OpCode::Add;
+            push(make_number(l + r));
+        op == OpCode::Subtract;
+            push(make_number(l - r));
+        op == OpCode::Multiply;
+            push(make_number(l * r / FIXED_SCALE));
+        op == OpCode::Divide;
+            push(make_number(l * FIXED_SCALE / r));
+        op == OpCode::Modulo;
+            push(make_number(l % r));
 
-            push , make_number , power , l , r / FIXED_SCALE;
+            push(make_number(power(l, r / FIXED_SCALE)));
 
         result = FIXED_SCALE;
         i = 0;
         i < exponent;
             result = result * base / FIXED_SCALE;
-            ++i;
+            i += 1;
 
         result;
 
-        value = pop;
-        !value_is_number;
-            runtime_error , "operand must be a number" , 0;
+        value = pop();
+        !value.is_number();
+            runtime_error("operand must be a number", 0);
 
-        push , make_number , -value_as_number;
+        push(make_number(-value.as_number()));
 
-        value = pop;
-        push , make_number , value_as_number + delta;
+        value = pop();
+        push(make_number(value.as_number() + delta));
 
         // --- Bitwise ---------------------------------------------------------
 
-        b = pop;
-        a = pop;
-        l = a_as_number / FIXED_SCALE;
-        r = b_as_number / FIXED_SCALE;
-        op == OpCode_BitAnd;
-            push , make_number , l & r * FIXED_SCALE;
-        op == OpCode_BitOr;
-            push , make_number , l | r * FIXED_SCALE;
-        op == OpCode_BitXor;
-            push , make_number , l ^ r * FIXED_SCALE;
-        op == OpCode_ShiftLeft;
-            push , make_number , l << r * FIXED_SCALE;
-        op == OpCode_ShiftRight;
-            push , make_number , l >> r * FIXED_SCALE;
+        b = pop();
+        a = pop();
+        l = a.as_number() / FIXED_SCALE;
+        r = b.as_number() / FIXED_SCALE;
+        op == OpCode::BitAnd;
+            push(make_number((l & r) * FIXED_SCALE));
+        op == OpCode::BitOr;
+            push(make_number((l | r) * FIXED_SCALE));
+        op == OpCode::BitXor;
+            push(make_number((l ^ r) * FIXED_SCALE));
+        op == OpCode::ShiftLeft;
+            push(make_number((l << r) * FIXED_SCALE));
+        op == OpCode::ShiftRight;
+            push(make_number((l >> r) * FIXED_SCALE));
 
-            push , make_number , l >> r & OPERAND_MASK * FIXED_SCALE;
+            push(make_number(((l >> r) & OPERAND_MASK) * FIXED_SCALE));
 
-        value = pop;
-        raw = value_as_number / FIXED_SCALE;
-        push , make_number , ~raw * FIXED_SCALE;
+        value = pop();
+        raw = value.as_number() / FIXED_SCALE;
+        push(make_number(~raw * FIXED_SCALE));
 
         // --- Strings, arrays and maps ----------------------------------------
 
-        b = pop;
-        a = pop;
-        joined = string_of , a;
-        joined_append , string_of , b;
-        push , intern , joined;
+        b = pop();
+        a = pop();
+        joined = string_of(a);
+        joined.append(string_of(b));
+        push(intern(joined));
 
-        interned_contains , text;
-            make_object , interned_at , text;
+        interned.contains(text);
+            make_object(interned.at(text));
 
-        handle = allocate , ObjectKind_String , text_size;
-        interned_insert , text , handle;
-        strings_by_handle_insert , handle , text;
-        make_object , handle;
+        handle = allocate(ObjectKind::String, text.size());
+        interned.insert(text, handle);
+        strings_by_handle.insert(handle, text);
+        make_object(handle);
 
-        handle = allocate , ObjectKind_Array , count;
-        target = arrays_at , handle;
+        handle = allocate(ObjectKind::Array, count);
+        target = arrays.at(handle);
         i = 0;
         i < count;
-            target_items_push_back , peek , count - 1 - i;
-            i++;
+            target.items.push_back(peek(count - 1 - i));
+            i += 1;
 
-        pop_n , count;
-        push , make_object , handle;
+        pop_n(count);
+        push(make_object(handle));
 
-        value = pop;
-        target = arrays_at , peek , 0 , as_object;
-        target_items_push_back , value;
+        value = pop();
+        target = arrays.at(peek(0).as_object());
+        target.items.push_back(value);
 
-        target = pop;
-        push , make_number , arrays_at , target_as_object_size * FIXED_SCALE;
+        target = pop();
+        push(make_number(arrays.at(target.as_object()).size() * FIXED_SCALE));
 
-        length = pop_as_number / FIXED_SCALE;
-        begin = pop_as_number / FIXED_SCALE;
-        source = pop;
-        handle = allocate , ObjectKind_Array , length;
-        target = arrays_at , handle;
-        original = arrays_at , source_as_object;
-        i , range , begin , begin + length;
-            original_in_bounds , i;
-                target_items_push_back , original_at , i;
+        length = pop().as_number() / FIXED_SCALE;
+        begin = pop().as_number() / FIXED_SCALE;
+        source = pop();
+        handle = allocate(ObjectKind::Array, length);
+        target = arrays.at(handle);
+        original = arrays.at(source.as_object());
+        i , range(begin, begin + length);
+            original.in_bounds(i);
+                target.items.push_back(original.at(i));
 
-        push , make_object , handle;
+        push(make_object(handle));
 
-        b = pop;
-        a = pop;
-        handle = allocate , ObjectKind_Array , 0;
-        target = arrays_at , handle;
-        value , arrays_at , a_as_object_items;
-            target_items_push_back , value;
+        b = pop();
+        a = pop();
+        handle = allocate(ObjectKind::Array, 0);
+        target = arrays.at(handle);
+        value , arrays.at(a.as_object()).items;
+            target.items.push_back(value);
 
-        value , arrays_at , b_as_object_items;
-            target_items_push_back , value;
+        value , arrays.at(b.as_object()).items;
+            target.items.push_back(value);
 
-        push , make_object , handle;
+        push(make_object(handle));
 
-        handle = allocate , ObjectKind_Map , pair_count;
-        target = maps_at , handle;
+        handle = allocate(ObjectKind::Map, pair_count);
+        target = maps.at(handle);
         i = 0;
         i < pair_count;
-            target_values_push_back , pop;
-            target_keys_push_back , pop;
-            i++;
+            target.values.push_back(pop());
+            target.keys.push_back(pop());
+            i += 1;
 
-        push , make_object , handle;
+        push(make_object(handle));
 
-        value = pop;
-        key = pop;
-        target = maps_at , peek , 0 , as_object;
-        existing = target_find , key;
+        value = pop();
+        key = pop();
+        target = maps.at(peek(0).as_object());
+        existing = target.find(key);
         existing >= 0;
-            store_slot_in , target_values , existing , value;
+            store_slot_in(target.values, existing, value);
 
-            target_keys_push_back , key;
-            target_values_push_back , value;
+            target.keys.push_back(key);
+            target.values.push_back(value);
 
-        slot = slots_at , index;
-        slot_kind = value_kind;
-        slot_number = value_number;
-        slot_object = value_object;
-        slot_boolean = value_boolean;
+        slot = slots.at(index);
+        slot.kind = value.kind;
+        slot.number = value.number;
+        slot.object = value.object;
+        slot.boolean = value.boolean;
 
-        key = pop;
-        target = maps_at , pop_as_object;
-        index = target_find , key;
+        key = pop();
+        target = maps.at(pop().as_object());
+        index = target.find(key);
         index < 0;
-            push , make_nil;
+            push(make_nil());
 
-            push , target_values_at , index;
+            push(target.values.at(index));
 
-        key = pop;
-        target = maps_at , peek , 0 , as_object;
-        index = target_find , key;
+        key = pop();
+        target = maps.at(peek(0).as_object());
+        index = target.find(key);
         index >= 0;
-            target_keys_erase , index;
-            target_values_erase , index;
+            target.keys.erase(index);
+            target.values.erase(index);
 
-        target = pop;
-        push , make_number , maps_at , target_as_object_size * FIXED_SCALE;
+        target = pop();
+        push(make_number(maps.at(target.as_object()).size() * FIXED_SCALE));
 
-        value = peek , 0;
-        !value_is_object;
-            runtime_error , "value has no length" , 0;
+        value = peek(0);
+        !value.is_object();
+            runtime_error("value has no length", 0);
 
-        kind = objects_at , value_as_object_kind;
-        kind == ObjectKind_Array;
-            array_length;
-        kind == ObjectKind_Map;
-            map_length;
+        kind = objects.at(value.as_object()).kind;
+        kind == ObjectKind::Array;
+            array_length();
+        kind == ObjectKind::Map;
+            map_length();
 
-            text = string_of , pop;
-            push , make_number , text_size * FIXED_SCALE;
+            text = string_of(pop());
+            push(make_number(text.size() * FIXED_SCALE));
 
-        value = pop;
-        push , intern , type_name , value;
+        value = pop();
+        push(intern(type_name(value)));
 
-        value_is_nil;
+        value.is_nil();
             "nil";
-        value_is_bool;
+        value.is_bool();
             "bool";
-        value_is_number;
+        value.is_number();
             "number";
 
-            object_kind_name , objects_at , value_object_kind;
+            object_kind_name(objects.at(value.object).kind);
 
-        value_is_nil;
+        value.is_nil();
             "nil";
 
-        value_is_bool;
-            value_boolean;
+        value.is_bool();
+            value.boolean;
                 "true";
 
                 "false";
 
-        value_is_number;
-            format_fixed , value_number;
+        value.is_number();
+            format_fixed(value.number);
 
-        string_of , value;
+        string_of(value);
 
-        key = string_of , name;
-        modules_contains , key;
-            modules_at , key;
+        key = string_of(name);
+        modules.contains(key);
+            modules.at(key);
 
-        runtime_error , "no such module" , 0;
-        make_nil;
+        runtime_error("no such module", 0);
+        make_nil();
 
         // A cooperative yield point so long-running loops stay interruptible.
 
-        ++steps;
+        steps += 1;
         steps % 4096 == 0;
             interrupted;
-                runtime_error , "execution interrupted" , 0;
+                runtime_error("execution interrupted", 0);
 
                 // --- Calls -----------------------------------------------------------
 
-        !callee_is_object;
-            runtime_error , "can only call functions" , 0;
+        !callee.is_object();
+            runtime_error("can only call functions", 0);
 
-        kind = objects_at , callee_as_object_kind;
-        kind == ObjectKind_Closure;
-            call_closure , callee_as_object , argument_count , false;
-        kind == ObjectKind_Native;
-            call_native , argument_count;
-        kind == ObjectKind_BoundMethod;
-            call_closure , bound_target , callee_as_object , argument_count , false;
+        kind = objects.at(callee.as_object()).kind;
+        kind == ObjectKind::Closure;
+            call_closure(callee.as_object(), argument_count, false);
+        kind == ObjectKind::Native;
+            call_native(argument_count);
+        kind == ObjectKind::BoundMethod;
+            call_closure(bound_target(callee.as_object()), argument_count, false);
 
-            runtime_error , "value is not callable" , 0;
+            runtime_error("value is not callable", 0);
 
-        closure = closures_at , handle;
-        argument_count != closure_arity;
-            runtime_error , "wrong number of arguments" , 0;
+        closure = closures.at(handle);
+        argument_count != closure.arity();
+            runtime_error("wrong number of arguments", 0);
 
         frame_count >= FRAMES_MAX;
-            runtime_error , "stack overflow" , 0;
+            runtime_error("stack overflow", 0);
 
         frame ;
-        frame_closure = handle;
-        frame_ip = 0;
-        frame_slot_base = stack_top - argument_count - 1;
-        frame_argument_count = argument_count;
-        frame_is_tail = tail;
-        frames_push_back , frame;
-        frame_count++;
+        frame.closure = handle;
+        frame.ip = 0;
+        frame.slot_base = stack_top - argument_count - 1;
+        frame.argument_count = argument_count;
+        frame.is_tail = tail;
+        frames.push_back(frame);
+        frame_count += 1;
 
-        callee = peek , argument_count;
-        frame = frames_at , frame_count - 1;
-        base = frame_slot_base;
-        --frame_count;
-        frames_pop_back;
-        shift_arguments , base , argument_count;
-        call_closure , callee_as_object , argument_count , true;
+        callee = peek(argument_count);
+        frame = frames.at(frame_count - 1);
+        base = frame.slot_base;
+        frame_count -= 1;
+        frames.pop_back();
+        shift_arguments(base, argument_count);
+        call_closure(callee.as_object(), argument_count, true);
 
         // Slide the pending arguments down over the frame being replaced.
 
         i = 0;
         i <= argument_count;
-            store_slot , base + i , stack_at , stack_top - argument_count - 1 + i;
-            i++;
+            store_slot(base + i, stack.at(stack_top - argument_count - 1 + i));
+            i += 1;
 
         stack_top = base + argument_count + 1;
 
-        receiver = peek , argument_count;
-        !receiver_is_object;
-            runtime_error , "only objects have methods" , 0;
+        receiver = peek(argument_count);
+        !receiver.is_object();
+            runtime_error("only objects have methods", 0);
 
-        method = lookup_field , receiver_as_object , string_of , name;
-        call_value , method , argument_count;
+        method = lookup_field(receiver.as_object(), string_of(name));
+        call_value(method, argument_count);
 
-        callee = peek , argument_count;
-        slot = natives_at , callee_as_object_slot;
-        result = dispatch_native , slot , argument_count;
-        pop_n , argument_count + 1;
-        push , result;
+        callee = peek(argument_count);
+        slot = natives.at(callee.as_object()).slot;
+        result = dispatch_native(slot, argument_count);
+        pop_n(argument_count + 1);
+        push(result);
 
         slot;
         argument_count;
-        make_nil;
+        make_nil();
 
-        bound_methods_at , handle;
+        bound_methods.at(handle);
 
-        frame = frames_at , frame_count - 1;
-        base = frame_slot_base;
-        close_upvalues , base;
-        frame_count--;
-        frames_pop_back;
+        frame = frames.at(frame_count - 1);
+        base = frame.slot_base;
+        close_upvalues(base);
+        frame_count -= 1;
+        frames.pop_back();
         stack_top > base;
-            pop;
+            pop();
 
         frame_count > 0;
-            push , result;
+            push(result);
 
             last_result = result;
 
@@ -1261,54 +1261,54 @@
     // scan stops early.
 
         handle , open_upvalues;
-            upvalues_at , handle_location == index;
+            upvalues.at(handle).location == index;
                 handle;
 
-        created = allocate , ObjectKind_Upvalue , 0;
-        target = upvalues_at , created;
-        target_location = index;
-        open_upvalues_push_back , created;
+        created = allocate(ObjectKind::Upvalue, 0);
+        target = upvalues.at(created);
+        target.location = index;
+        open_upvalues.push_back(created);
         created;
 
     // Close every open upvalue at or above `floor`, copying the live stack
     // slot into the upvalue itself.
 
         i = 0;
-        i < open_upvalues_size;
-            handle = open_upvalues_at , i;
-            target = upvalues_at , handle;
-            target_location >= floor;
-                target_closed = stack_at , target_location;
-                target_location = -1;
-                open_upvalues_erase , i;
+        i < open_upvalues.size();
+            handle = open_upvalues.at(i);
+            target = upvalues.at(handle);
+            target.location >= floor;
+                target.closed = stack.at(target.location);
+                target.location = -1;
+                open_upvalues.erase(i);
 
-                ++i;
+                i += 1;
 
-        handle = closures_at , closure_upvalues_at , index;
-        target = upvalues_at , handle;
-        target_is_open;
-            stack_at , target_location;
+        handle = closures.at(closure).upvalues.at(index);
+        target = upvalues.at(handle);
+        target.is_open();
+            stack.at(target.location);
 
-        target_closed;
+        target.closed;
 
-        handle = closures_at , closure_upvalues_at , index;
-        target = upvalues_at , handle;
-        target_is_open;
-            store_slot , target_location , value;
+        handle = closures.at(closure).upvalues.at(index);
+        target = upvalues.at(handle);
+        target.is_open();
+            store_slot(target.location, value);
 
-            target_closed = value;
+            target.closed = value;
 
-        handle = allocate , ObjectKind_Closure , 0;
-        created = closures_at , handle;
-        created_function = functions_at , function_as_object;
-        i , range , 0 , created_function_upvalue_count;
-            descriptor = upvalue_plan_at , i;
-            descriptor_first;
-                created_upvalues_push_back , capture_upvalue , frame_slot_base + descriptor_second;
+        handle = allocate(ObjectKind::Closure, 0);
+        created = closures.at(handle);
+        created.function = functions.at(function.as_object());
+        i , range(0, created.function.upvalue_count);
+            descriptor = upvalue_plan.at(i);
+            descriptor.first;
+                created.upvalues.push_back(capture_upvalue(frame.slot_base + descriptor.second));
 
-                created_upvalues_push_back , closures_at , frame_closure_upvalues_at , descriptor_second;
+                created.upvalues.push_back(closures.at(frame.closure).upvalues.at(descriptor.second));
 
-        push , make_object , handle;
+        push(make_object(handle));
 
     // --- The interpreter loop --------------------------------------------
 
@@ -1323,231 +1323,231 @@
 
             frame_count == 0;
 
-            frame = frames_at , frame_count - 1;
-            chunk = closures_at , frame_closure_function_chunk;
-            frame_ip >= chunk_size;
+            frame = frames.at(frame_count - 1);
+            chunk = closures.at(frame.closure).function.chunk;
+            frame.ip >= chunk.size();
                 // Falling off the end of a chunk is an implicit `return nil`.
-                return_from , make_nil;
+                return_from(make_nil());
 
             trace_execution;
-                print_stack;
-                println , disassemble_instruction , chunk , frame_ip;
+                print_stack();
+                println(disassemble_instruction(chunk, frame.ip));
 
-            ins = chunk_code_at , frame_ip;
-            op = ins_op;
-            frame_ip += 1;
+            ins = chunk.code.at(frame.ip);
+            op = ins.op;
+            frame.ip += 1;
             bytes_allocated > next_gc;
-                collect_garbage;
+                collect_garbage();
 
             // --- constants, literals and stack shuffling ---
-            op == OpCode_Constant;
-                push , chunk_constant_at , ins_operand;
-            op == OpCode_ConstantLong;
-                push , chunk_constant_at , ins_operand & OPERAND_MASK;
-            op == OpCode_Nil;
-                push , make_nil;
-            op == OpCode_True;
-                push , make_bool , true;
-            op == OpCode_False;
-                push , make_bool , false;
-            op == OpCode_Pop;
-                pop;
-            op == OpCode_PopN;
-                pop_n , ins_operand;
-            op == OpCode_Dup;
-                push , peek , 0;
-            op == OpCode_Swap;
-                swap_top;
-            op == OpCode_Rotate;
+            op == OpCode::Constant;
+                push(chunk.constant_at(ins.operand));
+            op == OpCode::ConstantLong;
+                push(chunk.constant_at(ins.operand & OPERAND_MASK));
+            op == OpCode::Nil;
+                push(make_nil());
+            op == OpCode::True;
+                push(make_bool(true));
+            op == OpCode::False;
+                push(make_bool(false));
+            op == OpCode::Pop;
+                pop();
+            op == OpCode::PopN;
+                pop_n(ins.operand);
+            op == OpCode::Dup;
+                push(peek(0));
+            op == OpCode::Swap;
+                swap_top();
+            op == OpCode::Rotate;
                 // Bring the n-th slot to the top, sliding the rest down.
-                rotate , ins_operand;
+                rotate(ins.operand);
             // --- variable access: locals, globals, upvalues, members ---
-            op == OpCode_GetLocal;
-                push , stack_at , frame_local , ins_operand;
-            op == OpCode_SetLocal;
-                store_slot , frame_local , ins_operand , peek , 0;
-            op == OpCode_GetGlobal;
-                load_global , chunk_constant_at , ins_operand;
-            op == OpCode_SetGlobal;
-                assign_global , chunk_constant_at , ins_operand;
-            op == OpCode_DefineGlobal;
-                define_global , chunk_constant_at , ins_operand;
-            op == OpCode_GetUpvalue;
-                push , read_upvalue , frame_closure , ins_operand;
-            op == OpCode_SetUpvalue;
-                write_upvalue , frame_closure , ins_operand , peek , 0;
-            op == OpCode_GetProperty;
-                get_property , chunk_constant_at , ins_operand;
-            op == OpCode_SetProperty;
-                set_property , chunk_constant_at , ins_operand;
-            op == OpCode_GetIndex;
-                index_get;
-            op == OpCode_SetIndex;
-                index_set;
+            op == OpCode::GetLocal;
+                push(stack.at(frame.local(ins.operand)));
+            op == OpCode::SetLocal;
+                store_slot(frame.local(ins.operand), peek(0));
+            op == OpCode::GetGlobal;
+                load_global(chunk.constant_at(ins.operand));
+            op == OpCode::SetGlobal;
+                assign_global(chunk.constant_at(ins.operand));
+            op == OpCode::DefineGlobal;
+                define_global(chunk.constant_at(ins.operand));
+            op == OpCode::GetUpvalue;
+                push(read_upvalue(frame.closure, ins.operand));
+            op == OpCode::SetUpvalue;
+                write_upvalue(frame.closure, ins.operand, peek(0));
+            op == OpCode::GetProperty;
+                get_property(chunk.constant_at(ins.operand));
+            op == OpCode::SetProperty;
+                set_property(chunk.constant_at(ins.operand));
+            op == OpCode::GetIndex;
+                index_get();
+            op == OpCode::SetIndex;
+                index_set();
             // --- comparison ---
-            op == OpCode_Equal;
-                compare_equal , false;
-            op == OpCode_NotEqual;
-                compare_equal , true;
-            op == OpCode_Greater;
-                compare_order , OpCode_Greater;
-            op == OpCode_GreaterEqual;
-                compare_order , OpCode_GreaterEqual;
-            op == OpCode_Less;
-                compare_order , OpCode_Less;
-            op == OpCode_LessEqual;
-                compare_order , OpCode_LessEqual;
+            op == OpCode::Equal;
+                compare_equal(false);
+            op == OpCode::NotEqual;
+                compare_equal(true);
+            op == OpCode::Greater;
+                compare_order(OpCode::Greater);
+            op == OpCode::GreaterEqual;
+                compare_order(OpCode::GreaterEqual);
+            op == OpCode::Less;
+                compare_order(OpCode::Less);
+            op == OpCode::LessEqual;
+                compare_order(OpCode::LessEqual);
             // --- arithmetic; operands are fixed-point, scaled by FIXED_SCALE ---
-            op == OpCode_Add;
+            op == OpCode::Add;
                 // Add is overloaded: strings concatenate, numbers add.
-                peek , 0 , is_object && peek , 1 , is_object;
-                    concat_strings;
+                peek(0).is_object() && peek(1).is_object();
+                    concat_strings();
 
-                    arith , OpCode_Add;
+                    arith(OpCode::Add);
 
-            op == OpCode_Subtract;
-                arith , OpCode_Subtract;
-            op == OpCode_Multiply;
-                arith , OpCode_Multiply;
-            op == OpCode_Divide;
-                peek , 0 , as_number == 0;
-                    runtime_error , "division by zero" , chunk_line_at , frame_ip;
+            op == OpCode::Subtract;
+                arith(OpCode::Subtract);
+            op == OpCode::Multiply;
+                arith(OpCode::Multiply);
+            op == OpCode::Divide;
+                peek(0).as_number() == 0;
+                    runtime_error("division by zero", chunk.line_at(frame.ip));
 
-                    arith , OpCode_Divide;
+                    arith(OpCode::Divide);
 
-            op == OpCode_Modulo;
-                peek , 0 , as_number == 0;
-                    runtime_error , "modulo by zero" , chunk_line_at , frame_ip;
+            op == OpCode::Modulo;
+                peek(0).as_number() == 0;
+                    runtime_error("modulo by zero", chunk.line_at(frame.ip));
 
-                    arith , OpCode_Modulo;
+                    arith(OpCode::Modulo);
 
-            op == OpCode_Power;
-                arith , OpCode_Power;
+            op == OpCode::Power;
+                arith(OpCode::Power);
             // --- unary operators ---
-            op == OpCode_Negate;
-                negate;
-            op == OpCode_Increment;
-                adjust , FIXED_SCALE;
-            op == OpCode_Decrement;
-                adjust , -FIXED_SCALE;
-            op == OpCode_Not;
-                value = pop;
-                push , make_bool , !value_is_truthy;
+            op == OpCode::Negate;
+                negate();
+            op == OpCode::Increment;
+                adjust(FIXED_SCALE);
+            op == OpCode::Decrement;
+                adjust(-FIXED_SCALE);
+            op == OpCode::Not;
+                value = pop();
+                push(make_bool(!value.is_truthy()));
             // --- bitwise; operands are truncated to whole integers first ---
-            op == OpCode_BitAnd;
-                bitwise , OpCode_BitAnd;
-            op == OpCode_BitOr;
-                bitwise , OpCode_BitOr;
-            op == OpCode_BitXor;
-                bitwise , OpCode_BitXor;
-            op == OpCode_BitNot;
-                bit_not;
-            op == OpCode_ShiftLeft;
-                bitwise , OpCode_ShiftLeft;
-            op == OpCode_ShiftRight;
-                bitwise , OpCode_ShiftRight;
-            op == OpCode_ShiftRightLogical;
-                bitwise , OpCode_ShiftRightLogical;
+            op == OpCode::BitAnd;
+                bitwise(OpCode::BitAnd);
+            op == OpCode::BitOr;
+                bitwise(OpCode::BitOr);
+            op == OpCode::BitXor;
+                bitwise(OpCode::BitXor);
+            op == OpCode::BitNot;
+                bit_not();
+            op == OpCode::ShiftLeft;
+                bitwise(OpCode::ShiftLeft);
+            op == OpCode::ShiftRight;
+                bitwise(OpCode::ShiftRight);
+            op == OpCode::ShiftRightLogical;
+                bitwise(OpCode::ShiftRightLogical);
             // --- control flow ---
-            op == OpCode_Jump;
-                frame_jump_to , ins_operand;
-            op == OpCode_JumpIfFalse;
-                cond = pop;
-                !cond_is_truthy;
-                    frame_jump_to , ins_operand;
+            op == OpCode::Jump;
+                frame.jump_to(ins.operand);
+            op == OpCode::JumpIfFalse;
+                cond = pop();
+                !cond.is_truthy();
+                    frame.jump_to(ins.operand);
 
-            op == OpCode_JumpIfTrue;
-                cond = pop;
-                cond_is_truthy;
-                    frame_jump_to , ins_operand;
+            op == OpCode::JumpIfTrue;
+                cond = pop();
+                cond.is_truthy();
+                    frame.jump_to(ins.operand);
 
-            op == OpCode_JumpIfNil;
+            op == OpCode::JumpIfNil;
                 // Peeks rather than pops: this backs the nil-coalescing lowering.
-                peek , 0 , is_nil;
-                    frame_jump_to , ins_operand;
+                peek(0).is_nil();
+                    frame.jump_to(ins.operand);
 
-            op == OpCode_JumpIfNotNil;
-                !peek , 0 , is_nil;
-                    frame_jump_to , ins_operand;
+            op == OpCode::JumpIfNotNil;
+                !peek(0).is_nil();
+                    frame.jump_to(ins.operand);
 
-            op == OpCode_Loop;
+            op == OpCode::Loop;
                 // Backwards edge; the operand is an absolute index, not a delta.
-                frame_jump_to , ins_operand;
-                check_interrupt;
+                frame.jump_to(ins.operand);
+                check_interrupt();
             // --- calls ---
-            op == OpCode_Call;
-                call_value , peek , ins_operand , ins_operand;
-            op == OpCode_Invoke;
-                invoke , chunk_constant_at , ins_operand , ins_extra;
-            op == OpCode_TailCall;
+            op == OpCode::Call;
+                call_value(peek(ins.operand), ins.operand);
+            op == OpCode::Invoke;
+                invoke(chunk.constant_at(ins.operand), ins.extra);
+            op == OpCode::TailCall;
                 // Reuses the current frame instead of pushing a new one.
-                tail_call , ins_operand;
-            op == OpCode_CallNative;
-                call_native , ins_operand;
+                tail_call(ins.operand);
+            op == OpCode::CallNative;
+                call_native(ins.operand);
             // --- closures and returns ---
-            op == OpCode_Closure;
-                make_closure , chunk_constant_at , ins_operand , frame;
-            op == OpCode_CloseUpvalue;
-                close_upvalues , stack_top - 1;
-                pop;
-            op == OpCode_Return;
-                return_from , pop;
-            op == OpCode_ReturnNil;
-                return_from , make_nil;
+            op == OpCode::Closure;
+                make_closure(chunk.constant_at(ins.operand), frame);
+            op == OpCode::CloseUpvalue;
+                close_upvalues(stack_top - 1);
+                pop();
+            op == OpCode::Return;
+                return_from(pop());
+            op == OpCode::ReturnNil;
+                return_from(make_nil());
             // --- arrays ---
-            op == OpCode_NewArray;
-                new_array , ins_operand;
-            op == OpCode_ArrayPush;
-                array_push;
-            op == OpCode_ArrayLength;
-                array_length;
-            op == OpCode_ArraySlice;
-                array_slice;
-            op == OpCode_ArrayConcat;
-                array_concat;
+            op == OpCode::NewArray;
+                new_array(ins.operand);
+            op == OpCode::ArrayPush;
+                array_push();
+            op == OpCode::ArrayLength;
+                array_length();
+            op == OpCode::ArraySlice;
+                array_slice();
+            op == OpCode::ArrayConcat;
+                array_concat();
             // --- maps ---
-            op == OpCode_NewMap;
-                new_map , ins_operand;
-            op == OpCode_MapInsert;
-                map_insert;
-            op == OpCode_MapLookup;
-                map_lookup;
-            op == OpCode_MapErase;
-                map_erase;
-            op == OpCode_MapLength;
-                map_length;
+            op == OpCode::NewMap;
+                new_map(ins.operand);
+            op == OpCode::MapInsert;
+                map_insert();
+            op == OpCode::MapLookup;
+                map_lookup();
+            op == OpCode::MapErase;
+                map_erase();
+            op == OpCode::MapLength;
+                map_length();
             // --- builtins, diagnostics and terminators ---
-            op == OpCode_Concat;
-                concat_strings;
-            op == OpCode_Length;
-                length_of;
-            op == OpCode_TypeOf;
-                type_of;
-            op == OpCode_Print;
-                value = pop;
-                println , to_display , value;
-            op == OpCode_Assert;
-                cond = pop;
-                !cond_is_truthy;
-                    runtime_error , "assertion failed" , ins_operand;
+            op == OpCode::Concat;
+                concat_strings();
+            op == OpCode::Length;
+                length_of();
+            op == OpCode::TypeOf;
+                type_of();
+            op == OpCode::Print;
+                value = pop();
+                println(to_display(value));
+            op == OpCode::Assert;
+                cond = pop();
+                !cond.is_truthy();
+                    runtime_error("assertion failed", ins.operand);
 
-            op == OpCode_Import;
-                push , import_module , chunk_constant_at , ins_operand;
-            op == OpCode_Nop;
+            op == OpCode::Import;
+                push(import_module(chunk.constant_at(ins.operand)));
+            op == OpCode::Nop;
                 // Alignment padding left behind by the peephole pass.
-                ins_operand;
-            op == OpCode_Halt;
+                ins.operand;
+            op == OpCode::Halt;
                 frame_count = 0;
 
                 // An opcode this build does not know about. Serialized chunks
                 // carry a version stamp, so this only fires on corruption.
-                runtime_error , "unknown opcode" , chunk_line_at , frame_ip;
+                runtime_error("unknown opcode", chunk.line_at(frame.ip));
 
             had_error;
-                reset_stack;
-                InterpretResult_RuntimeError;
+                reset_stack();
+                InterpretResult::RuntimeError;
 
-        InterpretResult_Ok;
+        InterpretResult::Ok;
 
     // --- Allocation and the mark-sweep collector -------------------------
 
@@ -1557,127 +1557,127 @@
 
         bytes_allocated += 32 + hint * 16;
         bytes_allocated > next_gc;
-            collect_garbage;
+            collect_garbage();
 
         header ;
-        header_kind = kind;
-        header_marked = false;
-        header_handle = objects_size;
-        objects_push_back , header;
-        header_handle;
+        header.kind = kind;
+        header.marked = false;
+        header.handle = objects.size();
+        objects.push_back(header);
+        header.handle;
 
         before = bytes_allocated;
-        gray_stack_clear;
-        mark_roots;
-        trace_references;
-        sweep;
+        gray_stack.clear();
+        mark_roots();
+        trace_references();
+        sweep();
         next_gc = bytes_allocated * GC_GROWTH_PERCENT / 100;
         next_gc < GC_MIN_THRESHOLD;
             next_gc = GC_MIN_THRESHOLD;
 
         trace_gc;
-            line = string;
-            line_append , "gc: reclaimed ";
-            line_append , to_string , before - bytes_allocated;
-            line_append , " bytes";
-            println , line;
+            line = string();
+            line.append("gc: reclaimed ");
+            line.append(to_string(before - bytes_allocated));
+            line.append(" bytes");
+            println(line);
 
     // Roots are the value stack, every live call frame, the open upvalue
     // list, the globals table and the module cache.
 
         value , stack;
-            mark_value , value;
+            mark_value(value);
 
         frame , frames;
-            frame_closure >= 0;
-                mark_object , frame_closure;
+            frame.closure >= 0;
+                mark_object(frame.closure);
 
         handle , open_upvalues;
-            mark_object , handle;
+            mark_object(handle);
 
         entry , globals;
-            mark_value , entry_second;
+            mark_value(entry.second);
 
         entry , modules;
-            mark_value , entry_second;
+            mark_value(entry.second);
 
-        mark_value , last_result;
+        mark_value(last_result);
 
-        !value_is_object;
+        !value.is_object();
 
-        mark_object , value_object;
+        mark_object(value.object);
 
         handle < 0;
 
-        header = objects_at , handle;
-        header_marked;
+        header = objects.at(handle);
+        header.marked;
 
-        header_marked = true;
-        gray_stack_push_back , handle;
+        header.marked = true;
+        gray_stack.push_back(handle);
 
         // Tri-colour marking: gray objects still have unvisited children.
 
-        !gray_stack_empty;
-            handle = gray_stack_back;
-            gray_stack_pop_back;
-            blacken_object , handle;
+        !gray_stack.empty();
+            handle = gray_stack.back();
+            gray_stack.pop_back();
+            blacken_object(handle);
 
-        kind = objects_at , handle_kind;
-        kind == ObjectKind_Array;
-            value , arrays_at , handle_items;
-                mark_value , value;
+        kind = objects.at(handle).kind;
+        kind == ObjectKind::Array;
+            value , arrays.at(handle).items;
+                mark_value(value);
 
-        kind == ObjectKind_Map;
-            value , maps_at , handle_keys;
-                mark_value , value;
+        kind == ObjectKind::Map;
+            value , maps.at(handle).keys;
+                mark_value(value);
 
-            value , maps_at , handle_values;
-                mark_value , value;
+            value , maps.at(handle).values;
+                mark_value(value);
 
-        kind == ObjectKind_Closure;
-            upvalue , closures_at , handle_upvalues;
-                mark_object , upvalue;
+        kind == ObjectKind::Closure;
+            upvalue , closures.at(handle).upvalues;
+                mark_object(upvalue);
 
-            mark_chunk , closures_at , handle_function_chunk;
-        kind == ObjectKind_Upvalue;
-            mark_value , upvalues_at , handle_closed;
-        kind == ObjectKind_Function;
-            mark_chunk , functions_at , handle_chunk;
-        kind == ObjectKind_BoundMethod;
-            mark_object , bound_methods_at , handle;
+            mark_chunk(closures.at(handle).function.chunk);
+        kind == ObjectKind::Upvalue;
+            mark_value(upvalues.at(handle).closed);
+        kind == ObjectKind::Function;
+            mark_chunk(functions.at(handle).chunk);
+        kind == ObjectKind::BoundMethod;
+            mark_object(bound_methods.at(handle));
 
             // Strings and natives have no outgoing references.
             handle;
 
-        value , chunk_constants;
-            mark_value , value;
+        value , chunk.constants;
+            mark_value(value);
 
     // Unmarked objects are released; survivors are cleared for the next
     // cycle. The object table itself is compacted lazily.
 
         i = 0;
-        i < objects_size;
-            header = objects_at , i;
-            header_marked;
-                header_marked = false;
-                i++;
+        i < objects.size();
+            header = objects.at(i);
+            header.marked;
+                header.marked = false;
+                i += 1;
 
-                free_object , i;
-                ++i;
+                free_object(i);
+                i += 1;
 
-        header = objects_at , handle;
+        header = objects.at(handle);
         bytes_allocated -= 32;
-        header_kind == ObjectKind_Array;
-            arrays_at , handle_items_clear;
-        header_kind == ObjectKind_Map;
-            maps_at , handle_keys_clear;
-            maps_at , handle_values_clear;
-        header_kind == ObjectKind_Closure;
-            closures_at , handle_upvalues_clear;
+        header.kind == ObjectKind::Array;
+            arrays.at(handle).items.clear();
+        header.kind == ObjectKind::Map;
+            maps.at(handle).keys.clear();
+            maps.at(handle).values.clear();
+        header.kind == ObjectKind::Closure;
+            closures.at(handle).upvalues.clear();
 
             handle;
 
-        header_handle = -1;
+        header.handle = -1;
 
     // --- State -----------------------------------------------------------
 
@@ -1688,41 +1688,41 @@
 
     // --- Free helpers --------------------------------------------------------
 
-    kind == ObjectKind_String;
+    kind == ObjectKind::String;
         "string";
-    kind == ObjectKind_Array;
+    kind == ObjectKind::Array;
         "array";
-    kind == ObjectKind_Map;
+    kind == ObjectKind::Map;
         "map";
-    kind == ObjectKind_Function;
+    kind == ObjectKind::Function;
         "function";
-    kind == ObjectKind_Closure;
+    kind == ObjectKind::Closure;
         "closure";
-    kind == ObjectKind_Upvalue;
+    kind == ObjectKind::Upvalue;
         "upvalue";
-    kind == ObjectKind_Native;
+    kind == ObjectKind::Native;
         "native";
-    kind == ObjectKind_BoundMethod;
+    kind == ObjectKind::BoundMethod;
         "method";
-    kind == ObjectKind_Instance;
+    kind == ObjectKind::Instance;
         "instance";
 
         "class";
 
         // Render a fixed-point number: 1500 becomes "1.500".
 
-    text = string;
+    text = string();
     value < 0;
-        text_append , "-";
+        text.append("-");
 
-    magnitude = abs , value;
-    text_append , to_string , magnitude / FIXED_SCALE;
+    magnitude = abs(value);
+    text.append(to_string(magnitude / FIXED_SCALE));
     fraction = magnitude % FIXED_SCALE;
     fraction != 0;
-        text_append , ".";
+        text.append(".");
         divisor = FIXED_SCALE / 10;
         divisor > 0;
-            text_append , to_string , fraction / divisor % 10;
+            text.append(to_string(fraction / divisor % 10));
             divisor /= 10;
 
     text;
@@ -1731,16 +1731,16 @@
 
 // Load a top-level chunk into a fresh frame and run it to completion.
 
-    machine_reset_stack;
-    handle = machine_allocate , ObjectKind_Closure , 0;
-    entry = machine_closures_at , handle;
-    entry_function_chunk = chunk;
-    entry_function_arity = 0;
-    machine_push , make_object , handle;
-    machine_call_closure , handle , 0 , false;
-    result = machine_run;
-    result == InterpretResult_RuntimeError;
-        println , "execution aborted";
+    machine.reset_stack();
+    handle = machine.allocate(ObjectKind::Closure, 0);
+    entry = machine.closures.at(handle);
+    entry.function.chunk = chunk;
+    entry.function.arity = 0;
+    machine.push(make_object(handle));
+    machine.call_closure(handle, 0, false);
+    result = machine.run();
+    result == InterpretResult::RuntimeError;
+        println("execution aborted");
 
     result;
 
@@ -1748,19 +1748,19 @@
 // and every jump target must land inside the chunk.
 
     depth = 0;
-    i , range , 0 , chunk_size;
-        ins = chunk_code_at , i;
-        depth += stack_effect , ins_op , ins_operand;
+    i , range(0, chunk.size());
+        ins = chunk.code.at(i);
+        depth += stack_effect(ins.op, ins.operand);
         depth < 0;
             false;
 
-        ins_is_jump;
-            ins_operand < 0 || ins_operand >= chunk_size;
+        ins.is_jump();
+            ins.operand < 0 || ins.operand >= chunk.size();
                 false;
 
-        opcode_operand_count , ins_op > 0;
-            opcode_operand_kind , ins_op == OperandKind_ConstantSlot;
-                ins_operand >= chunk_constants_size;
+        opcode_operand_count(ins.op) > 0;
+            opcode_operand_kind(ins.op) == OperandKind::ConstantSlot;
+                ins.operand >= chunk.constants.size();
                     false;
 
     depth >= 0;

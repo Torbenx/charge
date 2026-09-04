@@ -9,10 +9,16 @@ The target grammar knows only
   * assignments              = += -= *= &= ^= |= /= %= <<= >>= &&= ||=
   * `;` between expressions
 
-Everything the full charge grammar offers on top of that -- statements, call
-expressions, index expressions, template parameterisation, member and static
-access, declarations, types -- is rewritten away.  Only function bodies
-survive; the comments of the input are carried over verbatim and in place.
+Everything the full charge grammar offers on top of that -- statements, index
+expressions, template parameterisation, declarations, types -- is rewritten
+away.  Only function bodies survive; the comments of the input are carried
+over verbatim and in place.
+
+Call expressions (`f(a, b)`), subscripting (`a[i, j]`), parameterization
+(`a{T, U}`), grouping parentheses (`(a + b)`), member access (`a.b`) and
+static access (`a::b`) are folded away by default too, but can be kept as
+real syntax with `--calls keep`, `--parentheses keep` and `--access keep`
+respectively.
 
 Run `./benchmark-expr/generate.py --help` for the knobs.
 """
@@ -307,6 +313,10 @@ UPDATE_PUNCTUATION = {
     "&&=", "||=",
 }
 
+# Postfix brackets `--calls keep` preserves as real syntax instead of folding
+# into a binary-operator chain: `f(a, b)`, `a[i, j]`, `a{T, U}`.
+SUBSCRIPT_KINDS = {"call", "index", "parameterize"}
+
 
 @dataclasses.dataclass
 class Frame:
@@ -408,7 +418,9 @@ class Rewriter:
             return nextIndex
 
         if text == ",":
-            if self.inExpression:
+            if self.inExpression and self.frame.kind in SUBSCRIPT_KINDS and self.options.calls == "keep":
+                token.out = ","
+            elif self.inExpression:
                 self.splice(token)
             else:
                 token.out = DELETE
@@ -603,7 +615,10 @@ class Rewriter:
             self.frame.atArgument = False
             return index + 1
 
-        if self.options.access == "binary":
+        if self.options.access == "keep":
+            token.out = token.text
+            self.exprEnd = False
+        elif self.options.access == "binary":
             self.splice(token)
             self.exprEnd = False
         elif self.options.access == "merge":
@@ -664,8 +679,10 @@ class Rewriter:
 
         kind = {"(": "call", "[": "index", "{": "parameterize"}[text]
         self.stack.append(Frame(kind))
-        # `f()` collapses to `f`, `f(a, b)` to `f OP a OP b`.
-        if empty:
+        if kind in SUBSCRIPT_KINDS and self.options.calls == "keep":
+            token.out = text
+        elif empty:
+            # `f()` collapses to `f`, `f(a, b)` to `f OP a OP b`.
             token.out = DELETE
         else:
             self.splice(token)
@@ -684,6 +701,9 @@ class Rewriter:
             self.exprEnd = False
         elif frame.kind == "group":
             token.out = ")" if self.options.parentheses == "keep" else DELETE
+            self.exprEnd = True
+        elif frame.kind in SUBSCRIPT_KINDS and self.options.calls == "keep":
+            token.out = token.text
             self.exprEnd = True
         else:
             token.out = DELETE
@@ -834,6 +854,10 @@ def check(text, options):
         allowedPunctuation |= {":", "{", "}", ","}
     if options.parentheses == "keep":
         allowedPunctuation |= {"(", ")"}
+    if options.calls == "keep":
+        allowedPunctuation |= {"(", ")", "[", "]", "{", "}"}
+    if options.access == "keep":
+        allowedPunctuation |= {".", "::"}
     offenders = {}
     for token in lex(text):
         if token.kind == PUNCT and token.text not in allowedPunctuation:
@@ -883,13 +907,16 @@ def main(argv=None):
                         help="whether statements survive or everything becomes an expression")
     parser.add_argument("--wrapper", choices=("flat", "block", "fn"), default="block",
                         help="how a function body is delimited; ignored for --grammar expressions")
-    parser.add_argument("--access", choices=("merge", "binary", "drop"), default="merge",
+    parser.add_argument("--access", choices=("merge", "binary", "drop", "keep"), default="keep",
                         help="what `a.b` and `a::b` become")
+    parser.add_argument("--calls", choices=("fold", "keep"), default="keep",
+                        help="whether `f(a, b)`, `a[i, j]` and `a{T, U}` stay calls, indices and "
+                             "parameterizations, or fold into `f OP a OP b`")
     parser.add_argument("--implicit-self", dest="implicitSelf", choices=("drop", "keep"), default="drop",
                         help="what the leading `.` of `.member` becomes")
-    parser.add_argument("--parentheses", choices=("drop", "keep"), default="drop",
+    parser.add_argument("--parentheses", choices=("drop", "keep"), default="keep",
                         help="whether grouping parentheses survive")
-    parser.add_argument("--increments", choices=("synthesize", "keep"), default="synthesize",
+    parser.add_argument("--increments", choices=("synthesize", "keep"), default="keep",
                         help="turn `x += 1;` into `x++;` / `++x;`, which the input never uses")
     parser.add_argument("--strings", choices=("keep", "shorten"), default="keep",
                         help="whether string literals keep their contents")
