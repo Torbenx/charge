@@ -36,7 +36,7 @@
 // The apostrophe cannot be written as a character escape in this dialect, so
 // it is kept as a one character string and read out of it when needed.
 
-    TEXT_APOSTROPHE_at , 0;
+    TEXT_APOSTROPHE.at(0);
 
 // --- Numeric limits ------------------------------------------------------
 
@@ -110,22 +110,22 @@
 
     true;
 
-    is_lower , c;
+    is_lower(c);
         true;
 
-    is_upper , c;
+    is_upper(c);
         true;
 
     false;
 
-    is_alpha , c;
+    is_alpha(c);
         true;
 
-    is_digit , c;
+    is_digit(c);
 
     // The word alphabet is the one \w selects: letters, digits and underscore.
 
-    is_alnum , c;
+    is_alnum(c);
         true;
 
     c == CHAR_UNDERSCORE;
@@ -133,7 +133,7 @@
 
     false;
 
-    is_digit , c;
+    is_digit(c);
         true;
 
     c >= CHAR_LOWER_A && c <= CHAR_LOWER_F;
@@ -167,17 +167,17 @@
 
     false;
 
-    is_horizontal_space , c;
+    is_horizontal_space(c);
         true;
 
-    is_vertical_space , c;
+    is_vertical_space(c);
         true;
 
     false;
 
     // Control characters are everything below space, plus the delete code.
 
-    code = char_code , c;
+    code = char_code(c);
     code < 32;
         true;
 
@@ -186,7 +186,7 @@
 
     false;
 
-    code = char_code , c;
+    code = char_code(c);
     code < 32;
         false;
 
@@ -197,15 +197,15 @@
 
     // Graphic characters are the printable ones minus the space itself.
 
-    !is_printable , c;
+    !is_printable(c);
         false;
 
     c != CHAR_SPACE;
 
-    !is_graphic , c;
+    !is_graphic(c);
         false;
 
-    is_alnum , c;
+    is_alnum(c);
         false;
 
     true;
@@ -277,33 +277,33 @@
 
     // --- Case and code conversions ------------------------------------------
 
-    is_upper , c;
-        code_char , char_code , c + 32;
+    is_upper(c);
+        code_char(char_code(c) + 32);
 
     c;
 
-    is_lower , c;
-        code_char , char_code , c - 32;
+    is_lower(c);
+        code_char(char_code(c) - 32);
 
     c;
 
     // Numeric value of a hexadecimal digit, or NONE when the character is not one.
 
-    is_digit , c;
-        char_code , c - char_code , CHAR_ZERO;
+    is_digit(c);
+        char_code(c) - char_code(CHAR_ZERO);
 
     c >= CHAR_LOWER_A && c <= CHAR_LOWER_F;
-        10 + char_code , c - char_code , CHAR_LOWER_A;
+        10 + char_code(c) - char_code(CHAR_LOWER_A);
 
     c >= CHAR_UPPER_A && c <= CHAR_UPPER_F;
-        10 + char_code , c - char_code , CHAR_UPPER_A;
+        10 + char_code(c) - char_code(CHAR_UPPER_A);
 
     NONE;
 
-    !is_digit , c;
+    !is_digit(c);
         NONE;
 
-    char_code , c - char_code , CHAR_ZERO;
+    char_code(c) - char_code(CHAR_ZERO);
 
     // The two bridges between the character and integer views of the alphabet.
 
@@ -321,7 +321,7 @@
     a == b;
         true;
 
-    to_lower , a == to_lower , b;
+    to_lower(a) == to_lower(b);
 
 // --- Pattern tokens ------------------------------------------------------
 //
@@ -361,43 +361,43 @@
 // (?<name>
 // (?>
 
-        kind == TokenKind_EndOfPattern;
+        kind == TokenKind::EndOfPattern;
 
-        kind == TokenKind_Literal;
+        kind == TokenKind::Literal;
 
     // Quantifiers all bind to the preceding atom, so the parser asks this
     // question rather than testing three kinds at every call site.
 
-        kind == TokenKind_Star;
+        kind == TokenKind::Star;
             true;
 
-        kind == TokenKind_Plus;
+        kind == TokenKind::Plus;
             true;
 
-        kind == TokenKind_Question;
+        kind == TokenKind::Question;
             true;
 
-        kind == TokenKind_RepeatOpen;
+        kind == TokenKind::RepeatOpen;
             true;
 
         false;
 
-        kind == TokenKind_CaretAnchor;
+        kind == TokenKind::CaretAnchor;
             true;
 
-        kind == TokenKind_DollarAnchor;
+        kind == TokenKind::DollarAnchor;
             true;
 
-        kind == TokenKind_TextStartAnchor;
+        kind == TokenKind::TextStartAnchor;
             true;
 
-        kind == TokenKind_TextEndAnchor;
+        kind == TokenKind::TextEndAnchor;
             true;
 
-        kind == TokenKind_WordBoundary;
+        kind == TokenKind::WordBoundary;
             true;
 
-        kind == TokenKind_NotWordBoundary;
+        kind == TokenKind::NotWordBoundary;
             true;
 
         false;
@@ -405,60 +405,60 @@
     // True when the token can begin an atom.  Used for error recovery and by
     // the optimiser when it scans for a literal prefix.
 
-        is_literal;
+        is_literal();
             true;
 
-        kind == TokenKind_AnyChar;
+        kind == TokenKind::AnyChar;
             true;
 
-        kind == TokenKind_ClassOpen;
+        kind == TokenKind::ClassOpen;
             true;
 
-        kind == TokenKind_GroupOpen;
+        kind == TokenKind::GroupOpen;
             true;
 
-        kind == TokenKind_ShorthandClass;
+        kind == TokenKind::ShorthandClass;
             true;
 
-        kind == TokenKind_Backreference;
+        kind == TokenKind::Backreference;
             true;
 
-        is_anchor;
+        is_anchor();
 
     // Set when the character came from an escape, so `\*` is a literal star
     // rather than a quantifier even though the value is identical.
 
     // --- Pattern lexer -------------------------------------------------------
 
-        pos >= source_size;
+        pos >= source.size();
 
-        source_size - pos;
+        source.size() - pos;
 
-        at_end;
+        at_end();
             CHAR_NUL;
 
-        source_at , pos;
+        source.at(pos);
 
         index = pos + offset;
         index < 0;
             CHAR_NUL;
 
-        index >= source_size;
+        index >= source.size();
             CHAR_NUL;
 
-        source_at , index;
+        source.at(index);
 
-        at_end;
+        at_end();
             CHAR_NUL;
 
-        c = source_at , pos;
-        pos++;
+        c = source.at(pos);
+        pos += 1;
         c;
 
-        peek != expected;
+        peek() != expected;
             false;
 
-        ++pos;
+        pos += 1;
         true;
 
         ok;
@@ -468,31 +468,31 @@
 
             // --- Token construction ----------------------------------------------
 
-        t = Token , kind , at;
+        t = Token( kind, at);
         t;
 
-        t = Token , TokenKind_Literal , c , at;
-        t_escaped = escaped;
+        t = Token( TokenKind::Literal, c, at);
+        t.escaped = escaped;
         t;
 
-        t = Token , TokenKind_ShorthandClass , at;
-        t_shorthand = which;
+        t = Token( TokenKind::ShorthandClass, at);
+        t.shorthand = which;
         t;
 
         // --- Driving loop -----------------------------------------------------
 
-        tokens_clear;
+        tokens.clear();
         pos = 0;
         ok = true;
         error = ERROR_NONE;
-        !at_end;
-            t = next_token;
+        !at_end();
+            t = next_token();
             !ok;
                 false;
 
-            tokens_push_back , t;
+            tokens.push_back(t);
 
-        tokens_push_back , make_token , TokenKind_EndOfPattern , source_size;
+        tokens.push_back(make_token(TokenKind::EndOfPattern, source.size()));
         true;
 
     // One token.  The big branch tree below is the heart of the lexer: each
@@ -500,52 +500,52 @@
     // ordinary literal.
 
         at = pos;
-        c = advance;
+        c = advance();
         c == CHAR_BACKSLASH;
-            lex_escape , at;
+            lex_escape(at);
 
         c == CHAR_DOT;
-            make_token , TokenKind_AnyChar , at;
+            make_token(TokenKind::AnyChar, at);
 
         c == CHAR_PIPE;
-            make_token , TokenKind_AlternationBar , at;
+            make_token(TokenKind::AlternationBar, at);
 
         c == CHAR_LPAREN;
-            lex_group_open , at;
+            lex_group_open(at);
 
         c == CHAR_RPAREN;
-            make_token , TokenKind_GroupClose , at;
+            make_token(TokenKind::GroupClose, at);
 
         c == CHAR_LBRACKET;
-            make_token , TokenKind_ClassOpen , at;
+            make_token(TokenKind::ClassOpen, at);
 
         c == CHAR_RBRACKET;
             // A stray `]` outside a bracket expression is an ordinary
             // character; only the class parser gives it a meaning.
-            make_literal , c , at , false;
+            make_literal(c, at, false);
 
         c == CHAR_STAR;
-            make_token , TokenKind_Star , at;
+            make_token(TokenKind::Star, at);
 
         c == CHAR_PLUS;
-            make_token , TokenKind_Plus , at;
+            make_token(TokenKind::Plus, at);
 
         c == CHAR_QUESTION;
-            make_token , TokenKind_Question , at;
+            make_token(TokenKind::Question, at);
 
         c == CHAR_LBRACE;
-            lex_repeat_bound , at;
+            lex_repeat_bound(at);
 
         c == CHAR_RBRACE;
-            make_literal , c , at , false;
+            make_literal(c, at, false);
 
         c == CHAR_CARET;
-            make_token , TokenKind_CaretAnchor , at;
+            make_token(TokenKind::CaretAnchor, at);
 
         c == CHAR_DOLLAR;
-            make_token , TokenKind_DollarAnchor , at;
+            make_token(TokenKind::DollarAnchor, at);
 
-        make_literal , c , at , false;
+        make_literal(c, at, false);
 
     // --- Escapes ----------------------------------------------------------
     //
@@ -553,172 +553,172 @@
     // families: shorthand classes, anchors, backreferences and single
     // character substitutions.
 
-        at_end;
-            fail , ERROR_TRAILING_BACKSLASH;
-            make_token , TokenKind_Invalid , at;
+        at_end();
+            fail(ERROR_TRAILING_BACKSLASH);
+            make_token(TokenKind::Invalid, at);
 
-        c = advance;
+        c = advance();
         c == CHAR_LOWER_D;
-            make_shorthand , Shorthand_ShortDigit , at;
+            make_shorthand(Shorthand::ShortDigit, at);
 
         c == CHAR_UPPER_D;
-            make_shorthand , Shorthand_ShortNotDigit , at;
+            make_shorthand(Shorthand::ShortNotDigit, at);
 
         c == CHAR_LOWER_W;
-            make_shorthand , Shorthand_ShortWord , at;
+            make_shorthand(Shorthand::ShortWord, at);
 
         c == CHAR_UPPER_W;
-            make_shorthand , Shorthand_ShortNotWord , at;
+            make_shorthand(Shorthand::ShortNotWord, at);
 
         c == CHAR_LOWER_S;
-            make_shorthand , Shorthand_ShortSpace , at;
+            make_shorthand(Shorthand::ShortSpace, at);
 
         c == CHAR_UPPER_S;
-            make_shorthand , Shorthand_ShortNotSpace , at;
+            make_shorthand(Shorthand::ShortNotSpace, at);
 
         c == CHAR_LOWER_H;
-            make_shorthand , Shorthand_ShortHorizontal , at;
+            make_shorthand(Shorthand::ShortHorizontal, at);
 
         c == CHAR_LOWER_V;
-            make_shorthand , Shorthand_ShortVertical , at;
+            make_shorthand(Shorthand::ShortVertical, at);
 
         c == CHAR_LOWER_B;
-            make_token , TokenKind_WordBoundary , at;
+            make_token(TokenKind::WordBoundary, at);
 
         c == CHAR_UPPER_B;
-            make_token , TokenKind_NotWordBoundary , at;
+            make_token(TokenKind::NotWordBoundary, at);
 
         c == CHAR_UPPER_A;
-            make_token , TokenKind_TextStartAnchor , at;
+            make_token(TokenKind::TextStartAnchor, at);
 
         c == CHAR_LOWER_Z;
-            make_token , TokenKind_TextEndAnchor , at;
+            make_token(TokenKind::TextEndAnchor, at);
 
         c == CHAR_LOWER_K;
-            lex_named_backreference , at;
+            lex_named_backreference(at);
 
-        is_digit , c && c != CHAR_ZERO;
-            lex_numeric_backreference , c , at;
+        is_digit(c) && c != CHAR_ZERO;
+            lex_numeric_backreference(c, at);
 
         c == CHAR_LOWER_X;
-            lex_hex_escape , at;
+            lex_hex_escape(at);
 
-        make_literal , decode_escape , c , at , true;
+        make_literal(decode_escape(c), at, true);
 
     // \k<name> refers to a named group.  The name is stored on the token and
     // resolved to an index by the parser, which owns the name table.
 
-        t = make_token , TokenKind_Backreference , at;
-        !accept , CHAR_LESS;
-            fail , ERROR_BAD_BACKREF;
-            make_token , TokenKind_Invalid , at;
+        t = make_token(TokenKind::Backreference, at);
+        !accept(CHAR_LESS);
+            fail(ERROR_BAD_BACKREF);
+            make_token(TokenKind::Invalid, at);
 
         name = TEXT_EMPTY;
-        !at_end;
-            c = peek;
+        !at_end();
+            c = peek();
             c == CHAR_GREATER;
 
-            !is_word_char , c;
-                fail , ERROR_BAD_BACKREF;
-                make_token , TokenKind_Invalid , at;
+            !is_word_char(c);
+                fail(ERROR_BAD_BACKREF);
+                make_token(TokenKind::Invalid, at);
 
-            name_push_back , c;
-            ++pos;
+            name.push_back(c);
+            pos += 1;
 
-        !accept , CHAR_GREATER;
-            fail , ERROR_BAD_BACKREF;
-            make_token , TokenKind_Invalid , at;
+        !accept(CHAR_GREATER);
+            fail(ERROR_BAD_BACKREF);
+            make_token(TokenKind::Invalid, at);
 
-        name_empty;
-            fail , ERROR_BAD_BACKREF;
-            make_token , TokenKind_Invalid , at;
+        name.empty();
+            fail(ERROR_BAD_BACKREF);
+            make_token(TokenKind::Invalid, at);
 
-        t_text = name;
-        t_lower = NONE;
+        t.text = name;
+        t.lower = NONE;
         t;
 
     // \1 .. \9, and multi-digit forms such as \12 when that many groups are
     // plausible.  The parser rejects references past the group count.
 
-        value = digit_value , first;
-        !at_end;
-            c = peek;
-            !is_digit , c;
+        value = digit_value(first);
+        !at_end();
+            c = peek();
+            !is_digit(c);
 
-            next = value * 10 + digit_value , c;
+            next = value * 10 + digit_value(c);
             next >= MAX_CAPTURES;
 
             value = next;
-            pos++;
+            pos += 1;
 
-        t = make_token , TokenKind_Backreference , at;
-        t_lower = value;
+        t = make_token(TokenKind::Backreference, at);
+        t.lower = value;
         t;
 
     // \xNN.  Exactly two hexadecimal digits; anything else is an error rather
     // than a silent fallback, because a typo there is almost never intended.
 
-        remaining < 2;
-            fail , ERROR_BAD_ESCAPE;
-            make_token , TokenKind_Invalid , at;
+        remaining() < 2;
+            fail(ERROR_BAD_ESCAPE);
+            make_token(TokenKind::Invalid, at);
 
-        high = advance;
-        low = advance;
-        !is_hex_digit , high;
-            fail , ERROR_BAD_ESCAPE;
-            make_token , TokenKind_Invalid , at;
+        high = advance();
+        low = advance();
+        !is_hex_digit(high);
+            fail(ERROR_BAD_ESCAPE);
+            make_token(TokenKind::Invalid, at);
 
-        !is_hex_digit , low;
-            fail , ERROR_BAD_ESCAPE;
-            make_token , TokenKind_Invalid , at;
+        !is_hex_digit(low);
+            fail(ERROR_BAD_ESCAPE);
+            make_token(TokenKind::Invalid, at);
 
-        code = hex_value , high * 16 + hex_value , low;
-        make_literal , code_char , code , at , true;
+        code = hex_value(high) * 16 + hex_value(low);
+        make_literal(code_char(code), at, true);
 
         // --- Group openings ---------------------------------------------------
 
-        t = make_token , TokenKind_GroupOpen , at;
-        peek != CHAR_QUESTION;
-            t_group_kind = GroupKind_Capturing;
+        t = make_token(TokenKind::GroupOpen, at);
+        peek() != CHAR_QUESTION;
+            t.group_kind = GroupKind::Capturing;
             t;
 
-        pos++;
-        c = advance;
+        pos += 1;
+        c = advance();
         c == CHAR_COLON;
-            t_group_kind = GroupKind_NonCapturing;
+            t.group_kind = GroupKind::NonCapturing;
             t;
 
         c == CHAR_GREATER;
-            t_group_kind = GroupKind_Atomic;
+            t.group_kind = GroupKind::Atomic;
             t;
 
         c == CHAR_LESS;
             name = TEXT_EMPTY;
-            !at_end;
-                n = peek;
+            !at_end();
+                n = peek();
                 n == CHAR_GREATER;
 
-                !is_word_char , n;
-                    fail , ERROR_BAD_GROUP;
-                    make_token , TokenKind_Invalid , at;
+                !is_word_char(n);
+                    fail(ERROR_BAD_GROUP);
+                    make_token(TokenKind::Invalid, at);
 
-                name_push_back , n;
-                pos++;
+                name.push_back(n);
+                pos += 1;
 
-            !accept , CHAR_GREATER;
-                fail , ERROR_BAD_GROUP;
-                make_token , TokenKind_Invalid , at;
+            !accept(CHAR_GREATER);
+                fail(ERROR_BAD_GROUP);
+                make_token(TokenKind::Invalid, at);
 
-            name_empty;
-                fail , ERROR_BAD_GROUP;
-                make_token , TokenKind_Invalid , at;
+            name.empty();
+                fail(ERROR_BAD_GROUP);
+                make_token(TokenKind::Invalid, at);
 
-            t_group_kind = GroupKind_Named;
-            t_text = name;
+            t.group_kind = GroupKind::Named;
+            t.text = name;
             t;
 
-        fail , ERROR_BAD_GROUP;
-        make_token , TokenKind_Invalid , at;
+        fail(ERROR_BAD_GROUP);
+        make_token(TokenKind::Invalid, at);
 
     // --- Repetition bounds ------------------------------------------------
     //
@@ -727,56 +727,56 @@
     // engine does; only a bound that parses but is out of range is an error.
 
         save = pos;
-        !is_digit , peek;
+        !is_digit(peek());
             pos = save;
-            make_literal , CHAR_LBRACE , at , false;
+            make_literal(CHAR_LBRACE, at, false);
 
         lower = 0;
         digits = 0;
-        is_digit , peek;
-            lower = lower * 10 + digit_value , peek;
-            ++digits;
-            ++pos;
+        is_digit(peek());
+            lower = lower * 10 + digit_value(peek());
+            digits += 1;
+            pos += 1;
             lower > MAX_REPEAT;
-                fail , ERROR_REPEAT_TOO_LARGE;
-                make_token , TokenKind_Invalid , at;
+                fail(ERROR_REPEAT_TOO_LARGE);
+                make_token(TokenKind::Invalid, at);
 
-        t = make_token , TokenKind_RepeatOpen , at;
-        t_lower = lower;
-        accept , CHAR_RBRACE;
-            t_upper = lower;
+        t = make_token(TokenKind::RepeatOpen, at);
+        t.lower = lower;
+        accept(CHAR_RBRACE);
+            t.upper = lower;
             t;
 
-        !accept , CHAR_COMMA;
+        !accept(CHAR_COMMA);
             pos = save;
-            make_literal , CHAR_LBRACE , at , false;
+            make_literal(CHAR_LBRACE, at, false);
 
-        accept , CHAR_RBRACE;
+        accept(CHAR_RBRACE);
             // `{n,}` is an open ended bound.
-            t_upper = NONE;
+            t.upper = NONE;
             t;
 
-        !is_digit , peek;
+        !is_digit(peek());
             pos = save;
-            make_literal , CHAR_LBRACE , at , false;
+            make_literal(CHAR_LBRACE, at, false);
 
         upper = 0;
-        is_digit , peek;
-            upper = upper * 10 + digit_value , peek;
-            pos++;
+        is_digit(peek());
+            upper = upper * 10 + digit_value(peek());
+            pos += 1;
             upper > MAX_REPEAT;
-                fail , ERROR_REPEAT_TOO_LARGE;
-                make_token , TokenKind_Invalid , at;
+                fail(ERROR_REPEAT_TOO_LARGE);
+                make_token(TokenKind::Invalid, at);
 
-        !accept , CHAR_RBRACE;
+        !accept(CHAR_RBRACE);
             pos = save;
-            make_literal , CHAR_LBRACE , at , false;
+            make_literal(CHAR_LBRACE, at, false);
 
         upper < lower;
-            fail , ERROR_BAD_REPEAT;
-            make_token , TokenKind_Invalid , at;
+            fail(ERROR_BAD_REPEAT);
+            make_token(TokenKind::Invalid, at);
 
-        t_upper = upper;
+        t.upper = upper;
         t;
 
 // Single character escapes that stand for a control character.  Anything not
@@ -798,7 +798,7 @@
         CHAR_NUL;
 
     marker == CHAR_LOWER_E;
-        code_char , 27;
+        code_char(27);
 
     marker;
 
@@ -820,10 +820,10 @@
         ESCAPE_BACKSLASH;
 
     out = TEXT_EMPTY;
-    is_metacharacter , c;
-        out_push_back , CHAR_BACKSLASH;
+    is_metacharacter(c);
+        out.push_back(CHAR_BACKSLASH);
 
-    out_push_back , c;
+    out.push_back(c);
     out;
 
 // --- Character classes ---------------------------------------------------
@@ -847,48 +847,48 @@
 
         // Two ranges may be fused when they overlap or merely touch.
 
-        other_low > high + 1;
+        other.low > high + 1;
             false;
 
-        low > other_high + 1;
+        low > other.high + 1;
             false;
 
         true;
 
-        other_low < low;
-            low = other_low;
+        other.low < low;
+            low = other.low;
 
-        other_high > high;
-            high = other_high;
+        other.high > high;
+            high = other.high;
 
-    r = ClassRange , low , high;
+    r = ClassRange( low, high);
     high < low;
-        r_low = high;
-        r_high = low;
+        r.low = high;
+        r.high = low;
 
     r;
 
-    code = char_code , c;
-    make_range , code , code;
+    code = char_code(c);
+    make_range(code, code);
 
-        ranges_empty;
+        ranges.empty();
 
-        ranges_size;
+        ranges.size();
 
-        ranges_push_back , make_range , low , high;
+        ranges.push_back(make_range(low, high));
         normalised = false;
 
-        code = char_code , c;
-        add_range , code , code;
+        code = char_code(c);
+        add_range(code, code);
 
-        add_range , char_code , low , char_code , high;
+        add_range(char_code(low), char_code(high));
 
     // Pull every range of `other` in.  Used both by the class parser, when it
     // expands a shorthand inside brackets, and by the optimiser when it merges
     // sibling classes under an alternation.
 
-        r , other_ranges;
-            add_range , r_low , r_high;
+        r , other.ranges;
+            add_range(r.low, r.high);
 
         normalised = false;
 
@@ -899,17 +899,17 @@
     // stays obvious.
 
         i = 1;
-        i < ranges_size;
+        i < ranges.size();
             j = i;
             j > 0;
-                left = ranges , j - 1;
-                right = ranges , j;
-                left_low <= right_low;
+                left = ranges[j - 1];
+                right = ranges[j];
+                left.low <= right.low;
 
-                swap , ranges , j - 1 , ranges , j;
-                j--;
+                swap(ranges[j - 1], ranges[j]);
+                j -= 1;
 
-            ++i;
+            i += 1;
 
     // Sort, then fuse every pair that touches.  Afterwards the list is a
     // canonical description of the set, so two classes are equal exactly when
@@ -917,29 +917,29 @@
 
         normalised;
 
-        ranges_empty;
+        ranges.empty();
             normalised = true;
 
-        sort_ranges;
-        merged = vector , ClassRange;
-        merged_push_back , ranges , 0;
+        sort_ranges();
+        merged = vector{ClassRange}();
+        merged.push_back(ranges[0]);
         i = 1;
-        i < ranges_size;
-            next = ranges , i;
-            last = merged_back;
-            last_touches , next;
-                last_fuse , next;
+        i < ranges.size();
+            next = ranges[i];
+            last = merged.back();
+            last.touches(next);
+                last.fuse(next);
 
-                merged_push_back , next;
+                merged.push_back(next);
 
-            i++;
+            i += 1;
 
-        ranges = move , merged;
+        ranges = move(merged);
         normalised = true;
 
         found = false;
         r , ranges;
-            r_contains , code;
+            r.contains(code);
                 found = true;
 
         negated;
@@ -947,20 +947,20 @@
 
         found;
 
-        contains_code , char_code , c;
+        contains_code(char_code(c));
 
     // Case-insensitive membership: try the character as written and then its
     // opposite case.  Folding the class itself would be faster but would lose
     // the original spelling, which the printer wants.
 
-        matches , c;
+        matches(c);
             true;
 
-        is_lower , c;
-            matches , to_upper , c;
+        is_lower(c);
+            matches(to_upper(c));
 
-        is_upper , c;
-            matches , to_lower , c;
+        is_upper(c);
+            matches(to_lower(c));
 
         false;
 
@@ -969,7 +969,7 @@
 
         total = 0;
         r , ranges;
-            total += r_width;
+            total += r.width();
 
         negated;
             ALPHABET_SIZE - total;
@@ -979,32 +979,32 @@
         negated;
             false;
 
-        ranges_size != 1;
+        ranges.size() != 1;
             false;
 
-        only = ranges , 0;
-        only_is_single;
+        only = ranges[0];
+        only.is_single();
 
-        only = ranges , 0;
-        code_char , only_low;
+        only = ranges[0];
+        code_char(only.low);
 
-        negated != other_negated;
+        negated != other.negated;
             false;
 
-        ranges_size != other_ranges_size;
+        ranges.size() != other.ranges.size();
             false;
 
         i = 0;
-        i < ranges_size;
-            a = ranges , i;
-            b = other_ranges , i;
-            a_low != b_low;
+        i < ranges.size();
+            a = ranges[i];
+            b = other.ranges[i];
+            a.low != b.low;
                 false;
 
-            a_high != b_high;
+            a.high != b.high;
                 false;
 
-            ++i;
+            i += 1;
 
         true;
 
@@ -1012,15 +1012,15 @@
 
         out = TEXT_LBRACKET;
         negated;
-            out_push_back , CHAR_CARET;
+            out.push_back(CHAR_CARET);
 
         r , ranges;
-            out_append , escape_spelling , code_char , r_low;
-            !r_is_single;
-                out_push_back , CHAR_MINUS;
-                out_append , escape_spelling , code_char , r_high;
+            out.append(escape_spelling(code_char(r.low)));
+            !r.is_single();
+                out.push_back(CHAR_MINUS);
+                out.append(escape_spelling(code_char(r.high)));
 
-        out_append , TEXT_RBRACKET;
+        out.append(TEXT_RBRACKET);
         out;
 
 // --- Shorthand and POSIX class tables ------------------------------------
@@ -1028,169 +1028,169 @@
 // Both families are built from the same primitive: fill a class with ranges
 // and optionally flip its negation flag.
 
-    c = CharClass;
-    c_add_char_range , CHAR_ZERO , CHAR_NINE;
+    c = CharClass();
+    c.add_char_range(CHAR_ZERO, CHAR_NINE);
     c;
 
-    c = CharClass;
-    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_Z;
-    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_Z;
-    c_add_char_range , CHAR_ZERO , CHAR_NINE;
-    c_add_char , CHAR_UNDERSCORE;
+    c = CharClass();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_Z);
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_Z);
+    c.add_char_range(CHAR_ZERO, CHAR_NINE);
+    c.add_char(CHAR_UNDERSCORE);
     c;
 
-    c = CharClass;
-    c_add_char , CHAR_SPACE;
-    c_add_char , CHAR_TAB;
-    c_add_char , CHAR_NEWLINE;
-    c_add_char , CHAR_RETURN;
-    c_add_char , CHAR_FORMFEED;
-    c_add_char , code_char , 11;
+    c = CharClass();
+    c.add_char(CHAR_SPACE);
+    c.add_char(CHAR_TAB);
+    c.add_char(CHAR_NEWLINE);
+    c.add_char(CHAR_RETURN);
+    c.add_char(CHAR_FORMFEED);
+    c.add_char(code_char(11));
     c;
 
-    c = CharClass;
-    c_add_char , CHAR_SPACE;
-    c_add_char , CHAR_TAB;
+    c = CharClass();
+    c.add_char(CHAR_SPACE);
+    c.add_char(CHAR_TAB);
     c;
 
-    c = CharClass;
-    c_add_char , CHAR_NEWLINE;
-    c_add_char , CHAR_RETURN;
-    c_add_char , CHAR_FORMFEED;
-    c_add_char , code_char , 11;
+    c = CharClass();
+    c.add_char(CHAR_NEWLINE);
+    c.add_char(CHAR_RETURN);
+    c.add_char(CHAR_FORMFEED);
+    c.add_char(code_char(11));
     c;
 
-    c = CharClass;
-    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_Z;
-    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_Z;
+    c = CharClass();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_Z);
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_Z);
     c;
 
-    c = class_of_alpha;
-    c_add_char_range , CHAR_ZERO , CHAR_NINE;
+    c = class_of_alpha();
+    c.add_char_range(CHAR_ZERO, CHAR_NINE);
     c;
 
-    c = CharClass;
-    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_Z;
+    c = CharClass();
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_Z);
     c;
 
-    c = CharClass;
-    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_Z;
+    c = CharClass();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_Z);
     c;
 
-    c = class_of_digits;
-    c_add_char_range , CHAR_LOWER_A , CHAR_LOWER_F;
-    c_add_char_range , CHAR_UPPER_A , CHAR_UPPER_F;
+    c = class_of_digits();
+    c.add_char_range(CHAR_LOWER_A, CHAR_LOWER_F);
+    c.add_char_range(CHAR_UPPER_A, CHAR_UPPER_F);
     c;
 
-    c = CharClass;
-    c_add_range , 33 , 47;
-    c_add_range , 58 , 64;
-    c_add_range , 91 , 96;
-    c_add_range , 123 , 126;
+    c = CharClass();
+    c.add_range(33, 47);
+    c.add_range(58, 64);
+    c.add_range(91, 96);
+    c.add_range(123, 126);
     c;
 
-    c = CharClass;
-    c_add_range , 32 , 126;
+    c = CharClass();
+    c.add_range(32, 126);
     c;
 
-    c = CharClass;
-    c_add_range , 33 , 126;
+    c = CharClass();
+    c.add_range(33, 126);
     c;
 
-    c = CharClass;
-    c_add_range , 0 , 31;
-    c_add_range , 127 , 127;
+    c = CharClass();
+    c.add_range(0, 31);
+    c.add_range(127, 127);
     c;
 
-    c = CharClass;
+    c = CharClass();
     dot_matches_newline;
-        c_add_range , CODE_MIN , CODE_MAX;
+        c.add_range(CODE_MIN, CODE_MAX);
         c;
 
-    c_add_char , CHAR_NEWLINE;
-    c_negate;
+    c.add_char(CHAR_NEWLINE);
+    c.negate();
     c;
 
 // Expand `\d`, `\W` and friends.  Negated shorthands are the positive class
 // with the flag flipped, which keeps the two spellings in step.
 
-    which == Shorthand_ShortDigit;
-        class_of_digits;
+    which == Shorthand::ShortDigit;
+        class_of_digits();
 
-    which == Shorthand_ShortNotDigit;
-        c = class_of_digits;
-        c_negate;
+    which == Shorthand::ShortNotDigit;
+        c = class_of_digits();
+        c.negate();
         c;
 
-    which == Shorthand_ShortWord;
-        class_of_word;
+    which == Shorthand::ShortWord;
+        class_of_word();
 
-    which == Shorthand_ShortNotWord;
-        c = class_of_word;
-        c_negate;
+    which == Shorthand::ShortNotWord;
+        c = class_of_word();
+        c.negate();
         c;
 
-    which == Shorthand_ShortSpace;
-        class_of_space;
+    which == Shorthand::ShortSpace;
+        class_of_space();
 
-    which == Shorthand_ShortNotSpace;
-        c = class_of_space;
-        c_negate;
+    which == Shorthand::ShortNotSpace;
+        c = class_of_space();
+        c.negate();
         c;
 
-    which == Shorthand_ShortHorizontal;
-        class_of_horizontal;
+    which == Shorthand::ShortHorizontal;
+        class_of_horizontal();
 
-    which == Shorthand_ShortVertical;
-        class_of_vertical;
+    which == Shorthand::ShortVertical;
+        class_of_vertical();
 
-    CharClass;
+    CharClass();
 
 // `[[:name:]]`.  `found` is set to false when the name is not one of the
 // thirteen POSIX classes, and the caller raises ERROR_UNKNOWN_CLASS.
 
     found = true;
-    name_compare , POSIX_ALPHA == 0;
-        class_of_alpha;
+    name.compare(POSIX_ALPHA) == 0;
+        class_of_alpha();
 
-    name_compare , POSIX_DIGIT == 0;
-        class_of_digits;
+    name.compare(POSIX_DIGIT) == 0;
+        class_of_digits();
 
-    name_compare , POSIX_ALNUM == 0;
-        class_of_alnum;
+    name.compare(POSIX_ALNUM) == 0;
+        class_of_alnum();
 
-    name_compare , POSIX_UPPER == 0;
-        class_of_upper;
+    name.compare(POSIX_UPPER) == 0;
+        class_of_upper();
 
-    name_compare , POSIX_LOWER == 0;
-        class_of_lower;
+    name.compare(POSIX_LOWER) == 0;
+        class_of_lower();
 
-    name_compare , POSIX_SPACE == 0;
-        class_of_space;
+    name.compare(POSIX_SPACE) == 0;
+        class_of_space();
 
-    name_compare , POSIX_BLANK == 0;
-        class_of_horizontal;
+    name.compare(POSIX_BLANK) == 0;
+        class_of_horizontal();
 
-    name_compare , POSIX_PUNCT == 0;
-        class_of_punct;
+    name.compare(POSIX_PUNCT) == 0;
+        class_of_punct();
 
-    name_compare , POSIX_PRINT == 0;
-        class_of_print;
+    name.compare(POSIX_PRINT) == 0;
+        class_of_print();
 
-    name_compare , POSIX_GRAPH == 0;
-        class_of_graph;
+    name.compare(POSIX_GRAPH) == 0;
+        class_of_graph();
 
-    name_compare , POSIX_CNTRL == 0;
-        class_of_cntrl;
+    name.compare(POSIX_CNTRL) == 0;
+        class_of_cntrl();
 
-    name_compare , POSIX_XDIGIT == 0;
-        class_of_xdigit;
+    name.compare(POSIX_XDIGIT) == 0;
+        class_of_xdigit();
 
-    name_compare , POSIX_WORD == 0;
-        class_of_word;
+    name.compare(POSIX_WORD) == 0;
+        class_of_word();
 
     found = false;
-    CharClass;
+    CharClass();
 
 // --- Abstract syntax tree ------------------------------------------------
 //
@@ -1213,30 +1213,30 @@
 
 // Whether a quantifier prefers to consume or to stop.
 
-        kind == NodeKind_NodeLiteral;
+        kind == NodeKind::NodeLiteral;
             true;
 
-        kind == NodeKind_NodeString;
+        kind == NodeKind::NodeString;
             true;
 
-        kind == NodeKind_NodeAny;
+        kind == NodeKind::NodeAny;
             true;
 
-        kind == NodeKind_NodeClass;
+        kind == NodeKind::NodeClass;
             true;
 
-        kind == NodeKind_NodeAnchor;
+        kind == NodeKind::NodeAnchor;
             true;
 
-        kind == NodeKind_NodeBackreference;
+        kind == NodeKind::NodeBackreference;
             true;
 
-        kind == NodeKind_NodeEmpty;
+        kind == NodeKind::NodeEmpty;
             true;
 
         false;
 
-        !children_empty;
+        !children.empty();
             true;
 
         first != NONE;
@@ -1244,15 +1244,15 @@
         first != NONE;
             1;
 
-        children_size;
+        children.size();
 
     // An anchor consumes nothing, and neither does an empty node or a
     // repetition whose lower bound is zero.
 
-        kind == NodeKind_NodeAnchor;
+        kind == NodeKind::NodeAnchor;
             true;
 
-        kind == NodeKind_NodeEmpty;
+        kind == NodeKind::NodeEmpty;
             true;
 
         false;
@@ -1287,158 +1287,158 @@
 
 // --- Token stream helpers ---------------------------------------------
 
-        tokens_size;
+        tokens.size();
 
-        index >= tokens_size;
+        index >= tokens.size();
             true;
 
-        t = tokens , index;
-        t_is_end;
+        t = tokens[index];
+        t.is_end();
 
-        tokens , index;
+        tokens[index];
 
-        index >= tokens_size;
-            TokenKind_EndOfPattern;
+        index >= tokens.size();
+            TokenKind::EndOfPattern;
 
-        t = tokens , index;
-        t_kind;
+        t = tokens[index];
+        t.kind;
 
         at = index + offset;
-        at >= tokens_size;
-            TokenKind_EndOfPattern;
+        at >= tokens.size();
+            TokenKind::EndOfPattern;
 
-        t = tokens , at;
-        t_kind;
+        t = tokens[at];
+        t.kind;
 
-        index >= tokens_size;
-            source_size;
+        index >= tokens.size();
+            source.size();
 
-        t = tokens , index;
-        t_position;
+        t = tokens[index];
+        t.position;
 
-        index < tokens_size;
-            index++;
+        index < tokens.size();
+            index += 1;
 
-        current_kind != kind;
+        current_kind() != kind;
             false;
 
-        step;
+        step();
         true;
 
     // Skip forward until the token stream is positioned at or after `offset`.
     // Called after the character-mode class parser has consumed a stretch of
     // the source that the lexer had already turned into tokens.
 
-        index < tokens_size;
-            t = tokens , index;
-            t_position >= offset;
+        index < tokens.size();
+            t = tokens[index];
+            t.position >= offset;
 
-            t_is_end;
+            t.is_end();
 
-            index++;
+            index += 1;
 
         ok;
             ok = false;
             error = message;
-            error_position = current_offset;
+            error_position = current_offset();
 
         NONE;
 
         // --- Arena ------------------------------------------------------------
 
-        nodes_size;
+        nodes.size();
 
-        nodes , index;
+        nodes[index];
 
-        index = nodes_size;
-        n = Node , kind;
-        n_position = current_offset;
-        nodes_push_back , n;
+        index = nodes.size();
+        n = Node( kind);
+        n.position = current_offset();
+        nodes.push_back(n);
         index;
 
-        index = new_node , NodeKind_NodeLiteral;
-        n = nodes , index;
-        n_value = c;
-        n_charclass_add_char , c;
+        index = new_node(NodeKind::NodeLiteral);
+        n = nodes[index];
+        n.value = c;
+        n.charclass.add_char(c);
         index;
 
-        index = new_node , NodeKind_NodeClass;
-        n = nodes , index;
-        n_charclass = cls;
-        n_charclass_normalise;
+        index = new_node(NodeKind::NodeClass);
+        n = nodes[index];
+        n.charclass = cls;
+        n.charclass.normalise();
         index;
 
-        index = new_node , NodeKind_NodeAnchor;
-        n = nodes , index;
-        n_anchor = which;
+        index = new_node(NodeKind::NodeAnchor);
+        n = nodes[index];
+        n.anchor = which;
         index;
 
         // --- Group name table -------------------------------------------------
 
         entry , names;
-            entry_name_compare , name == 0;
-                entry_index;
+            entry.name.compare(name) == 0;
+                entry.index;
 
         NONE;
 
-        entry = GroupName , index;
-        entry_name = name;
-        names_push_back , entry;
+        entry = GroupName( index);
+        entry.name = name;
+        names.push_back(entry);
 
         // --- Entry point ------------------------------------------------------
 
         source = pattern;
-        nodes_clear;
-        names_clear;
+        nodes.clear();
+        names.clear();
         index = 0;
         depth = 0;
         group_count = 0;
         ok = true;
         error = ERROR_NONE;
 
-        lexer = PatternLexer;
-        lexer_source = pattern;
-        !lexer_tokenize;
+        lexer = PatternLexer();
+        lexer.source = pattern;
+        !lexer.tokenize();
             ok = false;
-            error = lexer_error;
-            error_position = lexer_error_position;
+            error = lexer.error;
+            error_position = lexer.error_position;
             NONE;
 
-        tokens = move , lexer_tokens;
+        tokens = move(lexer.tokens);
 
-        root = parse_alternation;
+        root = parse_alternation();
         !ok;
             NONE;
 
-        !at_end;
+        !at_end();
             // The only way to stop early with tokens left is a `)` with no
             // matching `(`, because every other token starts an atom.
-            fail , ERROR_UNBALANCED_PAREN;
+            fail(ERROR_UNBALANCED_PAREN);
 
         root = root;
         root;
 
         // --- alternation := concatenation ( '|' concatenation )* --------------
 
-        first = parse_concatenation;
+        first = parse_concatenation();
         !ok;
             NONE;
 
-        current_kind != TokenKind_AlternationBar;
+        current_kind() != TokenKind::AlternationBar;
             first;
 
-        index = new_node , NodeKind_NodeAlternate;
-        branches = vector , int;
-        branches_push_back , first;
-        accept_kind , TokenKind_AlternationBar;
-            branch = parse_concatenation;
+        index = new_node(NodeKind::NodeAlternate);
+        branches = vector{int}();
+        branches.push_back(first);
+        accept_kind(TokenKind::AlternationBar);
+            branch = parse_concatenation();
             !ok;
                 NONE;
 
-            branches_push_back , branch;
+            branches.push_back(branch);
 
-        n = nodes , index;
-        n_children = move , branches;
+        n = nodes[index];
+        n.children = move(branches);
         index;
 
     // --- concatenation := quantified* -------------------------------------
@@ -1447,31 +1447,31 @@
     // concatenation is legal - it is how `(|a)` and `a||b` get their empty
     // branches - and yields a NodeEmpty.
 
-        items = vector , int;
+        items = vector{int}();
 
-            at_end;
+            at_end();
 
-            current_kind == TokenKind_AlternationBar;
+            current_kind() == TokenKind::AlternationBar;
 
-            current_kind == TokenKind_GroupClose;
+            current_kind() == TokenKind::GroupClose;
 
-            item = parse_quantified;
+            item = parse_quantified();
             !ok;
                 NONE;
 
             item == NONE;
 
-            items_push_back , item;
+            items.push_back(item);
 
-        items_empty;
-            new_node , NodeKind_NodeEmpty;
+        items.empty();
+            new_node(NodeKind::NodeEmpty);
 
-        items_size == 1;
-            items , 0;
+        items.size() == 1;
+            items[0];
 
-        index = new_node , NodeKind_NodeConcat;
-        n = nodes , index;
-        n_children = move , items;
+        index = new_node(NodeKind::NodeConcat);
+        n = nodes[index];
+        n.children = move(items);
         index;
 
     // --- quantified := atom quantifier* -----------------------------------
@@ -1479,22 +1479,22 @@
     // Quantifiers are applied left to right, so `a*+` is `(a*)+`.  Each one
     // wraps the node produced so far in a fresh NodeRepeat.
 
-        atom = parse_atom;
+        atom = parse_atom();
         !ok;
             NONE;
 
         atom == NONE;
             NONE;
 
-            t = tokens , index;
-            !t_is_quantifier;
+            t = tokens[index];
+            !t.is_quantifier();
 
-            inner = nodes , atom;
-            inner_kind == NodeKind_NodeAnchor;
+            inner = nodes[atom];
+            inner.kind == NodeKind::NodeAnchor;
                 // `^*` is meaningless and almost always a typo.
-                fail , ERROR_NOTHING_TO_REPEAT;
+                fail(ERROR_NOTHING_TO_REPEAT);
 
-            atom = parse_quantifier , atom;
+            atom = parse_quantifier(atom);
             !ok;
                 NONE;
 
@@ -1505,46 +1505,46 @@
     // makes it possessive, which the backtracking matcher honours by
     // discarding the alternatives it would otherwise keep.
 
-        kind = current_kind;
+        kind = current_kind();
         lower = 0;
         upper = NONE;
-        kind == TokenKind_Star;
+        kind == TokenKind::Star;
             lower = 0;
             upper = NONE;
 
-            kind == TokenKind_Plus;
+            kind == TokenKind::Plus;
                 lower = 1;
                 upper = NONE;
 
-                kind == TokenKind_Question;
+                kind == TokenKind::Question;
                     lower = 0;
                     upper = 1;
 
-                    t = tokens , index;
-                    lower = t_lower;
-                    upper = t_upper;
+                    t = tokens[index];
+                    lower = t.lower;
+                    upper = t.upper;
                     upper != NONE && upper < lower;
-                        fail , ERROR_BAD_REPEAT;
+                        fail(ERROR_BAD_REPEAT);
 
                     lower > MAX_REPEAT;
-                        fail , ERROR_REPEAT_TOO_LARGE;
+                        fail(ERROR_REPEAT_TOO_LARGE);
 
-        step;
-        greed = Greediness_Greedy;
-        current_kind == TokenKind_Question;
-            greed = Greediness_Lazy;
-            step;
+        step();
+        greed = Greediness::Greedy;
+        current_kind() == TokenKind::Question;
+            greed = Greediness::Lazy;
+            step();
 
-            current_kind == TokenKind_Plus;
-                greed = Greediness_Possessive;
-                step;
+            current_kind() == TokenKind::Plus;
+                greed = Greediness::Possessive;
+                step();
 
-        index = new_node , NodeKind_NodeRepeat;
-        n = nodes , index;
-        n_first = target;
-        n_lower = lower;
-        n_upper = upper;
-        n_greed = greed;
+        index = new_node(NodeKind::NodeRepeat);
+        n = nodes[index];
+        n.first = target;
+        n.lower = lower;
+        n.upper = upper;
+        n.greed = greed;
         index;
 
     // --- atom -------------------------------------------------------------
@@ -1553,73 +1553,73 @@
     // or reports an error; returning NONE without an error set means "this
     // token does not begin an atom", which only `)` can do.
 
-        at_end;
+        at_end();
             NONE;
 
-        kind = current_kind;
-        kind == TokenKind_Literal;
-            t = tokens , index;
-            c = t_value;
-            step;
-            new_literal , c;
+        kind = current_kind();
+        kind == TokenKind::Literal;
+            t = tokens[index];
+            c = t.value;
+            step();
+            new_literal(c);
 
-        kind == TokenKind_AnyChar;
-            step;
-            index = new_node , NodeKind_NodeAny;
-            n = nodes , index;
-            n_charclass = class_of_any , dot_matches_newline;
+        kind == TokenKind::AnyChar;
+            step();
+            index = new_node(NodeKind::NodeAny);
+            n = nodes[index];
+            n.charclass = class_of_any(dot_matches_newline);
             index;
 
-        kind == TokenKind_ShorthandClass;
-            t = tokens , index;
-            which = t_shorthand;
-            step;
-            new_class , class_of_shorthand , which;
+        kind == TokenKind::ShorthandClass;
+            t = tokens[index];
+            which = t.shorthand;
+            step();
+            new_class(class_of_shorthand(which));
 
-        kind == TokenKind_ClassOpen;
-            parse_class;
+        kind == TokenKind::ClassOpen;
+            parse_class();
 
-        kind == TokenKind_GroupOpen;
-            parse_group;
+        kind == TokenKind::GroupOpen;
+            parse_group();
 
-        kind == TokenKind_Backreference;
-            parse_backreference;
+        kind == TokenKind::Backreference;
+            parse_backreference();
 
-        kind == TokenKind_CaretAnchor;
-            step;
-            new_anchor , AnchorKind_AnchorLineStart;
+        kind == TokenKind::CaretAnchor;
+            step();
+            new_anchor(AnchorKind::AnchorLineStart);
 
-        kind == TokenKind_DollarAnchor;
-            step;
-            new_anchor , AnchorKind_AnchorLineEnd;
+        kind == TokenKind::DollarAnchor;
+            step();
+            new_anchor(AnchorKind::AnchorLineEnd);
 
-        kind == TokenKind_TextStartAnchor;
-            step;
-            new_anchor , AnchorKind_AnchorTextStart;
+        kind == TokenKind::TextStartAnchor;
+            step();
+            new_anchor(AnchorKind::AnchorTextStart);
 
-        kind == TokenKind_TextEndAnchor;
-            step;
-            new_anchor , AnchorKind_AnchorTextEnd;
+        kind == TokenKind::TextEndAnchor;
+            step();
+            new_anchor(AnchorKind::AnchorTextEnd);
 
-        kind == TokenKind_WordBoundary;
-            step;
-            new_anchor , AnchorKind_AnchorWordBoundary;
+        kind == TokenKind::WordBoundary;
+            step();
+            new_anchor(AnchorKind::AnchorWordBoundary);
 
-        kind == TokenKind_NotWordBoundary;
-            step;
-            new_anchor , AnchorKind_AnchorNotWordBoundary;
+        kind == TokenKind::NotWordBoundary;
+            step();
+            new_anchor(AnchorKind::AnchorNotWordBoundary);
 
-        kind == TokenKind_Star;
-            fail , ERROR_NOTHING_TO_REPEAT;
+        kind == TokenKind::Star;
+            fail(ERROR_NOTHING_TO_REPEAT);
 
-        kind == TokenKind_Plus;
-            fail , ERROR_NOTHING_TO_REPEAT;
+        kind == TokenKind::Plus;
+            fail(ERROR_NOTHING_TO_REPEAT);
 
-        kind == TokenKind_RepeatOpen;
-            fail , ERROR_NOTHING_TO_REPEAT;
+        kind == TokenKind::RepeatOpen;
+            fail(ERROR_NOTHING_TO_REPEAT);
 
-        kind == TokenKind_Invalid;
-            fail , ERROR_BAD_ESCAPE;
+        kind == TokenKind::Invalid;
+            fail(ERROR_BAD_ESCAPE);
 
         NONE;
 
@@ -1629,62 +1629,62 @@
     // their body is parsed, so `(a(b))` numbers the outer group 1 and the
     // inner group 2 - the order the spelling suggests.
 
-        t = tokens , index;
-        group_kind = t_group_kind;
-        name = t_text;
-        step;
-        ++depth;
+        t = tokens[index];
+        group_kind = t.group_kind;
+        name = t.text;
+        step();
+        depth += 1;
         depth > MAX_GROUP_DEPTH;
-            depth--;
-            fail , ERROR_DEPTH_EXCEEDED;
+            depth -= 1;
+            fail(ERROR_DEPTH_EXCEEDED);
 
         number = NONE;
-        group_kind == GroupKind_Capturing;
-            ++group_count;
+        group_kind == GroupKind::Capturing;
+            group_count += 1;
             number = group_count;
 
-        group_kind == GroupKind_Named;
-            ++group_count;
+        group_kind == GroupKind::Named;
+            group_count += 1;
             number = group_count;
-            register_group_name , name , number;
+            register_group_name(name, number);
 
-        body = parse_alternation;
+        body = parse_alternation();
         !ok;
-            depth--;
+            depth -= 1;
             NONE;
 
-        !accept_kind , TokenKind_GroupClose;
-            depth--;
-            fail , ERROR_UNBALANCED_PAREN;
+        !accept_kind(TokenKind::GroupClose);
+            depth -= 1;
+            fail(ERROR_UNBALANCED_PAREN);
 
-        --depth;
-        index = new_node , NodeKind_NodeGroup;
-        n = nodes , index;
-        n_first = body;
-        n_group_kind = group_kind;
-        n_group_index = number;
-        n_text = name;
+        depth -= 1;
+        index = new_node(NodeKind::NodeGroup);
+        n = nodes[index];
+        n.first = body;
+        n.group_kind = group_kind;
+        n.group_index = number;
+        n.text = name;
         index;
 
         // --- backreference ----------------------------------------------------
 
-        t = tokens , index;
-        target = t_lower;
+        t = tokens[index];
+        target = t.lower;
         target == NONE;
-            target = find_group_named , t_text;
+            target = find_group_named(t.text);
             target == NONE;
-                fail , ERROR_BAD_BACKREF;
+                fail(ERROR_BAD_BACKREF);
 
         target > group_count;
             // Forward references are rejected: a group can only be recalled
             // once it has been opened, and a group that is still open has no
             // captured text yet.
-            fail , ERROR_BAD_BACKREF;
+            fail(ERROR_BAD_BACKREF);
 
-        step;
-        index = new_node , NodeKind_NodeBackreference;
-        n = nodes , index;
-        n_reference = target;
+        step();
+        index = new_node(NodeKind::NodeBackreference);
+        n = nodes[index];
+        n.reference = target;
         index;
 
     // --- Bracket expressions ----------------------------------------------
@@ -1701,98 +1701,98 @@
     //   * `[:name:]` names a POSIX class, but a bare `[` is just a bracket
     //   * a shorthand such as `\d` contributes all of its ranges
 
-        open = current_offset;
+        open = current_offset();
         at = open + 1;
-        cls = CharClass;
-        at < source_size;
-            source_at , at == CHAR_CARET;
-                cls_negate;
-                ++at;
+        cls = CharClass();
+        at < source.size();
+            source.at(at) == CHAR_CARET;
+                cls.negate();
+                at += 1;
 
         first = true;
         closed = false;
 
-            at >= source_size;
+            at >= source.size();
 
-            c = source_at , at;
+            c = source.at(at);
             c == CHAR_RBRACKET && !first;
-                at++;
+                at += 1;
                 closed = true;
 
             first = false;
             c == CHAR_RBRACKET;
                 // Leading `]`: an ordinary member of the class.
-                cls_add_char , c;
-                at++;
+                cls.add_char(c);
+                at += 1;
 
-            c == CHAR_LBRACKET && looks_like_posix , at;
-                at = parse_posix_class , at , cls;
+            c == CHAR_LBRACKET && looks_like_posix(at);
+                at = parse_posix_class(at, cls);
                 !ok;
                     NONE;
 
             c == CHAR_BACKSLASH;
-                at = parse_class_escape , at , cls;
+                at = parse_class_escape(at, cls);
                 !ok;
                     NONE;
 
             // An ordinary character.  It may be the low end of a range, which
             // is decided by what follows it.
             low = c;
-            at++;
-            !class_range_follows , at;
-                cls_add_char , low;
+            at += 1;
+            !class_range_follows(at);
+                cls.add_char(low);
 
             // Step over the hyphen and read the upper bound.
-            at++;
-            high_char = source_at , at;
+            at += 1;
+            high_char = source.at(at);
             high_char == CHAR_BACKSLASH;
-                scratch = CharClass;
-                after = parse_class_escape , at , scratch;
+                scratch = CharClass();
+                after = parse_class_escape(at, scratch);
                 !ok;
                     NONE;
 
-                !scratch_is_single_char;
+                !scratch.is_single_char();
                     // `a-\d` has no sensible reading; treat the three parts
                     // as separate members instead of guessing.
-                    cls_add_char , low;
-                    cls_add_char , CHAR_MINUS;
-                    cls_add_class , scratch;
+                    cls.add_char(low);
+                    cls.add_char(CHAR_MINUS);
+                    cls.add_class(scratch);
                     at = after;
 
-                high = scratch_single_char;
-                char_code , high < char_code , low;
-                    fail , ERROR_BAD_RANGE;
+                high = scratch.single_char();
+                char_code(high) < char_code(low);
+                    fail(ERROR_BAD_RANGE);
 
-                cls_add_char_range , low , high;
+                cls.add_char_range(low, high);
                 at = after;
 
-            char_code , high_char < char_code , low;
-                fail , ERROR_BAD_RANGE;
+            char_code(high_char) < char_code(low);
+                fail(ERROR_BAD_RANGE);
 
-            cls_add_char_range , low , high_char;
-            at++;
+            cls.add_char_range(low, high_char);
+            at += 1;
 
         !closed;
-            fail , ERROR_UNCLOSED_CLASS;
+            fail(ERROR_UNCLOSED_CLASS);
 
-        sync_to_offset , at;
-        cls_normalise;
-        new_class , cls;
+        sync_to_offset(at);
+        cls.normalise();
+        new_class(cls);
 
     // True when a `-` at `at` really is a range operator: it must exist, and
     // it must not be the last character before the closing bracket.
 
-        at >= source_size;
+        at >= source.size();
             false;
 
-        source_at , at != CHAR_MINUS;
+        source.at(at) != CHAR_MINUS;
             false;
 
         next = at + 1;
-        next >= source_size;
+        next >= source.size();
             false;
 
-        source_at , next == CHAR_RBRACKET;
+        source.at(next) == CHAR_RBRACKET;
             false;
 
         true;
@@ -1801,30 +1801,30 @@
     // colon and a closing `:]` appears before the class ends.
 
         colon = at + 1;
-        colon >= source_size;
+        colon >= source.size();
             false;
 
-        source_at , colon != CHAR_COLON;
+        source.at(colon) != CHAR_COLON;
             false;
 
         scan = colon + 1;
-        scan < source_size;
-            source_at , scan == CHAR_CARET;
-                scan++;
+        scan < source.size();
+            source.at(scan) == CHAR_CARET;
+                scan += 1;
 
-        scan < source_size;
-            c = source_at , scan;
+        scan < source.size();
+            c = source.at(scan);
             c == CHAR_COLON;
                 close = scan + 1;
-                close >= source_size;
+                close >= source.size();
                     false;
 
-                source_at , close == CHAR_RBRACKET;
+                source.at(close) == CHAR_RBRACKET;
 
-            !is_alpha , c;
+            !is_alpha(c);
                 false;
 
-            scan++;
+            scan += 1;
 
         false;
 
@@ -1835,34 +1835,34 @@
 
         scan = at + 2;
         complement = false;
-        scan < source_size;
-            source_at , scan == CHAR_CARET;
+        scan < source.size();
+            source.at(scan) == CHAR_CARET;
                 complement = true;
-                scan++;
+                scan += 1;
 
         name = TEXT_EMPTY;
-        scan < source_size;
-            c = source_at , scan;
+        scan < source.size();
+            c = source.at(scan);
             c == CHAR_COLON;
 
-            name_push_back , c;
-            scan++;
+            name.push_back(c);
+            scan += 1;
 
         // Step over the `:]` pair.
         scan += 2;
         known = false;
-        expanded = class_of_posix_name , name , known;
+        expanded = class_of_posix_name(name, known);
         !known;
-            fail , ERROR_UNKNOWN_CLASS;
+            fail(ERROR_UNKNOWN_CLASS);
             scan;
 
         complement;
-            expanded_normalise;
-            inverted = complement_of , expanded;
-            into_add_class , inverted;
+            expanded.normalise();
+            inverted = complement_of(expanded);
+            into.add_class(inverted);
             scan;
 
-        into_add_class , expanded;
+        into.add_class(expanded);
         scan;
 
     // Consume one `\x` sequence inside a bracket expression and add whatever
@@ -1870,65 +1870,65 @@
     // else contributes a single character.
 
         marker_at = at + 1;
-        marker_at >= source_size;
-            fail , ERROR_TRAILING_BACKSLASH;
-            source_size;
+        marker_at >= source.size();
+            fail(ERROR_TRAILING_BACKSLASH);
+            source.size();
 
-        marker = source_at , marker_at;
+        marker = source.at(marker_at);
         marker == CHAR_LOWER_D;
-            into_add_class , class_of_digits;
+            into.add_class(class_of_digits());
             marker_at + 1;
 
         marker == CHAR_UPPER_D;
-            into_add_class , complement_of , class_of_digits;
+            into.add_class(complement_of(class_of_digits()));
             marker_at + 1;
 
         marker == CHAR_LOWER_W;
-            into_add_class , class_of_word;
+            into.add_class(class_of_word());
             marker_at + 1;
 
         marker == CHAR_UPPER_W;
-            into_add_class , complement_of , class_of_word;
+            into.add_class(complement_of(class_of_word()));
             marker_at + 1;
 
         marker == CHAR_LOWER_S;
-            into_add_class , class_of_space;
+            into.add_class(class_of_space());
             marker_at + 1;
 
         marker == CHAR_UPPER_S;
-            into_add_class , complement_of , class_of_space;
+            into.add_class(complement_of(class_of_space()));
             marker_at + 1;
 
         marker == CHAR_LOWER_H;
-            into_add_class , class_of_horizontal;
+            into.add_class(class_of_horizontal());
             marker_at + 1;
 
         marker == CHAR_LOWER_V;
-            into_add_class , class_of_vertical;
+            into.add_class(class_of_vertical());
             marker_at + 1;
 
         marker == CHAR_LOWER_X;
             high_at = marker_at + 1;
             low_at = marker_at + 2;
-            low_at >= source_size;
-                fail , ERROR_BAD_ESCAPE;
-                source_size;
+            low_at >= source.size();
+                fail(ERROR_BAD_ESCAPE);
+                source.size();
 
-            high = source_at , high_at;
-            low = source_at , low_at;
-            !is_hex_digit , high || !is_hex_digit , low;
-                fail , ERROR_BAD_ESCAPE;
+            high = source.at(high_at);
+            low = source.at(low_at);
+            !is_hex_digit(high) || !is_hex_digit(low);
+                fail(ERROR_BAD_ESCAPE);
                 low_at + 1;
 
-            into_add_range , hex_value , high * 16 + hex_value , low , hex_value , high * 16 + hex_value , low;
+            into.add_range(hex_value(high) * 16 + hex_value(low), hex_value(high) * 16 + hex_value(low));
             low_at + 1;
 
         marker == CHAR_LOWER_B;
             // `\b` is a backspace inside a class, not a word boundary.
-            into_add_char , CHAR_BACKSPACE;
+            into.add_char(CHAR_BACKSPACE);
             marker_at + 1;
 
-        into_add_char , decode_escape , marker;
+        into.add_char(decode_escape(marker));
         marker_at + 1;
 
 // Build the set complement of a normalised class as an explicit range list.
@@ -1936,20 +1936,20 @@
 // way can be unioned with other classes, which the bracket parser needs.
 
     source = cls;
-    source_normalise;
-    out = CharClass;
+    source.normalise();
+    out = CharClass();
     cursor = CODE_MIN;
-    r , source_ranges;
-        r_low > cursor;
-            out_add_range , cursor , r_low - 1;
+    r , source.ranges;
+        r.low > cursor;
+            out.add_range(cursor, r.low - 1);
 
-        r_high + 1 > cursor;
-            cursor = r_high + 1;
+        r.high + 1 > cursor;
+            cursor = r.high + 1;
 
     cursor <= CODE_MAX;
-        out_add_range , cursor , CODE_MAX;
+        out.add_range(cursor, CODE_MAX);
 
-    out_normalise;
+    out.normalise();
     out;
 
 // --- Thompson NFA construction -------------------------------------------
@@ -1973,31 +1973,31 @@
               // re-match the text captured by a group
               // accept
 
-        kind == StateKind_StateChar;
+        kind == StateKind::StateChar;
 
-        kind == StateKind_StateSplit;
+        kind == StateKind::StateSplit;
             true;
 
-        kind == StateKind_StateJump;
+        kind == StateKind::StateJump;
             true;
 
-        kind == StateKind_StateSave;
+        kind == StateKind::StateSave;
             true;
 
-        kind == StateKind_StateAssert;
+        kind == StateKind::StateAssert;
             true;
 
         false;
 
-        kind == StateKind_StateMatch;
+        kind == StateKind::StateMatch;
 
-        kind != StateKind_StateChar;
+        kind != StateKind::StateChar;
             false;
 
         folded;
-            charclass_matches_folded , c;
+            charclass.matches_folded(c);
 
-        charclass_matches , c;
+        charclass.matches(c);
 
 // A dangling exit: state `state`, and which of its two out edges is unset.
 
@@ -2005,155 +2005,155 @@
 
         start != NONE;
 
-        exits_size;
+        exits.size();
 
-        p , other_exits;
-            exits_push_back , p;
+        p , other.exits;
+            exits.push_back(p);
 
-        states_size;
+        states.size();
 
-        index = states_size;
-        states_push_back , NfaState , kind;
+        index = states.size();
+        states.push_back(NfaState( kind));
         index;
 
         // Point every exit of `frag` at `target`.
 
-        p , frag_exits;
-            s = states , p_state;
-            p_second;
-                s_alternate = target;
+        p , frag.exits;
+            s = states[p.state];
+            p.second;
+                s.alternate = target;
 
-                s_out = target;
+                s.out = target;
 
-        frag = Fragment , state;
-        frag_exits_push_back , Patch , state , second;
+        frag = Fragment( state);
+        frag.exits.push_back(Patch( state, second));
         frag;
 
         // --- Entry point ------------------------------------------------------
 
-        states_clear;
+        states.clear();
         has_backreference = false;
         ok = true;
-        frag = build_node , parser , root;
+        frag = build_node(parser, root);
         !ok;
             false;
 
-        accept = new_state , StateKind_StateMatch;
-        patch , frag , accept;
-        start = frag_start;
+        accept = new_state(StateKind::StateMatch);
+        patch(frag, accept);
+        start = frag.start;
         accept = accept;
         true;
 
         // --- The recursive core -----------------------------------------------
 
         index == NONE;
-            build_empty;
+            build_empty();
 
-        n = parser_nodes , index;
-        n_kind == NodeKind_NodeEmpty;
-            build_empty;
+        n = parser.nodes[index];
+        n.kind == NodeKind::NodeEmpty;
+            build_empty();
 
-        n_kind == NodeKind_NodeLiteral;
-            build_class , n_charclass;
+        n.kind == NodeKind::NodeLiteral;
+            build_class(n.charclass);
 
-        n_kind == NodeKind_NodeAny;
-            build_class , n_charclass;
+        n.kind == NodeKind::NodeAny;
+            build_class(n.charclass);
 
-        n_kind == NodeKind_NodeClass;
-            build_class , n_charclass;
+        n.kind == NodeKind::NodeClass;
+            build_class(n.charclass);
 
-        n_kind == NodeKind_NodeString;
-            build_string , n_text;
+        n.kind == NodeKind::NodeString;
+            build_string(n.text);
 
-        n_kind == NodeKind_NodeAnchor;
-            build_anchor , n_anchor;
+        n.kind == NodeKind::NodeAnchor;
+            build_anchor(n.anchor);
 
-        n_kind == NodeKind_NodeBackreference;
-            build_backreference , n_reference;
+        n.kind == NodeKind::NodeBackreference;
+            build_backreference(n.reference);
 
-        n_kind == NodeKind_NodeConcat;
-            build_concat , parser , index;
+        n.kind == NodeKind::NodeConcat;
+            build_concat(parser, index);
 
-        n_kind == NodeKind_NodeAlternate;
-            build_alternate , parser , index;
+        n.kind == NodeKind::NodeAlternate;
+            build_alternate(parser, index);
 
-        n_kind == NodeKind_NodeRepeat;
-            build_repeat , parser , index;
+        n.kind == NodeKind::NodeRepeat;
+            build_repeat(parser, index);
 
-        n_kind == NodeKind_NodeGroup;
-            build_group , parser , index;
+        n.kind == NodeKind::NodeGroup;
+            build_group(parser, index);
 
         ok = false;
-        Fragment;
+        Fragment();
 
-        s = new_state , StateKind_StateJump;
-        single_exit , s , false;
+        s = new_state(StateKind::StateJump);
+        single_exit(s, false);
 
-        s = new_state , StateKind_StateChar;
-        state = states , s;
-        state_charclass = cls;
-        state_charclass_normalise;
-        single_exit , s , false;
+        s = new_state(StateKind::StateChar);
+        state = states[s];
+        state.charclass = cls;
+        state.charclass.normalise();
+        single_exit(s, false);
 
     // A literal run compiles to a chain of single character states.  The
     // simulator has no special case for it, but the compiled program does.
 
-        text_empty;
-            build_empty;
+        text.empty();
+            build_empty();
 
         head = NONE;
         previous = NONE;
         i = 0;
-        i < text_size;
-            s = new_state , StateKind_StateChar;
-            state = states , s;
-            state_charclass_add_char , text_at , i;
+        i < text.size();
+            s = new_state(StateKind::StateChar);
+            state = states[s];
+            state.charclass.add_char(text.at(i));
             head == NONE;
                 head = s;
 
-                prior = states , previous;
-                prior_out = s;
+                prior = states[previous];
+                prior.out = s;
 
             previous = s;
-            i++;
+            i += 1;
 
-        frag = Fragment , head;
-        frag_exits_push_back , Patch , previous , false;
+        frag = Fragment( head);
+        frag.exits.push_back(Patch( previous, false));
         frag;
 
-        s = new_state , StateKind_StateAssert;
-        state = states , s;
-        state_anchor = which;
-        single_exit , s , false;
+        s = new_state(StateKind::StateAssert);
+        state = states[s];
+        state.anchor = which;
+        single_exit(s, false);
 
         has_backreference = true;
-        s = new_state , StateKind_StateBackref;
-        state = states , s;
-        state_reference = group;
-        single_exit , s , false;
+        s = new_state(StateKind::StateBackref);
+        state = states[s];
+        state.reference = group;
+        single_exit(s, false);
 
     // e1 e2 ... : chain the fragments, patching each one's exits to the next
     // fragment's start.  The exits of the last fragment become the exits of
     // the whole.
 
-        n = parser_nodes , index;
-        result = Fragment;
+        n = parser.nodes[index];
+        result = Fragment();
         started = false;
-        child , n_children;
-            piece = build_node , parser , child;
+        child , n.children;
+            piece = build_node(parser, child);
             !ok;
-                Fragment;
+                Fragment();
 
             !started;
                 result = piece;
                 started = true;
 
-                patch , result , piece_start;
-                result_exits_clear;
-                result_absorb , piece;
+                patch(result, piece.start);
+                result.exits.clear();
+                result.absorb(piece);
 
         !started;
-            build_empty;
+            build_empty();
 
         result;
 
@@ -2161,63 +2161,63 @@
     // branch.  The last branch takes the final split's alternate edge, so no
     // split is ever left with a dangling second edge.
 
-        n = parser_nodes , index;
-        result = Fragment;
+        n = parser.nodes[index];
+        result = Fragment();
         previous_split = NONE;
         count = 0;
-        total = n_children_size;
-        child , n_children;
-            piece = build_node , parser , child;
+        total = n.children.size();
+        child , n.children;
+            piece = build_node(parser, child);
             !ok;
-                Fragment;
+                Fragment();
 
-            count++;
+            count += 1;
             count == total;
                 previous_split == NONE;
                     piece;
 
-                split = states , previous_split;
-                split_alternate = piece_start;
-                result_absorb , piece;
+                split = states[previous_split];
+                split.alternate = piece.start;
+                result.absorb(piece);
                 result;
 
-            split = new_state , StateKind_StateSplit;
-            s = states , split;
-            s_out = piece_start;
+            split = new_state(StateKind::StateSplit);
+            s = states[split];
+            s.out = piece.start;
             previous_split == NONE;
-                result_start = split;
+                result.start = split;
 
-                prior = states , previous_split;
-                prior_alternate = split;
+                prior = states[previous_split];
+                prior.alternate = split;
 
-            result_absorb , piece;
+            result.absorb(piece);
             previous_split = split;
 
         result;
 
-        n = parser_nodes , index;
-        group = n_group_index;
+        n = parser.nodes[index];
+        group = n.group_index;
         group == NONE;
-            build_node , parser , n_first;
+            build_node(parser, n.first);
 
-        open = new_state , StateKind_StateSave;
-        open_state = states , open;
-        open_state_slot = group * 2;
-        body = build_node , parser , n_first;
+        open = new_state(StateKind::StateSave);
+        open_state = states[open];
+        open_state.slot = group * 2;
+        body = build_node(parser, n.first);
         !ok;
-            Fragment;
+            Fragment();
 
-        open_state_out = body_start;
-        close = new_state , StateKind_StateSave;
-        close_state = states , close;
-        close_state_slot = group * 2 + 1;
-        patch , body , close;
-        single_exit_from , open , close;
+        open_state.out = body.start;
+        close = new_state(StateKind::StateSave);
+        close_state = states[close];
+        close_state.slot = group * 2 + 1;
+        patch(body, close);
+        single_exit_from(open, close);
 
         // Helper for fragments whose start and exit are different states.
 
-        frag = Fragment , start;
-        frag_exits_push_back , Patch , exit , false;
+        frag = Fragment( start);
+        frag.exits.push_back(Patch( exit, false));
         frag;
 
     // --- Repetition -------------------------------------------------------
@@ -2228,121 +2228,121 @@
     // Thompson NFA with no counters, at the cost of size - which is why the
     // parser caps the bound at MAX_REPEAT.
 
-        n = parser_nodes , index;
-        lower = n_lower;
-        upper = n_upper;
-        body = n_first;
-        lazy = n_greed == Greediness_Lazy;
+        n = parser.nodes[index];
+        lower = n.lower;
+        upper = n.upper;
+        body = n.first;
+        lazy = n.greed == Greediness::Lazy;
         lower == 0 && upper == NONE;
-            build_star , parser , body , lazy;
+            build_star(parser, body, lazy);
 
         lower == 1 && upper == NONE;
-            build_plus , parser , body , lazy;
+            build_plus(parser, body, lazy);
 
         lower == 0 && upper == 1;
-            build_optional , parser , body , lazy;
+            build_optional(parser, body, lazy);
 
-        result = Fragment;
+        result = Fragment();
         started = false;
         i = 0;
         i < lower;
-            piece = build_node , parser , body;
+            piece = build_node(parser, body);
             !ok;
-                Fragment;
+                Fragment();
 
             !started;
                 result = piece;
                 started = true;
 
-                patch , result , piece_start;
-                result_exits_clear;
-                result_absorb , piece;
+                patch(result, piece.start);
+                result.exits.clear();
+                result.absorb(piece);
 
-            i++;
+            i += 1;
 
         upper == NONE;
-            tail = build_star , parser , body , lazy;
+            tail = build_star(parser, body, lazy);
             !started;
                 tail;
 
-            patch , result , tail_start;
-            result_exits_clear;
-            result_absorb , tail;
+            patch(result, tail.start);
+            result.exits.clear();
+            result.absorb(tail);
             result;
 
         extra = upper - lower;
         extra > 0;
-            piece = build_optional , parser , body , lazy;
+            piece = build_optional(parser, body, lazy);
             !ok;
-                Fragment;
+                Fragment();
 
             !started;
                 result = piece;
                 started = true;
 
-                patch , result , piece_start;
-                result_exits_clear;
-                result_absorb , piece;
+                patch(result, piece.start);
+                result.exits.clear();
+                result.absorb(piece);
 
-            extra--;
+            extra -= 1;
 
         !started;
-            build_empty;
+            build_empty();
 
         result;
 
     // e* : a split that either enters the body - which loops back - or skips
     // it.  A lazy star simply swaps the two edges so the skip is preferred.
 
-        split = new_state , StateKind_StateSplit;
-        piece = build_node , parser , body;
+        split = new_state(StateKind::StateSplit);
+        piece = build_node(parser, body);
         !ok;
-            Fragment;
+            Fragment();
 
-        patch , piece , split;
-        s = states , split;
+        patch(piece, split);
+        s = states[split];
         lazy;
-            s_alternate = piece_start;
-            single_exit , split , false;
+            s.alternate = piece.start;
+            single_exit(split, false);
 
-        s_out = piece_start;
-        single_exit , split , true;
+        s.out = piece.start;
+        single_exit(split, true);
 
         // e+ : the body first, then a split that loops back or falls through.
 
-        piece = build_node , parser , body;
+        piece = build_node(parser, body);
         !ok;
-            Fragment;
+            Fragment();
 
-        split = new_state , StateKind_StateSplit;
-        patch , piece , split;
-        s = states , split;
+        split = new_state(StateKind::StateSplit);
+        patch(piece, split);
+        s = states[split];
         lazy;
-            s_alternate = piece_start;
-            single_exit_from , piece_start , split;
+            s.alternate = piece.start;
+            single_exit_from(piece.start, split);
 
-        s_out = piece_start;
-        frag = Fragment , piece_start;
-        frag_exits_push_back , Patch , split , true;
+        s.out = piece.start;
+        frag = Fragment( piece.start);
+        frag.exits.push_back(Patch( split, true));
         frag;
 
         // e? : one split, no loop.
 
-        split = new_state , StateKind_StateSplit;
-        piece = build_node , parser , body;
+        split = new_state(StateKind::StateSplit);
+        piece = build_node(parser, body);
         !ok;
-            Fragment;
+            Fragment();
 
-        s = states , split;
-        frag = Fragment , split;
+        s = states[split];
+        frag = Fragment( split);
         lazy;
-            s_alternate = piece_start;
-            frag_exits_push_back , Patch , split , false;
+            s.alternate = piece.start;
+            frag.exits.push_back(Patch( split, false));
 
-            s_out = piece_start;
-            frag_exits_push_back , Patch , split , true;
+            s.out = piece.start;
+            frag.exits.push_back(Patch( split, true));
 
-        frag_absorb , piece;
+        frag.absorb(piece);
         frag;
 
 // --- NFA simulation ------------------------------------------------------
@@ -2358,71 +2358,71 @@
 // and `stamp` records, per state, the generation in which it was added.
 // Clearing the set is then a single increment.
 
-        dense_size;
+        dense.size();
 
-        dense_empty;
+        dense.empty();
 
-        stamp_resize , capacity;
+        stamp.resize(capacity);
         generation = 1;
         i = 0;
         i < capacity;
-            stamp , i = 0;
-            ++i;
+            stamp[i] = 0;
+            i += 1;
 
-        dense_clear;
+        dense.clear();
 
-        ++generation;
-        dense_clear;
+        generation += 1;
+        dense.clear();
 
         state < 0;
             false;
 
-        state >= stamp_size;
+        state >= stamp.size();
             false;
 
-        stamp , state == generation;
+        stamp[state] == generation;
 
     // Returns false when the state was already present, which is what stops
     // the epsilon closure below from looping forever.
 
-        contains , state;
+        contains(state);
             false;
 
-        stamp , state = generation;
-        dense_push_back , state;
+        stamp[state] = generation;
+        dense.push_back(state);
         true;
 
-        dense , i;
+        dense[i];
 
         // The zero width assertions, evaluated against a position in the subject.
 
-    which == AnchorKind_AnchorTextStart;
+    which == AnchorKind::AnchorTextStart;
         pos == 0;
 
-    which == AnchorKind_AnchorTextEnd;
-        pos == text_size;
+    which == AnchorKind::AnchorTextEnd;
+        pos == text.size();
 
-    which == AnchorKind_AnchorLineStart;
+    which == AnchorKind::AnchorLineStart;
         pos == 0;
             true;
 
         !multiline;
             false;
 
-        text_at , pos - 1 == CHAR_NEWLINE;
+        text.at(pos - 1) == CHAR_NEWLINE;
 
-    which == AnchorKind_AnchorLineEnd;
-        pos == text_size;
+    which == AnchorKind::AnchorLineEnd;
+        pos == text.size();
             true;
 
         !multiline;
             false;
 
-        text_at , pos == CHAR_NEWLINE;
+        text.at(pos) == CHAR_NEWLINE;
 
-    before = word_char_before , text , pos;
-    after = word_char_at , text , pos;
-    which == AnchorKind_AnchorWordBoundary;
+    before = word_char_before(text, pos);
+    after = word_char_at(text, pos);
+    which == AnchorKind::AnchorWordBoundary;
         before != after;
 
     before == after;
@@ -2430,23 +2430,23 @@
     pos <= 0;
         false;
 
-    is_word_char , text_at , pos - 1;
+    is_word_char(text.at(pos - 1));
 
-    pos >= text_size;
+    pos >= text.size();
         false;
 
-    is_word_char , text_at , pos;
+    is_word_char(text.at(pos));
 
-        states_empty;
+        states.empty();
             false;
 
         start != NONE;
 
-        states = builder_states;
-        start = builder_start;
-        accept = builder_accept;
-        current_prepare , states_size;
-        next_prepare , states_size;
+        states = builder.states;
+        start = builder.start;
+        accept = builder.accept;
+        current.prepare(states.size());
+        next.prepare(states.size());
 
     // Add `state` and everything reachable from it without consuming input.
     // Splits fan out, jumps and saves fall through, and assertions are
@@ -2454,69 +2454,69 @@
 
         state == NONE;
 
-        !set_insert , state;
+        !set.insert(state);
 
-        s = states , state;
-        s_kind == StateKind_StateSplit;
-            add_state , set , s_out , pos;
-            add_state , set , s_alternate , pos;
+        s = states[state];
+        s.kind == StateKind::StateSplit;
+            add_state(set, s.out, pos);
+            add_state(set, s.alternate, pos);
 
-        s_kind == StateKind_StateJump;
-            add_state , set , s_out , pos;
+        s.kind == StateKind::StateJump;
+            add_state(set, s.out, pos);
 
-        s_kind == StateKind_StateSave;
+        s.kind == StateKind::StateSave;
             // The simulator does not record captures, so a save is a jump.
-            add_state , set , s_out , pos;
+            add_state(set, s.out, pos);
 
-        s_kind == StateKind_StateAssert;
-            assertion_holds , s_anchor , text , pos , multiline;
-                add_state , set , s_out , pos;
+        s.kind == StateKind::StateAssert;
+            assertion_holds(s.anchor, text, pos, multiline);
+                add_state(set, s.out, pos);
 
         i = 0;
-        i < set_size;
-            index = set_at , i;
-            s = states , index;
-            s_is_accepting;
+        i < set.size();
+            index = set.at(i);
+            s = states[index];
+            s.is_accepting();
                 true;
 
-            ++i;
+            i += 1;
 
         false;
 
         // Advance the whole set across one character.
 
-        next_clear;
+        next.clear();
         i = 0;
-        i < current_size;
-            index = current_at , i;
-            s = states , index;
-            s_consumes;
-                s_accepts , c , ignore_case;
-                    add_state , next , s_out , pos + 1;
+        i < current.size();
+            index = current.at(i);
+            s = states[index];
+            s.consumes();
+                s.accepts(c, ignore_case);
+                    add_state(next, s.out, pos + 1);
 
-            i++;
+            i += 1;
 
-        swap , current , next;
+        swap(current, next);
 
     // Run from `from` and report the offset just past the longest match that
     // begins there, or NONE when nothing matches.
 
-        current_clear;
-        add_state , current , start , from;
+        current.clear();
+        add_state(current, start, from);
         best = NONE;
-        set_contains_accept , current;
+        set_contains_accept(current);
             best = from;
 
         pos = from;
-        pos < text_size;
-            current_empty;
+        pos < text.size();
+            current.empty();
 
-            step , text_at , pos , pos;
-            ++pos;
-            set_contains_accept , current;
+            step(text.at(pos), pos);
+            pos += 1;
+            set_contains_accept(current);
                 best = pos;
 
-            ++steps;
+            steps += 1;
 
         best;
 
@@ -2525,24 +2525,24 @@
     // such programs so the API can do exactly that.
 
         start = from;
-        start <= text_size;
-            end = run_from , start;
+        start <= text.size();
+            end = run_from(start);
             end != NONE;
                 match_begin = start;
                 match_end = end;
                 true;
 
-            start++;
+            start += 1;
 
         match_begin = NONE;
         match_end = NONE;
         false;
 
-        end = run_from , 0;
+        end = run_from(0);
         end == NONE;
             false;
 
-        end == text_size;
+        end == text.size();
 
 // --- Backtracking matcher ------------------------------------------------
 //
@@ -2570,39 +2570,39 @@
 
         end >= begin;
 
-        !valid;
+        !valid();
             0;
 
         end - begin;
 
-        !valid;
+        !valid();
             TEXT_EMPTY;
 
-        subject_substr , begin , length;
+        subject.substr(begin, length());
 
         // --- Set up -----------------------------------------------------------
 
-        nodes = parser_nodes;
-        root = parser_root;
-        group_count = parser_group_count;
-        names = parser_names;
+        nodes = parser.nodes;
+        root = parser.root;
+        group_count = parser.group_count;
+        names = parser.names;
 
-        frames_clear;
+        frames.clear();
         steps = 0;
-        status = MatchStatus_NoMatch;
-        captures_clear;
+        status = MatchStatus::NoMatch;
+        captures.clear();
         i = 0;
         i <= group_count;
-            captures_push_back , Capture;
-            i++;
+            captures.push_back(Capture());
+            i += 1;
 
-        captures_size;
+        captures.size();
 
-        captures , index;
+        captures[index];
 
         entry , names;
-            entry_name_compare , name == 0;
-                entry_index;
+            entry.name.compare(name) == 0;
+                entry.index;
 
         NONE;
 
@@ -2610,268 +2610,268 @@
     // hanging.  `spend` returns false once the budget is gone, and every
     // caller treats that as an immediate failure.
 
-        ++steps;
+        steps += 1;
         steps > budget;
-            status = MatchStatus_Exhausted;
+            status = MatchStatus::Exhausted;
             false;
 
         true;
 
-        status == MatchStatus_Exhausted;
+        status == MatchStatus::Exhausted;
 
         // --- Frame allocation -------------------------------------------------
 
-        index = frames_size;
-        frames_push_back , frame;
+        index = frames.size();
+        frames.push_back(frame);
         index;
 
-        f = ContFrame , ContKind_ContNode , node , next;
-        push_frame , f;
+        f = ContFrame( ContKind::ContNode, node, next);
+        push_frame(f);
 
-        f = ContFrame , ContKind_ContGroupEnd , next;
-        f_slot = slot;
-        f_mark = mark;
-        push_frame , f;
+        f = ContFrame( ContKind::ContGroupEnd, next);
+        f.slot = slot;
+        f.mark = mark;
+        push_frame(f);
 
-        f = ContFrame , ContKind_ContRepeat , node , next;
-        f_count = count;
-        f_mark = mark;
-        push_frame , f;
+        f = ContFrame( ContKind::ContRepeat, node, next);
+        f.count = count;
+        f.mark = mark;
+        push_frame(f);
 
     // --- The continuation half --------------------------------------------
     //
     // Returns the offset the whole match reached, or NONE on failure.
 
-        !spend;
+        !spend();
             NONE;
 
         cont == NONE;
             // Nothing left to match: the pattern has succeeded here.
             pos;
 
-        kind = frames , cont_kind;
-        kind == ContKind_ContDone;
+        kind = frames[cont].kind;
+        kind == ContKind::ContDone;
             pos;
 
-        kind == ContKind_ContNode;
-            node = frames , cont_node;
-            next = frames , cont_next;
-            match_node , node , pos , next;
+        kind == ContKind::ContNode;
+            node = frames[cont].node;
+            next = frames[cont].next;
+            match_node(node, pos, next);
 
-        kind == ContKind_ContGroupEnd;
-            slot = frames , cont_slot;
-            mark = frames , cont_mark;
-            next = frames , cont_next;
+        kind == ContKind::ContGroupEnd;
+            slot = frames[cont].slot;
+            mark = frames[cont].mark;
+            next = frames[cont].next;
             saved_begin = NONE;
             saved_end = NONE;
-            slot < captures_size;
-                existing = captures , slot;
-                saved_begin = existing_begin;
-                saved_end = existing_end;
-                cap = captures , slot;
-                cap_begin = mark;
-                cap_end = pos;
+            slot < captures.size();
+                existing = captures[slot];
+                saved_begin = existing.begin;
+                saved_end = existing.end;
+                cap = captures[slot];
+                cap.begin = mark;
+                cap.end = pos;
 
-            result = run_continuation , next , pos;
+            result = run_continuation(next, pos);
             result == NONE;
                 // Undo the capture: a group that took part in a failed
                 // attempt must not leak its text into the final table.
-                slot < captures_size;
-                    cap = captures , slot;
-                    cap_begin = saved_begin;
-                    cap_end = saved_end;
+                slot < captures.size();
+                    cap = captures[slot];
+                    cap.begin = saved_begin;
+                    cap.end = saved_end;
 
             result;
 
-        node = frames , cont_node;
-        count = frames , cont_count;
-        mark = frames , cont_mark;
-        next = frames , cont_next;
+        node = frames[cont].node;
+        count = frames[cont].count;
+        mark = frames[cont].mark;
+        next = frames[cont].next;
         pos == mark;
             // The body matched the empty string.  Repeating it again would
             // never terminate, so the repetition ends here.
-            n = nodes , node;
-            count >= n_lower;
-                run_continuation , next , pos;
+            n = nodes[node];
+            count >= n.lower;
+                run_continuation(next, pos);
 
             NONE;
 
-        match_repeat , node , pos , count , next;
+        match_repeat(node, pos, count, next);
 
         // --- The node half ----------------------------------------------------
 
-        !spend;
+        !spend();
             NONE;
 
         node == NONE;
-            run_continuation , cont , pos;
+            run_continuation(cont, pos);
 
-        kind = nodes , node_kind;
-        kind == NodeKind_NodeEmpty;
-            run_continuation , cont , pos;
+        kind = nodes[node].kind;
+        kind == NodeKind::NodeEmpty;
+            run_continuation(cont, pos);
 
-        kind == NodeKind_NodeLiteral;
-            match_literal , node , pos , cont;
+        kind == NodeKind::NodeLiteral;
+            match_literal(node, pos, cont);
 
-        kind == NodeKind_NodeString;
-            match_string , node , pos , cont;
+        kind == NodeKind::NodeString;
+            match_string(node, pos, cont);
 
-        kind == NodeKind_NodeAny;
-            match_class , node , pos , cont;
+        kind == NodeKind::NodeAny;
+            match_class(node, pos, cont);
 
-        kind == NodeKind_NodeClass;
-            match_class , node , pos , cont;
+        kind == NodeKind::NodeClass;
+            match_class(node, pos, cont);
 
-        kind == NodeKind_NodeAnchor;
-            match_anchor , node , pos , cont;
+        kind == NodeKind::NodeAnchor;
+            match_anchor(node, pos, cont);
 
-        kind == NodeKind_NodeBackreference;
-            match_backreference , node , pos , cont;
+        kind == NodeKind::NodeBackreference;
+            match_backreference(node, pos, cont);
 
-        kind == NodeKind_NodeConcat;
-            match_concat , node , pos , cont;
+        kind == NodeKind::NodeConcat;
+            match_concat(node, pos, cont);
 
-        kind == NodeKind_NodeAlternate;
-            match_alternate , node , pos , cont;
+        kind == NodeKind::NodeAlternate;
+            match_alternate(node, pos, cont);
 
-        kind == NodeKind_NodeGroup;
-            match_group , node , pos , cont;
+        kind == NodeKind::NodeGroup;
+            match_group(node, pos, cont);
 
-        kind == NodeKind_NodeRepeat;
-            match_repeat , node , pos , 0 , cont;
+        kind == NodeKind::NodeRepeat;
+            match_repeat(node, pos, 0, cont);
 
         NONE;
 
-        pos >= text_size;
+        pos >= text.size();
             NONE;
 
-        expected = nodes , node_value;
-        actual = text_at , pos;
+        expected = nodes[node].value;
+        actual = text.at(pos);
         ignore_case;
-            !same_char_folded , expected , actual;
+            !same_char_folded(expected, actual);
                 NONE;
 
             expected != actual;
                 NONE;
 
-        run_continuation , cont , pos + 1;
+        run_continuation(cont, pos + 1);
 
     // A literal run, produced by the optimiser when it fuses adjacent
     // literals.  Matching it in one go saves a continuation hop per
     // character, which is the whole reason the optimisation exists.
 
-        text = nodes , node_text;
-        pos + text_size > text_size;
+        text = nodes[node].text;
+        pos + text.size() > text.size();
             NONE;
 
         i = 0;
-        i < text_size;
-            expected = text_at , i;
-            actual = text_at , pos + i;
+        i < text.size();
+            expected = text.at(i);
+            actual = text.at(pos + i);
             ignore_case;
-                !same_char_folded , expected , actual;
+                !same_char_folded(expected, actual);
                     NONE;
 
                 expected != actual;
                     NONE;
 
-            ++i;
+            i += 1;
 
-        run_continuation , cont , pos + text_size;
+        run_continuation(cont, pos + text.size());
 
-        pos >= text_size;
+        pos >= text.size();
             NONE;
 
-        c = text_at , pos;
-        cls = nodes , node_charclass;
+        c = text.at(pos);
+        cls = nodes[node].charclass;
         hit = false;
         ignore_case;
-            hit = cls_matches_folded , c;
+            hit = cls.matches_folded(c);
 
-            hit = cls_matches , c;
+            hit = cls.matches(c);
 
         !hit;
             NONE;
 
-        run_continuation , cont , pos + 1;
+        run_continuation(cont, pos + 1);
 
-        which = nodes , node_anchor;
-        !assertion_holds , which , text , pos , multiline;
+        which = nodes[node].anchor;
+        !assertion_holds(which, text, pos, multiline);
             NONE;
 
-        run_continuation , cont , pos;
+        run_continuation(cont, pos);
 
     // Re-match the exact text a group captured earlier.  An unset group
     // matches the empty string, which is what most engines do.
 
-        group = nodes , node_reference;
-        group >= captures_size;
+        group = nodes[node].reference;
+        group >= captures.size();
             NONE;
 
-        cap = captures , group;
-        !cap_valid;
-            run_continuation , cont , pos;
+        cap = captures[group];
+        !cap.valid();
+            run_continuation(cont, pos);
 
-        length = cap_length;
-        pos + length > text_size;
+        length = cap.length();
+        pos + length > text.size();
             NONE;
 
         i = 0;
         i < length;
-            expected = text_at , cap_begin + i;
-            actual = text_at , pos + i;
+            expected = text.at(cap.begin + i);
+            actual = text.at(pos + i);
             ignore_case;
-                !same_char_folded , expected , actual;
+                !same_char_folded(expected, actual);
                     NONE;
 
                 expected != actual;
                     NONE;
 
-            ++i;
+            i += 1;
 
-        run_continuation , cont , pos + length;
+        run_continuation(cont, pos + length);
 
     // Chain the children onto the continuation from the right, so the first
     // child is matched first and every later child is waiting in a frame.
 
-        count = nodes , node_children_size;
+        count = nodes[node].children.size();
         count == 0;
-            run_continuation , cont , pos;
+            run_continuation(cont, pos);
 
         chain = cont;
         i = count - 1;
         i >= 0;
-            child = nodes , node_children , i;
-            chain = push_node , child , chain;
-            i--;
+            child = nodes[node].children[i];
+            chain = push_node(child, chain);
+            i -= 1;
 
-        run_continuation , chain , pos;
+        run_continuation(chain, pos);
 
     // Try each branch in order with the same continuation.  Ordering is what
     // makes alternation leftmost-biased, so `a|ab` matches just `a`.
 
-        count = nodes , node_children_size;
+        count = nodes[node].children.size();
         i = 0;
         i < count;
-            child = nodes , node_children , i;
-            result = match_node , child , pos , cont;
+            child = nodes[node].children[i];
+            result = match_node(child, pos, cont);
             result != NONE;
                 result;
 
-            exhausted;
+            exhausted();
                 NONE;
 
-            ++i;
+            i += 1;
 
         NONE;
 
-        body = nodes , node_first;
-        group = nodes , node_group_index;
+        body = nodes[node].first;
+        group = nodes[node].group_index;
         group == NONE;
-            match_node , body , pos , cont;
+            match_node(body, pos, cont);
 
-        closing = push_group_end , group , pos , cont;
-        match_node , body , pos , closing;
+        closing = push_group_end(group, pos, cont);
+        match_node(body, pos, closing);
 
     // --- Repetition -------------------------------------------------------
     //
@@ -2880,48 +2880,48 @@
     // lazy one tries the continuation first.  A possessive repetition takes
     // as many iterations as it can and never gives one back.
 
-        !spend;
+        !spend();
             NONE;
 
-        lower = nodes , node_lower;
-        upper = nodes , node_upper;
-        body = nodes , node_first;
-        greed = nodes , node_greed;
+        lower = nodes[node].lower;
+        upper = nodes[node].upper;
+        body = nodes[node].first;
+        greed = nodes[node].greed;
         may_continue = count >= lower;
         may_repeat = true;
         upper != NONE;
             count >= upper;
                 may_repeat = false;
 
-        greed == Greediness_Possessive;
-            match_possessive , node , pos , count , cont;
+        greed == Greediness::Possessive;
+            match_possessive(node, pos, count, cont);
 
-        greed == Greediness_Lazy;
+        greed == Greediness::Lazy;
             may_continue;
-                stop = run_continuation , cont , pos;
+                stop = run_continuation(cont, pos);
                 stop != NONE;
                     stop;
 
-                exhausted;
+                exhausted();
                     NONE;
 
             !may_repeat;
                 NONE;
 
-            resume = push_repeat , node , count + 1 , pos , cont;
-            match_node , body , pos , resume;
+            resume = push_repeat(node, count + 1, pos, cont);
+            match_node(body, pos, resume);
 
         may_repeat;
-            resume = push_repeat , node , count + 1 , pos , cont;
-            more = match_node , body , pos , resume;
+            resume = push_repeat(node, count + 1, pos, cont);
+            more = match_node(body, pos, resume);
             more != NONE;
                 more;
 
-            exhausted;
+            exhausted();
                 NONE;
 
         may_continue;
-            run_continuation , cont , pos;
+            run_continuation(cont, pos);
 
         NONE;
 
@@ -2929,64 +2929,64 @@
     // matching, then hand the final position to the real continuation.  No
     // iteration is ever undone, which is the defining property.
 
-        lower = nodes , node_lower;
-        upper = nodes , node_upper;
-        body = nodes , node_first;
+        lower = nodes[node].lower;
+        upper = nodes[node].upper;
+        body = nodes[node].first;
         taken = count;
         cursor = pos;
 
             upper != NONE;
                 taken >= upper;
 
-            advanced = match_node , body , cursor , NONE;
+            advanced = match_node(body, cursor, NONE);
             advanced == NONE;
 
             advanced == cursor;
             // An empty iteration adds nothing and would loop forever.
 
             cursor = advanced;
-            ++taken;
-            exhausted;
+            taken += 1;
+            exhausted();
                 NONE;
 
         taken < lower;
             NONE;
 
-        run_continuation , cont , cursor;
+        run_continuation(cont, cursor);
 
         // --- Public entry points ----------------------------------------------
 
-        reset;
-        end = match_node , root , start , NONE;
+        reset();
+        end = match_node(root, start, NONE);
         end == NONE;
-            !exhausted;
-                status = MatchStatus_NoMatch;
+            !exhausted();
+                status = MatchStatus::NoMatch;
 
             false;
 
-        status = MatchStatus_Matched;
-        whole = captures , 0;
-        whole_begin = start;
-        whole_end = end;
+        status = MatchStatus::Matched;
+        whole = captures[0];
+        whole.begin = start;
+        whole.end = end;
         true;
 
         start = from;
-        start <= text_size;
-            match_at , start;
+        start <= text.size();
+            match_at(start);
                 true;
 
-            exhausted;
+            exhausted();
                 false;
 
-            start++;
+            start += 1;
 
         false;
 
-        !match_at , 0;
+        !match_at(0);
             false;
 
-        whole = captures , 0;
-        whole_end == text_size;
+        whole = captures[0];
+        whole.end == text.size();
 
 // --- Compiled program ----------------------------------------------------
 //
@@ -3011,95 +3011,95 @@
                  // accept
                  // never matches; left behind by the optimiser
 
-        op == OpCode_OpChar;
+        op == OpCode::OpChar;
             true;
 
-        op == OpCode_OpString;
+        op == OpCode::OpString;
             true;
 
-        op == OpCode_OpClass;
+        op == OpCode::OpClass;
             true;
 
-        op == OpCode_OpAny;
-            true;
-
-        false;
-
-        op == OpCode_OpSplit;
-            true;
-
-        op == OpCode_OpJump;
+        op == OpCode::OpAny;
             true;
 
         false;
 
-        op == OpCode_OpMatch;
+        op == OpCode::OpSplit;
             true;
 
-        op == OpCode_OpFail;
+        op == OpCode::OpJump;
+            true;
+
+        false;
+
+        op == OpCode::OpMatch;
+            true;
+
+        op == OpCode::OpFail;
 
     // How much input the instruction always consumes.  OpString reports its
     // whole length, which is what the prefix scanner wants.
 
-        op == OpCode_OpString;
-            text_size;
+        op == OpCode::OpString;
+            text.size();
 
-        consumes_input;
+        consumes_input();
             1;
 
         0;
 
-        code_size;
+        code.size();
 
-        code_empty;
+        code.empty();
 
-        code , pc;
+        code[pc];
 
         pc < 0;
-            OpCode_OpFail;
+            OpCode::OpFail;
 
-        pc >= code_size;
-            OpCode_OpFail;
+        pc >= code.size();
+            OpCode::OpFail;
 
-        code , pc_op;
+        code[pc].op;
 
-        at = code_size;
-        code_push_back , inst;
+        at = code.size();
+        code.push_back(inst);
         at;
 
-        emit , Instruction , op;
+        emit(Instruction( op));
 
-        inst = Instruction , OpCode_OpChar , c;
-        inst_charclass_add_char , c;
-        emit , inst;
+        inst = Instruction( OpCode::OpChar, c);
+        inst.charclass.add_char(c);
+        emit(inst);
 
-        inst = Instruction , OpCode_OpClass;
-        inst_charclass = cls;
-        inst_charclass_normalise;
-        emit , inst;
+        inst = Instruction( OpCode::OpClass);
+        inst.charclass = cls;
+        inst.charclass.normalise();
+        emit(inst);
 
-        inst = Instruction , OpCode_OpSave;
-        inst_slot = slot;
-        emit , inst;
+        inst = Instruction( OpCode::OpSave);
+        inst.slot = slot;
+        emit(inst);
 
-        inst = Instruction , OpCode_OpAssert;
-        inst_anchor = which;
-        emit , inst;
+        inst = Instruction( OpCode::OpAssert);
+        inst.anchor = which;
+        emit(inst);
 
-        inst = Instruction , OpCode_OpBackref;
-        inst_slot = slot;
-        emit , inst;
+        inst = Instruction( OpCode::OpBackref);
+        inst.slot = slot;
+        emit(inst);
 
-        inst = code , pc;
-        inst_x = target;
+        inst = code[pc];
+        inst.x = target;
 
-        inst = code , pc;
-        inst_y = target;
+        inst = code[pc];
+        inst.y = target;
 
         total = 0;
         inst , code;
-            inst_op == op;
-                ++total;
+            inst.op == op;
+                total += 1;
 
         total;
 
@@ -3109,74 +3109,74 @@
 
         total = 0;
         inst , code;
-            inst_op == OpCode_OpSplit;
+            inst.op == OpCode::OpSplit;
                 total;
 
-            total += inst_minimum_width;
-            inst_op == OpCode_OpMatch;
+            total += inst.minimum_width();
+            inst.op == OpCode::OpMatch;
 
         total;
 
         out = TEXT_EMPTY;
         pc = 0;
-        pc < code_size;
-            inst = code , pc;
-            out_append , to_string , pc;
-            out_append , TEXT_SPACE_ARROW;
-            out_append , opcode_name , inst_op;
-            inst_op == OpCode_OpChar;
-                out_append , TEXT_SPACE;
-                out_append , escape_spelling , inst_value;
+        pc < code.size();
+            inst = code[pc];
+            out.append(to_string(pc));
+            out.append(TEXT_SPACE_ARROW);
+            out.append(opcode_name(inst.op));
+            inst.op == OpCode::OpChar;
+                out.append(TEXT_SPACE);
+                out.append(escape_spelling(inst.value));
 
-            inst_op == OpCode_OpString;
-                out_append , TEXT_SPACE;
-                out_append , inst_text;
+            inst.op == OpCode::OpString;
+                out.append(TEXT_SPACE);
+                out.append(inst.text);
 
-            inst_op == OpCode_OpClass;
-                out_append , TEXT_SPACE;
-                out_append , inst_charclass_spell;
+            inst.op == OpCode::OpClass;
+                out.append(TEXT_SPACE);
+                out.append(inst.charclass.spell());
 
-            inst_is_branch;
-                out_append , TEXT_SPACE;
-                out_append , to_string , inst_x;
+            inst.is_branch();
+                out.append(TEXT_SPACE);
+                out.append(to_string(inst.x));
 
-            inst_op == OpCode_OpSplit;
-                out_append , TEXT_COMMA_SPACE;
-                out_append , to_string , inst_y;
+            inst.op == OpCode::OpSplit;
+                out.append(TEXT_COMMA_SPACE);
+                out.append(to_string(inst.y));
 
-            out_append , TEXT_NEWLINE;
-            ++pc;
+            out.append(TEXT_NEWLINE);
+            pc += 1;
 
         out;
 
-    op == OpCode_OpChar;
+    op == OpCode::OpChar;
         "char";
 
-    op == OpCode_OpString;
+    op == OpCode::OpString;
         "string";
 
-    op == OpCode_OpClass;
+    op == OpCode::OpClass;
         "class";
 
-    op == OpCode_OpAny;
+    op == OpCode::OpAny;
         "any";
 
-    op == OpCode_OpSplit;
+    op == OpCode::OpSplit;
         "split";
 
-    op == OpCode_OpJump;
+    op == OpCode::OpJump;
         "jump";
 
-    op == OpCode_OpSave;
+    op == OpCode::OpSave;
         "save";
 
-    op == OpCode_OpAssert;
+    op == OpCode::OpAssert;
         "assert_at";
 
-    op == OpCode_OpBackref;
+    op == OpCode::OpBackref;
         "backref";
 
-    op == OpCode_OpMatch;
+    op == OpCode::OpMatch;
         "match";
 
     "fail";
@@ -3189,165 +3189,165 @@
 // destination is known - the same hole-and-patch discipline the NFA builder
 // uses, expressed in indices instead of exit lists.
 
-        program = Program;
-        nodes = parser_nodes;
-        program_group_count = parser_group_count;
-        program_names = parser_names;
+        program = Program();
+        nodes = parser.nodes;
+        program.group_count = parser.group_count;
+        program.names = parser.names;
         ok = true;
-        program_emit_save , 0;
-        compile_node , parser_root;
+        program.emit_save(0);
+        compile_node(parser.root);
         !ok;
             false;
 
-        program_emit_save , 1;
-        program_emit_op , OpCode_OpMatch;
-        program_anchored = starts_anchored , parser_root;
+        program.emit_save(1);
+        program.emit_op(OpCode::OpMatch);
+        program.anchored = starts_anchored(parser.root);
         true;
 
-        program_code_size;
+        program.code.size();
 
         index == NONE;
 
         !ok;
 
-        kind = nodes , index_kind;
-        kind == NodeKind_NodeEmpty;
+        kind = nodes[index].kind;
+        kind == NodeKind::NodeEmpty;
 
-        kind == NodeKind_NodeLiteral;
-            program_emit_char , nodes , index_value;
+        kind == NodeKind::NodeLiteral;
+            program.emit_char(nodes[index].value);
 
-        kind == NodeKind_NodeString;
-            inst = Instruction , OpCode_OpString;
-            inst_text = nodes , index_text;
-            program_emit , inst;
+        kind == NodeKind::NodeString;
+            inst = Instruction( OpCode::OpString);
+            inst.text = nodes[index].text;
+            program.emit(inst);
 
-        kind == NodeKind_NodeAny;
-            program_emit_class , nodes , index_charclass;
+        kind == NodeKind::NodeAny;
+            program.emit_class(nodes[index].charclass);
 
-        kind == NodeKind_NodeClass;
-            program_emit_class , nodes , index_charclass;
+        kind == NodeKind::NodeClass;
+            program.emit_class(nodes[index].charclass);
 
-        kind == NodeKind_NodeAnchor;
-            program_emit_assert , nodes , index_anchor;
+        kind == NodeKind::NodeAnchor;
+            program.emit_assert(nodes[index].anchor);
 
-        kind == NodeKind_NodeBackreference;
-            program_has_backreference = true;
-            program_emit_backref , nodes , index_reference;
+        kind == NodeKind::NodeBackreference;
+            program.has_backreference = true;
+            program.emit_backref(nodes[index].reference);
 
-        kind == NodeKind_NodeConcat;
-            compile_concat , index;
+        kind == NodeKind::NodeConcat;
+            compile_concat(index);
 
-        kind == NodeKind_NodeAlternate;
-            compile_alternate , index;
+        kind == NodeKind::NodeAlternate;
+            compile_alternate(index);
 
-        kind == NodeKind_NodeGroup;
-            compile_group , index;
+        kind == NodeKind::NodeGroup;
+            compile_group(index);
 
-        kind == NodeKind_NodeRepeat;
-            compile_repeat , index;
+        kind == NodeKind::NodeRepeat;
+            compile_repeat(index);
 
         ok = false;
 
-        count = nodes , index_children_size;
+        count = nodes[index].children.size();
         i = 0;
         i < count;
-            compile_node , nodes , index_children , i;
+            compile_node(nodes[index].children[i]);
             !ok;
 
-            ++i;
+            i += 1;
 
     // Each branch but the last is guarded by a split and followed by a jump
     // to the join point.  The jumps are collected and patched together once
     // the last branch has been emitted.
 
-        count = nodes , index_children_size;
+        count = nodes[index].children.size();
         count == 0;
 
-        jumps = vector , int;
+        jumps = vector{int}();
         i = 0;
         i < count;
-            child = nodes , index_children , i;
+            child = nodes[index].children[i];
             i + 1 == count;
-                compile_node , child;
-                ++i;
+                compile_node(child);
+                i += 1;
 
-            split = program_emit_op , OpCode_OpSplit;
-            program_set_target , split , here;
-            compile_node , child;
+            split = program.emit_op(OpCode::OpSplit);
+            program.set_target(split, here());
+            compile_node(child);
             !ok;
 
-            jump = program_emit_op , OpCode_OpJump;
-            jumps_push_back , jump;
-            program_set_alternate , split , here;
-            ++i;
+            jump = program.emit_op(OpCode::OpJump);
+            jumps.push_back(jump);
+            program.set_alternate(split, here());
+            i += 1;
 
-        join = here;
+        join = here();
         jump , jumps;
-            program_set_target , jump , join;
+            program.set_target(jump, join);
 
-        group = nodes , index_group_index;
+        group = nodes[index].group_index;
         group == NONE;
-            compile_node , nodes , index_first;
+            compile_node(nodes[index].first);
 
-        program_emit_save , group * 2;
-        compile_node , nodes , index_first;
+        program.emit_save(group * 2);
+        compile_node(nodes[index].first);
         !ok;
 
-        program_emit_save , group * 2 + 1;
+        program.emit_save(group * 2 + 1);
 
-        lower = nodes , index_lower;
-        upper = nodes , index_upper;
-        body = nodes , index_first;
-        lazy = nodes , index_greed == Greediness_Lazy;
+        lower = nodes[index].lower;
+        upper = nodes[index].upper;
+        body = nodes[index].first;
+        lazy = nodes[index].greed == Greediness::Lazy;
         i = 0;
         i < lower;
-            compile_node , body;
+            compile_node(body);
             !ok;
 
-            i++;
+            i += 1;
 
         upper == NONE;
-            compile_star , body , lazy;
+            compile_star(body, lazy);
 
         extra = upper - lower;
-        splits = vector , int;
+        splits = vector{int}();
         extra > 0;
-            split = program_emit_op , OpCode_OpSplit;
-            splits_push_back , split;
+            split = program.emit_op(OpCode::OpSplit);
+            splits.push_back(split);
             lazy;
-                program_set_alternate , split , here;
+                program.set_alternate(split, here());
 
-                program_set_target , split , here;
+                program.set_target(split, here());
 
-            compile_node , body;
+            compile_node(body);
             !ok;
 
-            extra--;
+            extra -= 1;
 
-        after = here;
+        after = here();
         split , splits;
             lazy;
-                program_set_target , split , after;
+                program.set_target(split, after);
 
-                program_set_alternate , split , after;
+                program.set_alternate(split, after);
 
     // The star loop: split, body, jump back, and the split's other arm points
     // past the jump.  Swapping the arms turns the loop lazy.
 
-        split = program_emit_op , OpCode_OpSplit;
-        body_at = here;
-        compile_node , body;
+        split = program.emit_op(OpCode::OpSplit);
+        body_at = here();
+        compile_node(body);
         !ok;
 
-        jump = program_emit_op , OpCode_OpJump;
-        program_set_target , jump , split;
-        after = here;
+        jump = program.emit_op(OpCode::OpJump);
+        program.set_target(jump, split);
+        after = here();
         lazy;
-            program_set_target , split , after;
-            program_set_alternate , split , body_at;
+            program.set_target(split, after);
+            program.set_alternate(split, body_at);
 
-            program_set_target , split , body_at;
-            program_set_alternate , split , after;
+            program.set_target(split, body_at);
+            program.set_alternate(split, after);
 
     // True when every path through the pattern begins with an anchor that
     // pins it to the start of the subject.  Such a program never needs to be
@@ -3356,31 +3356,31 @@
         index == NONE;
             false;
 
-        kind = nodes , index_kind;
-        kind == NodeKind_NodeAnchor;
-            which = nodes , index_anchor;
-            which == AnchorKind_AnchorTextStart;
+        kind = nodes[index].kind;
+        kind == NodeKind::NodeAnchor;
+            which = nodes[index].anchor;
+            which == AnchorKind::AnchorTextStart;
                 true;
 
-            which == AnchorKind_AnchorLineStart;
+            which == AnchorKind::AnchorLineStart;
 
-        kind == NodeKind_NodeGroup;
-            starts_anchored , nodes , index_first;
+        kind == NodeKind::NodeGroup;
+            starts_anchored(nodes[index].first);
 
-        kind == NodeKind_NodeConcat;
-            nodes , index_children_empty;
+        kind == NodeKind::NodeConcat;
+            nodes[index].children.empty();
                 false;
 
-            starts_anchored , nodes , index_children , 0;
+            starts_anchored(nodes[index].children[0]);
 
-        kind == NodeKind_NodeAlternate;
+        kind == NodeKind::NodeAlternate;
             // Every branch must be anchored, or the pattern can still match
             // somewhere in the middle of the subject.
-            nodes , index_children_empty;
+            nodes[index].children.empty();
                 false;
 
-            child , nodes , index_children;
-                !starts_anchored , child;
+            child , nodes[index].children;
+                !starts_anchored(child);
                     false;
 
             true;
@@ -3411,25 +3411,25 @@
         sum;
 
         out = TEXT_EMPTY;
-        out_append , "literal runs: ";
-        out_append , to_string , literal_runs;
-        out_append , TEXT_COMMA_SPACE;
-        out_append , "merged classes: ";
-        out_append , to_string , merged_classes;
-        out_append , TEXT_COMMA_SPACE;
-        out_append , "collapsed repeats: ";
-        out_append , to_string , collapsed_repeats;
-        out_append , TEXT_COMMA_SPACE;
-        out_append , "threaded jumps: ";
-        out_append , to_string , threaded_jumps;
-        out_append , TEXT_COMMA_SPACE;
-        out_append , "dead instructions: ";
-        out_append , to_string , dead_instructions;
+        out.append("literal runs: ");
+        out.append(to_string(literal_runs));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("merged classes: ");
+        out.append(to_string(merged_classes));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("collapsed repeats: ");
+        out.append(to_string(collapsed_repeats));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("threaded jumps: ");
+        out.append(to_string(threaded_jumps));
+        out.append(TEXT_COMMA_SPACE);
+        out.append("dead instructions: ");
+        out.append(to_string(dead_instructions));
         out;
 
         rewrites > 0;
 
-        ++work;
+        work += 1;
         work <= OPTIMISER_BUDGET;
 
         // --- Tree passes ------------------------------------------------------
@@ -3438,13 +3438,13 @@
         round = 0;
         round < 4;
             before = rewrites;
-            fuse_literals , parser , parser_root;
-            merge_alternate_classes , parser , parser_root;
-            collapse_repeats , parser , parser_root;
-            stats_rounds += 1;
+            fuse_literals(parser, parser.root);
+            merge_alternate_classes(parser, parser.root);
+            collapse_repeats(parser, parser.root);
+            stats.rounds += 1;
             rewrites == before;
 
-            round++;
+            round += 1;
 
         rewrites;
 
@@ -3454,83 +3454,83 @@
 
         index == NONE;
 
-        !spend;
+        !spend();
 
-        kind = parser_nodes , index_kind;
-        kind == NodeKind_NodeRepeat;
-            fuse_literals , parser , parser_nodes , index_first;
+        kind = parser.nodes[index].kind;
+        kind == NodeKind::NodeRepeat;
+            fuse_literals(parser, parser.nodes[index].first);
 
-        kind == NodeKind_NodeGroup;
-            fuse_literals , parser , parser_nodes , index_first;
+        kind == NodeKind::NodeGroup;
+            fuse_literals(parser, parser.nodes[index].first);
 
-        kind == NodeKind_NodeAlternate;
-            count = parser_nodes , index_children_size;
+        kind == NodeKind::NodeAlternate;
+            count = parser.nodes[index].children.size();
             i = 0;
             i < count;
-                fuse_literals , parser , parser_nodes , index_children , i;
-                i++;
+                fuse_literals(parser, parser.nodes[index].children[i]);
+                i += 1;
 
-        kind != NodeKind_NodeConcat;
+        kind != NodeKind::NodeConcat;
 
-        count = parser_nodes , index_children_size;
+        count = parser.nodes[index].children.size();
         i = 0;
         i < count;
-            fuse_literals , parser , parser_nodes , index_children , i;
-            ++i;
+            fuse_literals(parser, parser.nodes[index].children[i]);
+            i += 1;
 
-        rebuilt = vector , int;
+        rebuilt = vector{int}();
         run = TEXT_EMPTY;
         run_start = NONE;
         i = 0;
         i < count;
-            child = parser_nodes , index_children , i;
-            child_kind = parser_nodes , child_kind;
-            literal = child_kind == NodeKind_NodeLiteral;
+            child = parser.nodes[index].children[i];
+            child_kind = parser.nodes[child].kind;
+            literal = child_kind == NodeKind::NodeLiteral;
             literal && i + 1 < count;
                 // A literal followed by a quantifier must stay separate: the
                 // quantifier binds to that one character, not to the run.
-                next = parser_nodes , index_children , i + 1;
-                parser_nodes , next_kind == NodeKind_NodeRepeat;
-                    parser_nodes , next_first == child;
+                next = parser.nodes[index].children[i + 1];
+                parser.nodes[next].kind == NodeKind::NodeRepeat;
+                    parser.nodes[next].first == child;
                         literal = false;
 
             literal;
                 run_start == NONE;
                     run_start = child;
 
-                run_push_back , parser_nodes , child_value;
+                run.push_back(parser.nodes[child].value);
 
-                run_size >= 2;
-                    fused = make_string_node , parser , run;
-                    rebuilt_push_back , fused;
-                    ++rewrites;
-                    stats_literal_runs += 1;
+                run.size() >= 2;
+                    fused = make_string_node(parser, run);
+                    rebuilt.push_back(fused);
+                    rewrites += 1;
+                    stats.literal_runs += 1;
 
                     run_start != NONE;
-                        rebuilt_push_back , run_start;
+                        rebuilt.push_back(run_start);
 
                 run = TEXT_EMPTY;
                 run_start = NONE;
-                rebuilt_push_back , child;
+                rebuilt.push_back(child);
 
-            ++i;
+            i += 1;
 
-        run_size >= 2;
-            fused = make_string_node , parser , run;
-            rebuilt_push_back , fused;
-            rewrites++;
-            stats_literal_runs += 1;
+        run.size() >= 2;
+            fused = make_string_node(parser, run);
+            rebuilt.push_back(fused);
+            rewrites += 1;
+            stats.literal_runs += 1;
 
             run_start != NONE;
-                rebuilt_push_back , run_start;
+                rebuilt.push_back(run_start);
 
-        n = parser_nodes , index;
-        n_children = move , rebuilt;
+        n = parser.nodes[index];
+        n.children = move(rebuilt);
 
-        index = parser_nodes_size;
-        n = Node , NodeKind_NodeString;
-        n_text = text;
-        parser_nodes_push_back , n;
+        index = parser.nodes.size();
+        n = Node( NodeKind::NodeString);
+        n.text = text;
+        parser.nodes.push_back(n);
         index;
 
     // `a|b|c` and `[ab]|[cd]` both describe a set of single characters, and a
@@ -3540,126 +3540,126 @@
 
         index == NONE;
 
-        !spend;
+        !spend();
 
-        kind = parser_nodes , index_kind;
-        kind == NodeKind_NodeRepeat;
-            merge_alternate_classes , parser , parser_nodes , index_first;
+        kind = parser.nodes[index].kind;
+        kind == NodeKind::NodeRepeat;
+            merge_alternate_classes(parser, parser.nodes[index].first);
 
-        kind == NodeKind_NodeGroup;
-            merge_alternate_classes , parser , parser_nodes , index_first;
+        kind == NodeKind::NodeGroup;
+            merge_alternate_classes(parser, parser.nodes[index].first);
 
-        kind == NodeKind_NodeConcat;
-            count = parser_nodes , index_children_size;
+        kind == NodeKind::NodeConcat;
+            count = parser.nodes[index].children.size();
             i = 0;
             i < count;
-                merge_alternate_classes , parser , parser_nodes , index_children , i;
-                i++;
+                merge_alternate_classes(parser, parser.nodes[index].children[i]);
+                i += 1;
 
-        kind != NodeKind_NodeAlternate;
+        kind != NodeKind::NodeAlternate;
 
-        count = parser_nodes , index_children_size;
+        count = parser.nodes[index].children.size();
         i = 0;
         i < count;
-            merge_alternate_classes , parser , parser_nodes , index_children , i;
-            ++i;
+            merge_alternate_classes(parser, parser.nodes[index].children[i]);
+            i += 1;
 
         count < 2;
 
         mergeable = true;
         i = 0;
         i < count;
-            child = parser_nodes , index_children , i;
-            child_kind = parser_nodes , child_kind;
+            child = parser.nodes[index].children[i];
+            child_kind = parser.nodes[child].kind;
             fine = false;
-            child_kind == NodeKind_NodeLiteral;
+            child_kind == NodeKind::NodeLiteral;
                 fine = true;
 
-            child_kind == NodeKind_NodeClass;
+            child_kind == NodeKind::NodeClass;
                 // A negated class cannot be unioned by concatenating ranges;
                 // it would have to be complemented first, and that is not
                 // worth doing inside a pass meant to be cheap.
-                !parser_nodes , child_charclass_negated;
+                !parser.nodes[child].charclass.negated;
                     fine = true;
 
             !fine;
                 mergeable = false;
 
-            ++i;
+            i += 1;
 
         !mergeable;
 
-        merged = CharClass;
+        merged = CharClass();
         i = 0;
         i < count;
-            child = parser_nodes , index_children , i;
-            merged_add_class , parser_nodes , child_charclass;
-            ++i;
+            child = parser.nodes[index].children[i];
+            merged.add_class(parser.nodes[child].charclass);
+            i += 1;
 
-        merged_normalise;
-        n = parser_nodes , index;
-        n_kind = NodeKind_NodeClass;
-        n_charclass = merged;
-        n_children_clear;
-        rewrites++;
-        stats_merged_classes += 1;
+        merged.normalise();
+        n = parser.nodes[index];
+        n.kind = NodeKind::NodeClass;
+        n.charclass = merged;
+        n.children.clear();
+        rewrites += 1;
+        stats.merged_classes += 1;
 
     // `e{1,1}` is `e`, and `e{0,0}` is the empty string.  Both turn up
     // constantly in generated patterns.
 
         index == NONE;
 
-        !spend;
+        !spend();
 
-        kind = parser_nodes , index_kind;
-        kind == NodeKind_NodeConcat;
-            count = parser_nodes , index_children_size;
+        kind = parser.nodes[index].kind;
+        kind == NodeKind::NodeConcat;
+            count = parser.nodes[index].children.size();
             i = 0;
             i < count;
-                collapse_repeats , parser , parser_nodes , index_children , i;
-                i++;
+                collapse_repeats(parser, parser.nodes[index].children[i]);
+                i += 1;
 
-        kind == NodeKind_NodeAlternate;
-            count = parser_nodes , index_children_size;
+        kind == NodeKind::NodeAlternate;
+            count = parser.nodes[index].children.size();
             i = 0;
             i < count;
-                collapse_repeats , parser , parser_nodes , index_children , i;
-                i++;
+                collapse_repeats(parser, parser.nodes[index].children[i]);
+                i += 1;
 
-        kind == NodeKind_NodeGroup;
-            collapse_repeats , parser , parser_nodes , index_first;
+        kind == NodeKind::NodeGroup;
+            collapse_repeats(parser, parser.nodes[index].first);
 
-        kind != NodeKind_NodeRepeat;
+        kind != NodeKind::NodeRepeat;
 
-        collapse_repeats , parser , parser_nodes , index_first;
-        lower = parser_nodes , index_lower;
-        upper = parser_nodes , index_upper;
+        collapse_repeats(parser, parser.nodes[index].first);
+        lower = parser.nodes[index].lower;
+        upper = parser.nodes[index].upper;
         lower == 0 && upper == 0;
-            n = parser_nodes , index;
-            n_kind = NodeKind_NodeEmpty;
-            n_first = NONE;
-            rewrites++;
-            stats_collapsed_repeats += 1;
+            n = parser.nodes[index];
+            n.kind = NodeKind::NodeEmpty;
+            n.first = NONE;
+            rewrites += 1;
+            stats.collapsed_repeats += 1;
 
         lower == 1 && upper == 1;
-            body = parser_nodes , index_first;
-            source = parser_nodes , body;
+            body = parser.nodes[index].first;
+            source = parser.nodes[body];
             copy = source;
-            n = parser_nodes , index;
-            n_kind = copy_kind;
-            n_value = copy_value;
-            n_text = copy_text;
-            n_charclass = copy_charclass;
-            n_anchor = copy_anchor;
-            n_group_kind = copy_group_kind;
-            n_group_index = copy_group_index;
-            n_reference = copy_reference;
-            n_lower = copy_lower;
-            n_upper = copy_upper;
-            n_first = copy_first;
-            n_children = copy_children;
-            ++rewrites;
-            stats_collapsed_repeats += 1;
+            n = parser.nodes[index];
+            n.kind = copy.kind;
+            n.value = copy.value;
+            n.text = copy.text;
+            n.charclass = copy.charclass;
+            n.anchor = copy.anchor;
+            n.group_kind = copy.group_kind;
+            n.group_index = copy.group_index;
+            n.reference = copy.reference;
+            n.lower = copy.lower;
+            n.upper = copy.upper;
+            n.first = copy.first;
+            n.children = copy.children;
+            rewrites += 1;
+            stats.collapsed_repeats += 1;
 
     // --- Literal prefix extraction ----------------------------------------
     //
@@ -3669,52 +3669,52 @@
     // the single most valuable optimisation for patterns like `error: .*`.
 
         out = TEXT_EMPTY;
-        collect_prefix , parser , index , out;
+        collect_prefix(parser, index, out);
         out;
 
         index == NONE;
 
-        !spend;
+        !spend();
 
-        kind = parser_nodes , index_kind;
-        kind == NodeKind_NodeLiteral;
-            out_push_back , parser_nodes , index_value;
+        kind = parser.nodes[index].kind;
+        kind == NodeKind::NodeLiteral;
+            out.push_back(parser.nodes[index].value);
 
-        kind == NodeKind_NodeString;
-            out_append , parser_nodes , index_text;
+        kind == NodeKind::NodeString;
+            out.append(parser.nodes[index].text);
 
-        kind == NodeKind_NodeGroup;
-            parser_nodes , index_group_kind == GroupKind_NonCapturing;
-                collect_prefix , parser , parser_nodes , index_first , out;
+        kind == NodeKind::NodeGroup;
+            parser.nodes[index].group_kind == GroupKind::NonCapturing;
+                collect_prefix(parser, parser.nodes[index].first, out);
 
-        kind == NodeKind_NodeAnchor;
+        kind == NodeKind::NodeAnchor;
         // Anchors consume nothing, so the prefix continues past them.
 
-        kind == NodeKind_NodeRepeat;
-            parser_nodes , index_lower >= 1;
+        kind == NodeKind::NodeRepeat;
+            parser.nodes[index].lower >= 1;
                 // The first mandatory iteration contributes its own prefix,
                 // but nothing after it is certain.
                 inner = TEXT_EMPTY;
-                collect_prefix , parser , parser_nodes , index_first , inner;
-                out_append , inner;
+                collect_prefix(parser, parser.nodes[index].first, inner);
+                out.append(inner);
 
-        kind != NodeKind_NodeConcat;
+        kind != NodeKind::NodeConcat;
 
-        count = parser_nodes , index_children_size;
+        count = parser.nodes[index].children.size();
         i = 0;
         i < count;
-            child = parser_nodes , index_children , i;
-            child_kind = parser_nodes , child_kind;
-            child_kind == NodeKind_NodeLiteral;
-                out_push_back , parser_nodes , child_value;
-                ++i;
+            child = parser.nodes[index].children[i];
+            child_kind = parser.nodes[child].kind;
+            child_kind == NodeKind::NodeLiteral;
+                out.push_back(parser.nodes[child].value);
+                i += 1;
 
-            child_kind == NodeKind_NodeString;
-                out_append , parser_nodes , child_text;
-                ++i;
+            child_kind == NodeKind::NodeString;
+                out.append(parser.nodes[child].text);
+                i += 1;
 
-            child_kind == NodeKind_NodeAnchor;
-                i++;
+            child_kind == NodeKind::NodeAnchor;
+                i += 1;
 
                 // --- Program passes ---------------------------------------------------
 
@@ -3722,11 +3722,11 @@
         round = 0;
         round < 3;
             before = rewrites;
-            thread_jumps , program;
-            mark_dead , program;
+            thread_jumps(program);
+            mark_dead(program);
             rewrites == before;
 
-            round++;
+            round += 1;
 
         rewrites;
 
@@ -3736,26 +3736,26 @@
     // might - cannot spin forever.
 
         pc = 0;
-        pc < program_code_size;
-            !spend;
+        pc < program.code.size();
+            !spend();
 
-            inst = program_code , pc;
-            inst_is_branch;
-                target = final_target , program , inst_x;
-                target != inst_x;
-                    program_set_target , pc , target;
-                    ++rewrites;
-                    stats_threaded_jumps += 1;
+            inst = program.code[pc];
+            inst.is_branch();
+                target = final_target(program, inst.x);
+                target != inst.x;
+                    program.set_target(pc, target);
+                    rewrites += 1;
+                    stats.threaded_jumps += 1;
 
-            again = program_code , pc;
-            again_op == OpCode_OpSplit;
-                target = final_target , program , again_y;
-                target != again_y;
-                    program_set_alternate , pc , target;
-                    ++rewrites;
-                    stats_threaded_jumps += 1;
+            again = program.code[pc];
+            again.op == OpCode::OpSplit;
+                target = final_target(program, again.y);
+                target != again.y;
+                    program.set_alternate(pc, target);
+                    rewrites += 1;
+                    stats.threaded_jumps += 1;
 
-            ++pc;
+            pc += 1;
 
         target = start;
         hops = 0;
@@ -3763,18 +3763,18 @@
             target < 0;
                 start;
 
-            target >= program_code_size;
+            target >= program.code.size();
                 start;
 
-            inst = program_code , target;
-            inst_op != OpCode_OpJump;
+            inst = program.code[target];
+            inst.op != OpCode::OpJump;
                 target;
 
-            inst_x == target;
+            inst.x == target;
                 target;
 
-            target = inst_x;
-            ++hops;
+            target = inst.x;
+            hops += 1;
 
         target;
 
@@ -3782,97 +3782,97 @@
     // OpFail, which keeps the indices stable - renumbering would mean
     // rewriting every branch in the program.
 
-        reachable = vector , bool;
-        reachable_resize , program_code_size;
+        reachable = vector{bool}();
+        reachable.resize(program.code.size());
         i = 0;
-        i < program_code_size;
-            reachable , i = false;
-            ++i;
+        i < program.code.size();
+            reachable[i] = false;
+            i += 1;
 
-        stack = vector , int;
-        stack_push_back , program_start;
-        !stack_empty;
-            !spend;
+        stack = vector{int}();
+        stack.push_back(program.start);
+        !stack.empty();
+            !spend();
 
-            pc = stack_back;
-            stack_pop_back;
+            pc = stack.back();
+            stack.pop_back();
             pc < 0;
 
-            pc >= program_code_size;
+            pc >= program.code.size();
 
-            reachable , pc;
+            reachable[pc];
 
-            reachable , pc = true;
-            inst = program_code , pc;
-            inst_op == OpCode_OpMatch;
+            reachable[pc] = true;
+            inst = program.code[pc];
+            inst.op == OpCode::OpMatch;
 
-            inst_op == OpCode_OpFail;
+            inst.op == OpCode::OpFail;
 
-            inst_op == OpCode_OpJump;
-                stack_push_back , inst_x;
+            inst.op == OpCode::OpJump;
+                stack.push_back(inst.x);
 
-            inst_op == OpCode_OpSplit;
-                stack_push_back , inst_x;
-                stack_push_back , inst_y;
+            inst.op == OpCode::OpSplit;
+                stack.push_back(inst.x);
+                stack.push_back(inst.y);
 
-            stack_push_back , pc + 1;
+            stack.push_back(pc + 1);
 
         i = 0;
-        i < program_code_size;
-            !reachable , i;
-                inst = program_code , i;
-                inst_op != OpCode_OpFail;
-                    inst_op = OpCode_OpFail;
-                    rewrites++;
-                    stats_dead_instructions += 1;
+        i < program.code.size();
+            !reachable[i];
+                inst = program.code[i];
+                inst.op != OpCode::OpFail;
+                    inst.op = OpCode::OpFail;
+                    rewrites += 1;
+                    stats.dead_instructions += 1;
 
-            ++i;
+            i += 1;
 
             // --- Match results -------------------------------------------------------
 
         found;
 
-        whole = groups , 0;
-        whole_begin;
+        whole = groups[0];
+        whole.begin;
 
-        whole = groups , 0;
-        whole_end;
+        whole = groups[0];
+        whole.end;
 
-        end - begin;
+        end() - begin();
 
-        groups_size;
+        groups.size();
 
         index < 0;
             TEXT_EMPTY;
 
-        index >= groups_size;
+        index >= groups.size();
             TEXT_EMPTY;
 
-        cap = groups , index;
-        cap_text_of , subject;
+        cap = groups[index];
+        cap.text_of(subject);
 
-        index >= groups_size;
+        index >= groups.size();
             NONE;
 
-        cap = groups , index;
-        cap_begin;
+        cap = groups[index];
+        cap.begin;
 
-        index >= groups_size;
+        index >= groups.size();
             false;
 
-        cap = groups , index;
-        cap_valid;
+        cap = groups[index];
+        cap.valid();
 
-        group , 0;
+        group(0);
 
-        subject_substr , 0 , begin;
+        subject.substr(0, begin());
 
-        from = end;
-        subject_substr , from , subject_size - from;
+        from = end();
+        subject.substr(from, subject.size() - from);
 
-    r = MatchResult;
-    r_subject = subject;
-    r_groups_push_back , Capture;
+    r = MatchResult();
+    r.subject = subject;
+    r.groups.push_back(Capture());
     r;
 
 // --- The engine facade ---------------------------------------------------
@@ -3888,13 +3888,13 @@
 
         error_position;
 
-        parser_group_count;
+        parser.group_count;
 
         pattern;
 
-        compiler_program_size;
+        compiler.program.size();
 
-        builder_state_count;
+        builder.state_count();
 
         prefix;
 
@@ -3903,59 +3903,59 @@
         pattern = pattern;
         ok = true;
         error = ERROR_NONE;
-        parser = PatternParser;
-        parser_dot_matches_newline = dot_matches_newline;
-        parser_ignore_case = ignore_case;
-        root = parser_parse , pattern;
+        parser = PatternParser();
+        parser.dot_matches_newline = dot_matches_newline;
+        parser.ignore_case = ignore_case;
+        root = parser.parse(pattern);
         root == NONE;
             ok = false;
-            error = parser_error;
-            error_position = parser_error_position;
+            error = parser.error;
+            error_position = parser.error_position;
             false;
 
-        optimiser = Optimiser;
-        optimiser_optimise_tree , parser;
-        prefix = optimiser_extract_prefix , parser , parser_root;
-        !builder_build , parser , parser_root;
+        optimiser = Optimiser();
+        optimiser.optimise_tree(parser);
+        prefix = optimiser.extract_prefix(parser, parser.root);
+        !builder.build(parser, parser.root);
             ok = false;
             error = ERROR_BAD_GROUP;
             false;
 
-        !compiler_compile , parser;
+        !compiler.compile(parser);
             ok = false;
             error = ERROR_BAD_GROUP;
             false;
 
-        optimiser_optimise_program , compiler_program;
-        compiler_program_prefix = prefix;
-        compiler_program_ignore_case = ignore_case;
-        compiler_program_multiline = multiline;
-        anchored = compiler_program_anchored;
+        optimiser.optimise_program(compiler.program);
+        compiler.program.prefix = prefix;
+        compiler.program.ignore_case = ignore_case;
+        compiler.program.multiline = multiline;
+        anchored = compiler.program.anchored;
         true;
 
-        matcher = BacktrackMatcher;
-        matcher_load , parser;
-        matcher_text = subject;
-        matcher_ignore_case = ignore_case;
-        matcher_multiline = multiline;
-        matcher_budget = BACKTRACK_BUDGET;
+        matcher = BacktrackMatcher();
+        matcher.load(parser);
+        matcher.text = subject;
+        matcher.ignore_case = ignore_case;
+        matcher.multiline = multiline;
+        matcher.budget = BACKTRACK_BUDGET;
 
-        simulator = NfaSimulator;
-        simulator_load , builder;
-        simulator_text = subject;
-        simulator_ignore_case = ignore_case;
-        simulator_multiline = multiline;
+        simulator = NfaSimulator();
+        simulator.load(builder);
+        simulator.text = subject;
+        simulator.ignore_case = ignore_case;
+        simulator.multiline = multiline;
 
     // The simulator is only usable when the caller does not need captures and
     // the pattern has no backreference.
 
-        engine == EngineChoice_ForceBacktrack;
+        engine == EngineChoice::ForceBacktrack;
             false;
 
-        engine == EngineChoice_ForceSimulation;
+        engine == EngineChoice::ForceSimulation;
             true;
 
-        builder_has_backreference;
+        builder.has_backreference;
             false;
 
         want_captures;
@@ -3969,30 +3969,30 @@
     // With no prefix every offset qualifies, so the scan degenerates to the
     // naive one.
 
-        prefix_empty;
+        prefix.empty();
             from;
 
         start = from;
-        limit = subject_size - prefix_size;
+        limit = subject.size() - prefix.size();
         start <= limit;
             i = 0;
             hit = true;
-            i < prefix_size;
-                expected = prefix_at , i;
-                actual = subject_at , start + i;
+            i < prefix.size();
+                expected = prefix.at(i);
+                actual = subject.at(start + i);
                 ignore_case;
-                    !same_char_folded , expected , actual;
+                    !same_char_folded(expected, actual);
                         hit = false;
 
                     expected != actual;
                         hit = false;
 
-                ++i;
+                i += 1;
 
             hit;
                 start;
 
-            ++start;
+            start += 1;
 
         NONE;
 
@@ -4000,54 +4000,54 @@
     //
     // Anchored at both ends: the pattern must describe the whole subject.
 
-        result = empty_result , subject;
+        result = empty_result(subject);
         !ok;
             result;
 
-        prepare_backtracker , subject;
-        !matcher_match_whole;
-            result_status = matcher_status;
-            result_steps = matcher_steps;
+        prepare_backtracker(subject);
+        !matcher.match_whole();
+            result.status = matcher.status;
+            result.steps = matcher.steps;
             result;
 
-        result_found = true;
-        result_groups = matcher_captures;
-        result_names = parser_names;
-        result_steps = matcher_steps;
-        result_status = MatchStatus_Matched;
+        result.found = true;
+        result.groups = matcher.captures;
+        result.names = parser.names;
+        result.steps = matcher.steps;
+        result.status = MatchStatus::Matched;
         result;
 
     // --- search -----------------------------------------------------------
     //
     // Leftmost match anywhere in the subject.
 
-        search_from , subject , 0;
+        search_from(subject, 0);
 
-        result = empty_result , subject;
+        result = empty_result(subject);
         !ok;
             result;
 
-        from > subject_size;
+        from > subject.size();
             result;
 
-        prepare_backtracker , subject;
+        prepare_backtracker(subject);
         start = from;
 
-            start > subject_size;
+            start > subject.size();
 
-            candidate = next_candidate , subject , start;
+            candidate = next_candidate(subject, start);
             candidate == NONE;
 
-            matcher_match_at , candidate;
-                result_found = true;
-                result_groups = matcher_captures;
-                result_names = parser_names;
-                result_steps = matcher_steps;
-                result_status = MatchStatus_Matched;
+            matcher.match_at(candidate);
+                result.found = true;
+                result.groups = matcher.captures;
+                result.names = parser.names;
+                result.steps = matcher.steps;
+                result.status = MatchStatus::Matched;
                 result;
 
-            matcher_exhausted;
-                result_status = MatchStatus_Exhausted;
+            matcher.exhausted();
+                result.status = MatchStatus::Exhausted;
                 result;
 
             anchored;
@@ -4058,7 +4058,7 @@
 
             start = candidate + 1;
 
-        result_steps = matcher_steps;
+        result.steps = matcher.steps;
         result;
 
     // Linear time containment test: does the pattern occur at all?  Uses the
@@ -4067,34 +4067,34 @@
         !ok;
             false;
 
-        may_simulate , false;
-            prepare_simulator , subject;
-            simulator_search_from , 0;
+        may_simulate(false);
+            prepare_simulator(subject);
+            simulator.search_from(0);
 
-        found = search , subject;
-        found_matched;
+        found = search(subject);
+        found.matched();
 
     // --- find_all ---------------------------------------------------------
     //
     // Every non-overlapping match, left to right.  An empty match advances
     // the cursor by one so the loop always terminates.
 
-        out = vector , MatchResult;
+        out = vector{MatchResult}();
         !ok;
             out;
 
         cursor = 0;
         guard = 0;
-        cursor <= subject_size;
-            guard++;
-            guard > subject_size + 2;
+        cursor <= subject.size();
+            guard += 1;
+            guard > subject.size() + 2;
 
-            hit = search_from , subject , cursor;
-            !hit_matched;
+            hit = search_from(subject, cursor);
+            !hit.matched();
 
-            stop = hit_end;
-            begin = hit_begin;
-            out_push_back , hit;
+            stop = hit.end();
+            begin = hit.begin();
+            out.push_back(hit);
             stop == begin;
                 cursor = stop + 1;
 
@@ -4102,8 +4102,8 @@
 
         out;
 
-        all = find_all , subject;
-        all_size;
+        all = find_all(subject);
+        all.size();
 
     // --- replace ----------------------------------------------------------
     //
@@ -4114,14 +4114,14 @@
         !ok;
             subject;
 
-        hit = search , subject;
-        !hit_matched;
+        hit = search(subject);
+        !hit.matched();
             subject;
 
-        out_append , subject_substr , 0 , hit_begin;
-        out_append , expand_replacement , replacement , hit;
-        tail = hit_end;
-        out_append , subject_substr , tail , subject_size - tail;
+        out.append(subject.substr(0, hit.begin()));
+        out.append(expand_replacement(replacement, hit));
+        tail = hit.end();
+        out.append(subject.substr(tail, subject.size() - tail));
         out;
 
         out = TEXT_EMPTY;
@@ -4130,27 +4130,27 @@
 
         cursor = 0;
         guard = 0;
-        cursor <= subject_size;
-            guard++;
-            guard > subject_size + 2;
+        cursor <= subject.size();
+            guard += 1;
+            guard > subject.size() + 2;
 
-            hit = search_from , subject , cursor;
-            !hit_matched;
+            hit = search_from(subject, cursor);
+            !hit.matched();
 
-            begin = hit_begin;
-            stop = hit_end;
-            out_append , subject_substr , cursor , begin - cursor;
-            out_append , expand_replacement , replacement , hit;
+            begin = hit.begin();
+            stop = hit.end();
+            out.append(subject.substr(cursor, begin - cursor));
+            out.append(expand_replacement(replacement, hit));
             stop == begin;
-                begin < subject_size;
-                    out_push_back , subject_at , begin;
+                begin < subject.size();
+                    out.push_back(subject.at(begin));
 
                 cursor = begin + 1;
 
                 cursor = stop;
 
-        cursor < subject_size;
-            out_append , subject_substr , cursor , subject_size - cursor;
+        cursor < subject.size();
+            out.append(subject.substr(cursor, subject.size() - cursor));
 
         out;
 
@@ -4160,127 +4160,127 @@
     // other value caps the number of pieces, with the remainder of the
     // subject forming the last one.
 
-        out = vector , string;
+        out = vector{string}();
         !ok;
-            out_push_back , subject;
+            out.push_back(subject);
             out;
 
         cursor = 0;
         guard = 0;
-        cursor <= subject_size;
-            ++guard;
-            guard > subject_size + 2;
+        cursor <= subject.size();
+            guard += 1;
+            guard > subject.size() + 2;
 
             limit > 0;
-                out_size + 1 >= limit;
+                out.size() + 1 >= limit;
 
-            hit = search_from , subject , cursor;
-            !hit_matched;
+            hit = search_from(subject, cursor);
+            !hit.matched();
 
-            begin = hit_begin;
-            stop = hit_end;
+            begin = hit.begin();
+            stop = hit.end();
             stop == begin;
                 // A zero width separator would split between every pair of
                 // characters; step over one character instead.
-                begin >= subject_size;
+                begin >= subject.size();
 
-                out_push_back , subject_substr , cursor , begin + 1 - cursor;
+                out.push_back(subject.substr(cursor, begin + 1 - cursor));
                 cursor = begin + 1;
 
-            out_push_back , subject_substr , cursor , begin - cursor;
+            out.push_back(subject.substr(cursor, begin - cursor));
             cursor = stop;
 
-        out_push_back , subject_substr , cursor , subject_size - cursor;
+        out.push_back(subject.substr(cursor, subject.size() - cursor));
         out;
 
     // Split and keep only the pieces that are not empty, which is what most
     // tokenising callers actually want.
 
-        pieces = split , subject , limit;
-        out = vector , string;
+        pieces = split(subject, limit);
+        out = vector{string}();
         piece , pieces;
-            !piece_empty;
-                out_push_back , piece;
+            !piece.empty();
+                out.push_back(piece);
 
         out;
 
         // --- Diagnostics ------------------------------------------------------
 
         out = TEXT_EMPTY;
-        out_append , "pattern ";
-        out_append , pattern;
-        out_append , TEXT_NEWLINE;
+        out.append("pattern ");
+        out.append(pattern);
+        out.append(TEXT_NEWLINE);
         !ok;
-            out_append , "error: ";
-            out_append , error;
-            out_append , " at ";
-            out_append , to_string , error_position;
-            out_append , TEXT_NEWLINE;
+            out.append("error: ");
+            out.append(error);
+            out.append(" at ");
+            out.append(to_string(error_position));
+            out.append(TEXT_NEWLINE);
             out;
 
-        out_append , "groups: ";
-        out_append , to_string , parser_group_count;
-        out_append , TEXT_NEWLINE;
-        out_append , "nfa states: ";
-        out_append , to_string , builder_state_count;
-        out_append , TEXT_NEWLINE;
-        out_append , "program: ";
-        out_append , to_string , compiler_program_size;
-        out_append , TEXT_NEWLINE;
-        out_append , "prefix: ";
-        out_append , prefix;
-        out_append , TEXT_NEWLINE;
-        out_append , optimiser_stats_describe;
-        out_append , TEXT_NEWLINE;
+        out.append("groups: ");
+        out.append(to_string(parser.group_count));
+        out.append(TEXT_NEWLINE);
+        out.append("nfa states: ");
+        out.append(to_string(builder.state_count()));
+        out.append(TEXT_NEWLINE);
+        out.append("program: ");
+        out.append(to_string(compiler.program.size()));
+        out.append(TEXT_NEWLINE);
+        out.append("prefix: ");
+        out.append(prefix);
+        out.append(TEXT_NEWLINE);
+        out.append(optimiser.stats.describe());
+        out.append(TEXT_NEWLINE);
         out;
 
         // Substitute `$n` references in a replacement template.
 
     out = TEXT_EMPTY;
     i = 0;
-    i < template_text_size;
-        c = template_text_at , i;
+    i < template_text.size();
+        c = template_text.at(i);
         c != CHAR_DOLLAR;
-            out_push_back , c;
-            ++i;
+            out.push_back(c);
+            i += 1;
 
         next = i + 1;
-        next >= template_text_size;
-            out_push_back , c;
-            i++;
+        next >= template_text.size();
+            out.push_back(c);
+            i += 1;
 
-        marker = template_text_at , next;
+        marker = template_text.at(next);
         marker == CHAR_DOLLAR;
-            out_push_back , CHAR_DOLLAR;
+            out.push_back(CHAR_DOLLAR);
             i += 2;
 
-        is_digit , marker;
-            out_append , hit_group , digit_value , marker;
+        is_digit(marker);
+            out.append(hit.group(digit_value(marker)));
             i += 2;
 
         marker == CHAR_LBRACE;
             // `${name}` refers to a named group.
             scan = next + 1;
             name = TEXT_EMPTY;
-            scan < template_text_size;
-                n = template_text_at , scan;
+            scan < template_text.size();
+                n = template_text.at(scan);
                 n == CHAR_RBRACE;
 
-                name_push_back , n;
-                ++scan;
+                name.push_back(n);
+                scan += 1;
 
             index = NONE;
-            entry , hit_names;
-                entry_name_compare , name == 0;
-                    index = entry_index;
+            entry , hit.names;
+                entry.name.compare(name) == 0;
+                    index = entry.index;
 
             index != NONE;
-                out_append , hit_group , index;
+                out.append(hit.group(index));
 
             i = scan + 1;
 
-        out_push_back , c;
-        ++i;
+        out.push_back(c);
+        i += 1;
 
     out;
 
@@ -4290,44 +4290,44 @@
 // around.  Each of them pays for compilation, so a loop should build a
 // `Regex` once instead.
 
-    re = Regex;
-    !re_compile , pattern;
+    re = Regex();
+    !re.compile(pattern);
         false;
 
-    hit = re_match_text , subject;
-    hit_matched;
+    hit = re.match_text(subject);
+    hit.matched();
 
-    re = Regex;
-    !re_compile , pattern;
+    re = Regex();
+    !re.compile(pattern);
         false;
 
-    re_contains , subject;
+    re.contains(subject);
 
-    re = Regex;
-    !re_compile , pattern;
+    re = Regex();
+    !re.compile(pattern);
         subject;
 
-    re_replace_all , subject , replacement;
+    re.replace_all(subject, replacement);
 
-    re = Regex;
-    out = vector , string;
-    !re_compile , pattern;
-        out_push_back , subject;
+    re = Regex();
+    out = vector{string}();
+    !re.compile(pattern);
+        out.push_back(subject);
         out;
 
-    re_split , subject , 0;
+    re.split(subject, 0);
 
     // Escape every metacharacter in `text` so the result matches it literally.
 
     out = TEXT_EMPTY;
     i = 0;
-    i < text_size;
-        c = text_at , i;
-        is_metacharacter , c;
-            out_push_back , CHAR_BACKSLASH;
+    i < text.size();
+        c = text.at(i);
+        is_metacharacter(c);
+            out.push_back(CHAR_BACKSLASH);
 
-        out_push_back , c;
-        ++i;
+        out.push_back(c);
+        i += 1;
 
     out;
 
@@ -4337,83 +4337,83 @@
 // is meant to look like from the outside, and they exercise every entry point
 // at least once.
 
-    re = Regex;
-    !re_compile , "[a-zA-Z_][a-zA-Z_0-9]*";
-        vector , string;
+    re = Regex();
+    !re.compile("[a-zA-Z_][a-zA-Z_0-9]*");
+        vector{string}();
 
-    out = vector , string;
-    hits = re_find_all , subject;
+    out = vector{string}();
+    hits = re.find_all(subject);
     hit , hits;
-        out_push_back , hit_text;
+        out.push_back(hit.text());
 
     out;
 
-    re = Regex;
-    !re_compile , "//[^\n]*";
+    re = Regex();
+    !re.compile("//[^\n]*");
         subject;
 
-    re_replace_all , subject , TEXT_EMPTY;
+    re.replace_all(subject, TEXT_EMPTY);
 
-    out = vector , int;
-    re = Regex;
-    !re_compile , "(\\d{4})-(\\d{2})-(\\d{2})";
+    out = vector{int}();
+    re = Regex();
+    !re.compile("(\\d{4})-(\\d{2})-(\\d{2})");
         out;
 
-    hit = re_match_text , subject;
-    !hit_matched;
+    hit = re.match_text(subject);
+    !hit.matched();
         out;
 
-    out_push_back , parse_int , hit_group , 1;
-    out_push_back , parse_int , hit_group , 2;
-    out_push_back , parse_int , hit_group , 3;
+    out.push_back(parse_int(hit.group(1)));
+    out.push_back(parse_int(hit.group(2)));
+    out.push_back(parse_int(hit.group(3)));
     out;
 
-    re = Regex;
-    !re_compile , "(?<key>\\w+)\\s*=\\s*(?<value>[^;]+);";
+    re = Regex();
+    !re.compile("(?<key>\\w+)\\s*=\\s*(?<value>[^;]+);");
         TEXT_EMPTY;
 
-    re_replace_all , subject , "${value} -> ${key}\n";
+    re.replace_all(subject, "${value} -> ${key}\n");
 
-    quick_split , ",\\s*" , subject;
+    quick_split(",\\s*", subject);
 
-    re = Regex;
+    re = Regex();
     // A backreference, so this one has to run on the backtracking matcher.
-    !re_compile , "\\b(\\w+)\\s+\\1\\b";
+    !re.compile("\\b(\\w+)\\s+\\1\\b");
         false;
 
-    re_contains , subject;
+    re.contains(subject);
 
-    re = Regex;
-    !re_compile , pattern;
-        println , re_error_text;
+    re = Regex();
+    !re.compile(pattern);
+        println(re.error_text());
 
-    println , re_describe;
-    println , re_compiler_program_disassemble;
+    println(re.describe());
+    println(re.compiler.program.disassemble());
 
 // A rough sanity sweep over the whole engine, written as a function so the
 // benchmark corpus contains at least one caller of everything above.
 
-    re = Regex;
-    !re_compile , "^(a|b)+c{2,4}[[:digit:]]*$";
-        panic , re_error_text;
+    re = Regex();
+    !re.compile("^(a|b)+c{2,4}[[:digit:]]*$");
+        panic(re.error_text());
 
-    re_group_count == 1;
-    re_program_size > 0;
-    re_state_count > 0;
+    re.group_count() == 1;
+    re.program_size() > 0;
+    re.state_count() > 0;
 
-    hit = re_match_text , "abbacc42";
-    hit_matched;
-        println , hit_text;
+    hit = re.match_text("abbacc42");
+    hit.matched();
+        println(hit.text());
 
-    pieces = quick_split , "\\s+" , "one two   three";
+    pieces = quick_split("\\s+", "one two   three");
     piece , pieces;
-        println , piece;
+        println(piece);
 
-    println , quick_replace , "[aeiou]" , "regular expressions" , "*";
-    quick_match , "\\d+" , "12345";
-        println , "all digits";
+    println(quick_replace("[aeiou]", "regular expressions", "*"));
+    quick_match("\\d+", "12345");
+        println("all digits");
 
-    example_repeated_word , "the the end";
-        println , "repeated word found";
+    example_repeated_word("the the end");
+        println("repeated word found");
 
-    println , quote_literal , "1 + 2 * (3 - 4)";
+    println(quote_literal("1 + 2 * (3 - 4)"));

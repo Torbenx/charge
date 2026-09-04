@@ -51,115 +51,115 @@
     // A normalised BigInt has no leading zero limbs, so an empty limb vector
     // is the unique representation of zero.
 
-        limbs_size == 0;
+        limbs.size() == 0;
 
-        limbs_size;
+        limbs.size();
 
     // Reading past the top of the number yields zero, which removes almost
     // every length check from the arithmetic loops below.
 
-        index < 0 || index >= limbs_size;
+        index < 0 || index >= limbs.size();
             0;
 
-        limbs , index;
+        limbs[index];
 
-        limbs_size == 0;
-            Sign_Zero;
+        limbs.size() == 0;
+            Sign::Zero;
 
         negative;
-            Sign_Negative;
+            Sign::Negative;
 
-        Sign_Positive;
+        Sign::Positive;
 
-        negative && limbs_size > 0;
+        negative && limbs.size() > 0;
 
-        !negative && limbs_size > 0;
+        !negative && limbs.size() > 0;
 
-        limbs_size == 0 || limbs , 0 & 1 == 0;
+        limbs.size() == 0 || (limbs[0] & 1) == 0;
 
-        limbs_size > 0 && limbs , 0 & 1 == 1;
+        limbs.size() > 0 && (limbs[0] & 1) == 1;
 
         // True when the value fits in a single limb, sign ignored.
 
-        limbs_size <= 1;
+        limbs.size() <= 1;
 
     // --- Mutation helpers -------------------------------------------------
 
     // Grow the limb vector with zeros until it can address `index`.
 
-        limbs_size <= index;
-            limbs_push_back , 0;
+        limbs.size() <= index;
+            limbs.push_back(0);
 
-        ensure_limb , index;
-        limbs , index = value & LIMB_MASK;
+        ensure_limb(index);
+        limbs[index] = value & LIMB_MASK;
 
     // Drop leading zero limbs and collapse the sign of zero. Every public
     // operation ends with a call to this so the representation stays unique.
 
-        limbs_size > 0 && limbs , limbs_size - 1 == 0;
-            limbs_pop_back;
+        limbs.size() > 0 && limbs[limbs.size() - 1] == 0;
+            limbs.pop_back();
 
-        limbs_size == 0;
+        limbs.size() == 0;
             negative = false;
 
-        limbs_clear;
+        limbs.clear();
         negative = false;
 
         // Load a machine integer, splitting it across as many limbs as needed.
 
-        limbs_clear;
+        limbs.clear();
         negative = value < 0;
-        magnitude = abs , value;
+        magnitude = abs(value);
         magnitude > 0;
-            limbs_push_back , magnitude & LIMB_MASK;
+            limbs.push_back(magnitude & LIMB_MASK);
             magnitude = magnitude >> LIMB_BITS;
 
-        normalise;
+        normalise();
 
-        out = BigInt;
-        out_negative = negative;
+        out = BigInt();
+        out.negative = negative;
         limb , limbs;
-            out_limbs_push_back , limb;
+            out.limbs.push_back(limb);
 
         out;
 
         // In-place sign flip. Zero is left alone so the invariant holds.
 
-        limbs_size > 0;
+        limbs.size() > 0;
             negative = !negative;
 
-        out = clone;
-        out_negative = false;
+        out = clone();
+        out.negative = false;
         out;
 
     // --- Bit level access -------------------------------------------------
 
     // Number of significant bits, zero for zero.
 
-        limbs_size == 0;
+        limbs.size() == 0;
             0;
 
-        top = limbs , limbs_size - 1;
+        top = limbs[limbs.size() - 1];
         bits = 0;
         top > 0;
-            bits++;
+            bits += 1;
             top = top >> 1;
 
-        limbs_size - 1 * LIMB_BITS + bits;
+        (limbs.size() - 1) * LIMB_BITS + bits;
 
         position < 0;
             0;
 
-        limb_at , position / LIMB_BITS >> position % LIMB_BITS & 1;
+        (limb_at(position / LIMB_BITS) >> (position % LIMB_BITS)) & 1;
 
         index = position / LIMB_BITS;
-        ensure_limb , index;
-        limbs , index = limbs , index | 1 << position % LIMB_BITS;
+        ensure_limb(index);
+        limbs[index] = limbs[index] | (1 << (position % LIMB_BITS));
 
         index = position / LIMB_BITS;
-        index < limbs_size;
-            limbs , index = limbs , index & LIMB_MASK ^ 1 << position % LIMB_BITS;
-            normalise;
+        index < limbs.size();
+            limbs[index] = limbs[index] & (LIMB_MASK ^ (1 << (position % LIMB_BITS)));
+            normalise();
 
             // Count of set bits across the whole magnitude.
 
@@ -175,17 +175,17 @@
         // Index of the lowest set bit, or -1 for zero. Used by binary GCD.
 
         index = 0;
-        index < limbs_size;
-            limbs , index != 0;
-                word = limbs , index;
+        index < limbs.size();
+            limbs[index] != 0;
+                word = limbs[index];
                 offset = 0;
-                word & 1 == 0;
+                (word & 1) == 0;
                     word = word >> 1;
-                    ++offset;
+                    offset += 1;
 
                 index * LIMB_BITS + offset;
 
-            ++index;
+            index += 1;
 
         -1;
 
@@ -194,80 +194,80 @@
     // Compare magnitudes only. Longer normalised number wins immediately;
     // otherwise scan from the top limb down.
 
-        limbs_size != other_limbs_size;
-            limbs_size < other_limbs_size;
-                Ordering_Less;
+        limbs.size() != other.limbs.size();
+            limbs.size() < other.limbs.size();
+                Ordering::Less;
 
-            Ordering_Greater;
+            Ordering::Greater;
 
-        index = limbs_size - 1;
+        index = limbs.size() - 1;
         index >= 0;
-            limbs , index != other_limbs , index;
-                limbs , index < other_limbs , index;
-                    Ordering_Less;
+            limbs[index] != other.limbs[index];
+                limbs[index] < other.limbs[index];
+                    Ordering::Less;
 
-                Ordering_Greater;
+                Ordering::Greater;
 
-            index--;
+            index -= 1;
 
-        Ordering_Equal;
+        Ordering::Equal;
 
         // Full signed comparison built on top of the magnitude comparison.
 
-        is_negative && !other_is_negative;
-            Ordering_Less;
+        is_negative() && !other.is_negative();
+            Ordering::Less;
 
-        !is_negative && other_is_negative;
-            Ordering_Greater;
+        !is_negative() && other.is_negative();
+            Ordering::Greater;
 
-        magnitude = compare_magnitude , other;
-        !is_negative;
+        magnitude = compare_magnitude(other);
+        !is_negative();
             magnitude;
 
-        magnitude == Ordering_Less;
-            Ordering_Greater;
+        magnitude == Ordering::Less;
+            Ordering::Greater;
 
-        magnitude == Ordering_Greater;
-            Ordering_Less;
+        magnitude == Ordering::Greater;
+            Ordering::Less;
 
-        Ordering_Equal;
+        Ordering::Equal;
 
-        compare , other == Ordering_Equal;
+        compare(other) == Ordering::Equal;
 
-        compare , other == Ordering_Less;
+        compare(other) == Ordering::Less;
 
     // Compare against a machine integer without allocating a temporary when
     // the value obviously does not fit in one limb.
 
-        scratch = BigInt;
-        scratch_assign_small , value;
-        compare , scratch;
+        scratch = BigInt();
+        scratch.assign_small(value);
+        compare(scratch);
 
 // --- Construction helpers -------------------------------------------------
 
 // The canonical zero.
 
-    out = BigInt;
-    out_negative = false;
+    out = BigInt();
+    out.negative = false;
     out;
 
-    out = BigInt;
-    out_limbs_push_back , 1;
+    out = BigInt();
+    out.limbs.push_back(1);
     out;
 
-    out = BigInt;
-    out_assign_small , value;
+    out = BigInt();
+    out.assign_small(value);
     out;
 
 // Build directly from limbs that are already reduced. Used by the division
 // and Karatsuba routines, which produce normalised limbs by construction.
 
-    out = BigInt;
-    out_negative = negative;
+    out = BigInt();
+    out.negative = negative;
     limb , source;
-        out_limbs_push_back , limb & LIMB_MASK;
+        out.limbs.push_back(limb & LIMB_MASK);
 
-    out_normalise;
+    out.normalise();
     out;
 
 // --- Magnitude addition ---------------------------------------------------
@@ -278,20 +278,20 @@
 // the previous carry plus both limbs, and the same accumulator feeds both the
 // stored limb and the next carry.
 
-    out = BigInt;
-    length = max , a_limb_count , b_limb_count;
+    out = BigInt();
+    length = max(a.limb_count(), b.limb_count());
     carry = 0;
     index = 0;
     index < length;
-        total = carry + a_limb_at , index + b_limb_at , index;
-        out_limbs_push_back , total & LIMB_MASK;
+        total = carry + a.limb_at(index) + b.limb_at(index);
+        out.limbs.push_back(total & LIMB_MASK);
         carry = total >> LIMB_BITS;
-        index++;
+        index += 1;
 
     carry > 0;
-        out_limbs_push_back , carry & LIMB_MASK;
+        out.limbs.push_back(carry & LIMB_MASK);
 
-    out_normalise;
+    out.normalise();
     out;
 
 // |a| - |b|, and the caller must guarantee |a| >= |b|.
@@ -300,31 +300,31 @@
 // LIMB_BASE before subtracting keeps the intermediate non-negative, and the
 // resulting quotient by LIMB_BASE is one exactly when no borrow was needed.
 
-    out = BigInt;
+    out = BigInt();
     borrow = 0;
     index = 0;
-    index < a_limb_count;
-        difference = a_limb_at , index - b_limb_at , index - borrow + LIMB_BASE;
-        out_limbs_push_back , difference & LIMB_MASK;
-        borrow = 1 - difference >> LIMB_BITS;
-        index++;
+    index < a.limb_count();
+        difference = a.limb_at(index) - b.limb_at(index) - borrow + LIMB_BASE;
+        out.limbs.push_back(difference & LIMB_MASK);
+        borrow = 1 - (difference >> LIMB_BITS);
+        index += 1;
 
-    out_normalise;
+    out.normalise();
     out;
 
     // |a| + small, where small is a non-negative machine integer below LIMB_BASE.
 
-    out = a_absolute;
+    out = a.absolute();
     carry = small;
     index = 0;
     carry > 0;
-        out_ensure_limb , index;
-        total = out_limbs , index + carry & LIMB_MASK;
-        out_limbs , index = total & LIMB_MASK;
-        carry = carry >> LIMB_BITS + total >> LIMB_BITS;
-        ++index;
+        out.ensure_limb(index);
+        total = out.limbs[index] + (carry & LIMB_MASK);
+        out.limbs[index] = total & LIMB_MASK;
+        carry = (carry >> LIMB_BITS) + (total >> LIMB_BITS);
+        index += 1;
 
-    out_normalise;
+    out.normalise();
     out;
 
 // --- Signed addition and subtraction --------------------------------------
@@ -332,51 +332,51 @@
 // Signed addition. Same signs add magnitudes and keep the sign; mixed signs
 // subtract the smaller magnitude from the larger and inherit its sign.
 
-    a_is_negative == b_is_negative;
-        out = add_magnitude , a , b;
-        out_negative = a_is_negative && out_limbs_size > 0;
+    a.is_negative() == b.is_negative();
+        out = add_magnitude(a, b);
+        out.negative = a.is_negative() && out.limbs.size() > 0;
         out;
 
-    ordering = a_compare_magnitude , b;
-    ordering == Ordering_Equal;
-        make_zero;
+    ordering = a.compare_magnitude(b);
+    ordering == Ordering::Equal;
+        make_zero();
 
-    ordering == Ordering_Greater;
-        out = sub_magnitude , a , b;
-        out_negative = a_is_negative && out_limbs_size > 0;
+    ordering == Ordering::Greater;
+        out = sub_magnitude(a, b);
+        out.negative = a.is_negative() && out.limbs.size() > 0;
         out;
 
-    out = sub_magnitude , b , a;
-    out_negative = b_is_negative && out_limbs_size > 0;
+    out = sub_magnitude(b, a);
+    out.negative = b.is_negative() && out.limbs.size() > 0;
     out;
 
 // Signed subtraction expressed as addition of the negation, but without
 // materialising the negated operand twice.
 
-    flipped = b_clone;
-    flipped_negate;
-    out = add , a , flipped;
+    flipped = b.clone();
+    flipped.negate();
+    out = add(a, flipped);
     flipped;
     out;
 
-    out = a_clone;
-    out_negate;
+    out = a.clone();
+    out.negate();
     out;
 
 // a + small without building a BigInt for the small operand when the signs
 // already agree.
 
     small == 0;
-        a_clone;
+        a.clone();
 
-    a_is_negative == small < 0;
-        out = add_small_magnitude , a , abs , small;
-        out_negative = a_is_negative || small < 0;
-        out_normalise;
+    a.is_negative() == (small < 0);
+        out = add_small_magnitude(a, abs(small));
+        out.negative = a.is_negative() || small < 0;
+        out.normalise();
         out;
 
-    other = make_from_int , small;
-    add , a , other;
+    other = make_from_int(small);
+    add(a, other);
 
 // --- Schoolbook multiplication --------------------------------------------
 
@@ -385,185 +385,185 @@
 // destination, all in one expression -- this is the shape the whole file is
 // built around.
 
-    result = BigInt;
-    a_is_zero || b_is_zero;
+    result = BigInt();
+    a.is_zero() || b.is_zero();
         result;
 
-    result_limbs_resize , a_limb_count + b_limb_count;
+    result.limbs.resize(a.limb_count() + b.limb_count());
     i = 0;
-    i < a_limb_count;
+    i < a.limb_count();
         carry = 0;
         j = 0;
-        j < b_limb_count;
-            total = carry + a_limbs , i * b_limbs , j + result_limbs , i + j;
-            result_limbs , i + j = total & LIMB_MASK;
+        j < b.limb_count();
+            total = carry + a.limbs[i] * b.limbs[j] + result.limbs[i + j];
+            result.limbs[i + j] = total & LIMB_MASK;
             carry = total >> LIMB_BITS;
-            ++limb_product_count;
-            j++;
+            limb_product_count += 1;
+            j += 1;
 
         // Flush the carry out through the remaining high limbs. The loop body
         // is again a single accumulate-mask-shift expression triple.
-        k = i + b_limb_count;
+        k = i + b.limb_count();
         carry > 0;
-            total = carry + result_limbs , k;
-            result_limbs , k = total & LIMB_MASK;
+            total = carry + result.limbs[k];
+            result.limbs[k] = total & LIMB_MASK;
             carry = total >> LIMB_BITS;
-            k++;
+            k += 1;
 
-        ++i;
+        i += 1;
 
-    result_negative = a_is_negative != b_is_negative;
-    result_normalise;
+    result.negative = a.is_negative() != b.is_negative();
+    result.normalise();
     result;
 
 // Multiply by a single limb-sized value. The magnitude only; the caller
 // applies the sign.
 
-    result = BigInt;
-    a_is_zero || small == 0;
+    result = BigInt();
+    a.is_zero() || small == 0;
         result;
 
-    magnitude = abs , small;
+    magnitude = abs(small);
     carry = 0;
     index = 0;
-    index < a_limb_count;
-        total = carry + a_limbs , index * magnitude & LIMB_MASK;
-        result_limbs_push_back , total & LIMB_MASK;
+    index < a.limb_count();
+        total = carry + a.limbs[index] * (magnitude & LIMB_MASK);
+        result.limbs.push_back(total & LIMB_MASK);
         carry = total >> LIMB_BITS;
-        index++;
+        index += 1;
 
     carry > 0;
-        result_limbs_push_back , carry & LIMB_MASK;
+        result.limbs.push_back(carry & LIMB_MASK);
         carry = carry >> LIMB_BITS;
 
-    result_negative = a_is_negative != small < 0;
-    result_normalise;
+    result.negative = a.is_negative() != (small < 0);
+    result.normalise();
     result;
 
 // Square via the schoolbook route, exploiting symmetry: every off-diagonal
 // product appears twice, so it is computed once and doubled inside the same
 // accumulator expression.
 
-    result = BigInt;
-    a_is_zero;
+    result = BigInt();
+    a.is_zero();
         result;
 
-    result_limbs_resize , a_limb_count * 2 + 1;
+    result.limbs.resize(a.limb_count() * 2 + 1);
     i = 0;
-    i < a_limb_count;
-        diagonal = result_limbs , i + i + a_limbs , i * a_limbs , i;
-        result_limbs , i + i = diagonal & LIMB_MASK;
+    i < a.limb_count();
+        diagonal = result.limbs[i + i] + a.limbs[i] * a.limbs[i];
+        result.limbs[i + i] = diagonal & LIMB_MASK;
         carry = diagonal >> LIMB_BITS;
         j = i + 1;
-        j < a_limb_count;
-            total = carry + result_limbs , i + j + a_limbs , i * a_limbs , j * 2;
-            result_limbs , i + j = total & LIMB_MASK;
+        j < a.limb_count();
+            total = carry + result.limbs[i + j] + a.limbs[i] * a.limbs[j] * 2;
+            result.limbs[i + j] = total & LIMB_MASK;
             carry = total >> LIMB_BITS;
-            ++limb_product_count;
-            j++;
+            limb_product_count += 1;
+            j += 1;
 
-        k = i + a_limb_count;
+        k = i + a.limb_count();
         carry > 0;
-            total = carry + result_limbs , k;
-            result_limbs , k = total & LIMB_MASK;
+            total = carry + result.limbs[k];
+            result.limbs[k] = total & LIMB_MASK;
             carry = total >> LIMB_BITS;
-            k++;
+            k += 1;
 
-        ++i;
+        i += 1;
 
-    result_negative = false;
-    result_normalise;
+    result.negative = false;
+    result.normalise();
     result;
 
 // --- Limb and bit shifts --------------------------------------------------
 
 // Shift the magnitude up by whole limbs, i.e. multiply by LIMB_BASE^count.
 
-    out = BigInt;
-    a_is_zero || count < 0;
+    out = BigInt();
+    a.is_zero() || count < 0;
         out;
 
-    i , range , 0 , count;
-        out_limbs_push_back , 0;
+    i , range(0, count);
+        out.limbs.push_back(0);
 
-    limb , a_limbs;
-        out_limbs_push_back , limb;
+    limb , a.limbs;
+        out.limbs.push_back(limb);
 
-    out_negative = a_is_negative;
-    out_normalise;
+    out.negative = a.is_negative();
+    out.normalise();
     out;
 
 // Shift the magnitude down by whole limbs, discarding the low ones. This is
 // floor division towards zero on the magnitude, not an arithmetic shift.
 
-    out = BigInt;
+    out = BigInt();
     index = count;
-    index < a_limb_count;
-        out_limbs_push_back , a_limbs , index;
-        index++;
+    index < a.limb_count();
+        out.limbs.push_back(a.limbs[index]);
+        index += 1;
 
-    out_negative = a_is_negative;
-    out_normalise;
+    out.negative = a.is_negative();
+    out.normalise();
     out;
 
 // General left shift by an arbitrary bit count. The whole-limb part is a
 // prefix of zeros; the residual bit part folds the tail of the previous limb
 // into the head of the current one inside a single expression.
 
-    bits <= 0 || a_is_zero;
-        a_clone;
+    bits <= 0 || a.is_zero();
+        a.clone();
 
     whole = bits / LIMB_BITS;
     partial = bits % LIMB_BITS;
-    out = BigInt;
-    i , range , 0 , whole;
-        out_limbs_push_back , 0;
+    out = BigInt();
+    i , range(0, whole);
+        out.limbs.push_back(0);
 
     partial == 0;
-        limb , a_limbs;
-            out_limbs_push_back , limb;
+        limb , a.limbs;
+            out.limbs.push_back(limb);
 
         carry = 0;
         index = 0;
-        index < a_limb_count;
-            total = a_limbs , index << partial & LIMB_MASK | carry;
-            out_limbs_push_back , total & LIMB_MASK;
-            carry = a_limbs , index >> LIMB_BITS - partial & LIMB_MASK;
-            ++index;
+        index < a.limb_count();
+            total = ((a.limbs[index] << partial) & LIMB_MASK) | carry;
+            out.limbs.push_back(total & LIMB_MASK);
+            carry = (a.limbs[index] >> (LIMB_BITS - partial)) & LIMB_MASK;
+            index += 1;
 
         carry > 0;
-            out_limbs_push_back , carry;
+            out.limbs.push_back(carry);
 
-    out_negative = a_is_negative;
-    out_normalise;
+    out.negative = a.is_negative();
+    out.normalise();
     out;
 
 // General right shift by an arbitrary bit count, truncating towards zero on
 // the magnitude. The recombination reads one limb above the current index so
 // the whole limb is assembled in one expression.
 
-    bits <= 0 || a_is_zero;
-        a_clone;
+    bits <= 0 || a.is_zero();
+        a.clone();
 
     whole = bits / LIMB_BITS;
     partial = bits % LIMB_BITS;
-    out = BigInt;
-    whole >= a_limb_count;
+    out = BigInt();
+    whole >= a.limb_count();
         out;
 
     index = whole;
-    index < a_limb_count;
+    index < a.limb_count();
         partial == 0;
-            out_limbs_push_back , a_limbs , index;
+            out.limbs.push_back(a.limbs[index]);
 
-            assembled = a_limbs , index >> partial
-                | a_limb_at , index + 1 << LIMB_BITS - partial & LIMB_MASK;
-            out_limbs_push_back , assembled & LIMB_MASK;
+            assembled = (a.limbs[index] >> partial)
+                | ((a.limb_at(index + 1) << (LIMB_BITS - partial)) & LIMB_MASK);
+            out.limbs.push_back(assembled & LIMB_MASK);
 
-        ++index;
+        index += 1;
 
-    out_negative = a_is_negative;
-    out_normalise;
+    out.negative = a.is_negative();
+    out.normalise();
     out;
 
 // --- Bitwise operations ---------------------------------------------------
@@ -572,82 +572,82 @@
 // per operator. Two's complement over an unbounded magnitude would need a
 // sign-extension pass that this library deliberately does not implement.
 
-    out = BigInt;
-    length = min , a_limb_count , b_limb_count;
+    out = BigInt();
+    length = min(a.limb_count(), b.limb_count());
     index = 0;
     index < length;
-        out_limbs_push_back , a_limbs , index & b_limbs , index;
-        index++;
+        out.limbs.push_back(a.limbs[index] & b.limbs[index]);
+        index += 1;
 
-    out_negative = a_is_negative && b_is_negative;
-    out_normalise;
+    out.negative = a.is_negative() && b.is_negative();
+    out.normalise();
     out;
 
-    out = BigInt;
-    length = max , a_limb_count , b_limb_count;
+    out = BigInt();
+    length = max(a.limb_count(), b.limb_count());
     index = 0;
     index < length;
-        out_limbs_push_back , a_limb_at , index | b_limb_at , index;
-        index++;
+        out.limbs.push_back(a.limb_at(index) | b.limb_at(index));
+        index += 1;
 
-    out_negative = a_is_negative || b_is_negative;
-    out_normalise;
+    out.negative = a.is_negative() || b.is_negative();
+    out.normalise();
     out;
 
-    out = BigInt;
-    length = max , a_limb_count , b_limb_count;
+    out = BigInt();
+    length = max(a.limb_count(), b.limb_count());
     index = 0;
     index < length;
-        out_limbs_push_back , a_limb_at , index ^ b_limb_at , index;
-        ++index;
+        out.limbs.push_back(a.limb_at(index) ^ b.limb_at(index));
+        index += 1;
 
-    out_negative = a_is_negative != b_is_negative;
-    out_normalise;
+    out.negative = a.is_negative() != b.is_negative();
+    out.normalise();
     out;
 
 // Complement within a fixed width, since an unbounded complement is not
 // representable. Bits above `width` are simply dropped.
 
-    out = BigInt;
-    limbs_needed = width + LIMB_BITS - 1 / LIMB_BITS;
+    out = BigInt();
+    limbs_needed = (width + LIMB_BITS - 1) / LIMB_BITS;
     index = 0;
     index < limbs_needed;
-        out_limbs_push_back , ~a_limb_at , index & LIMB_MASK;
-        ++index;
+        out.limbs.push_back((~a.limb_at(index)) & LIMB_MASK);
+        index += 1;
 
     overhang = width % LIMB_BITS;
-    overhang != 0 && out_limbs_size > 0;
-        top = out_limbs_size - 1;
-        out_limbs , top = out_limbs , top & 1 << overhang - 1;
+    overhang != 0 && out.limbs.size() > 0;
+        top = out.limbs.size() - 1;
+        out.limbs[top] = out.limbs[top] & ((1 << overhang) - 1);
 
-    out_negative = false;
-    out_normalise;
+    out.negative = false;
+    out.normalise();
     out;
 
 // --- Karatsuba multiplication ---------------------------------------------
 
 // Take the low `count` limbs of a magnitude.
 
-    out = BigInt;
+    out = BigInt();
     index = 0;
-    index < count && index < a_limb_count;
-        out_limbs_push_back , a_limbs , index;
-        index++;
+    index < count && index < a.limb_count();
+        out.limbs.push_back(a.limbs[index]);
+        index += 1;
 
-    out_negative = false;
-    out_normalise;
+    out.negative = false;
+    out.normalise();
     out;
 
     // Take everything from limb `count` upwards.
 
-    out = BigInt;
+    out = BigInt();
     index = count;
-    index < a_limb_count;
-        out_limbs_push_back , a_limbs , index;
-        index++;
+    index < a.limb_count();
+        out.limbs.push_back(a.limbs[index]);
+        index += 1;
 
-    out_negative = false;
-    out_normalise;
+    out.negative = false;
+    out.normalise();
     out;
 
 // Karatsuba: with a = a1*B^k + a0 and b = b1*B^k + b0,
@@ -657,52 +657,52 @@
 // so three half-width products replace four. The recombination below is
 // written as one long chained expression to match the formula shape.
 
-    a_is_zero || b_is_zero;
-        make_zero;
+    a.is_zero() || b.is_zero();
+        make_zero();
 
-    a_limb_count < KARATSUBA_THRESHOLD || b_limb_count < KARATSUBA_THRESHOLD;
-        schoolbook_multiply , a , b;
+    a.limb_count() < KARATSUBA_THRESHOLD || b.limb_count() < KARATSUBA_THRESHOLD;
+        schoolbook_multiply(a, b);
 
-    split = max , a_limb_count , b_limb_count / 2;
-    a_low = low_part , a , split;
-    a_high = high_part , a , split;
-    b_low = low_part , b , split;
-    b_high = high_part , b , split;
+    split = max(a.limb_count(), b.limb_count()) / 2;
+    a_low = low_part(a, split);
+    a_high = high_part(a, split);
+    b_low = low_part(b, split);
+    b_high = high_part(b, split);
 
-    high_product = karatsuba_multiply , a_high , b_high;
-    low_product = karatsuba_multiply , a_low , b_low;
-    cross_sum_a = add_magnitude , a_low , a_high;
-    cross_sum_b = add_magnitude , b_low , b_high;
-    cross_raw = karatsuba_multiply , cross_sum_a , cross_sum_b;
-    middle = subtract , subtract , cross_raw , high_product , low_product;
+    high_product = karatsuba_multiply(a_high, b_high);
+    low_product = karatsuba_multiply(a_low, b_low);
+    cross_sum_a = add_magnitude(a_low, a_high);
+    cross_sum_b = add_magnitude(b_low, b_high);
+    cross_raw = karatsuba_multiply(cross_sum_a, cross_sum_b);
+    middle = subtract(subtract(cross_raw, high_product), low_product);
 
     // result = high << 2k  +  middle << k  +  low, in a single chain.
-    result = add , add , shift_left_limbs , high_product , split + split ,
-        shift_left_limbs , middle , split , low_product;
-    result_negative = a_is_negative != b_is_negative && !result_is_zero;
-    result_normalise;
+    result = add(add(shift_left_limbs(high_product, split + split),
+        shift_left_limbs(middle, split)), low_product);
+    result.negative = a.is_negative() != b.is_negative() && !result.is_zero();
+    result.normalise();
     result;
 
     // Public multiply entry point: dispatch on operand width.
 
-    a_is_zero || b_is_zero;
-        make_zero;
+    a.is_zero() || b.is_zero();
+        make_zero();
 
-    a_limb_count == 1 && b_limb_count == 1;
+    a.limb_count() == 1 && b.limb_count() == 1;
         // Both fit in one limb, so the product fits in two and can be built
         // without any loop at all.
-        out = BigInt;
-        total = a_limbs , 0 * b_limbs , 0;
-        out_limbs_push_back , total & LIMB_MASK;
-        out_limbs_push_back , total >> LIMB_BITS;
-        out_negative = a_is_negative != b_is_negative;
-        out_normalise;
+        out = BigInt();
+        total = a.limbs[0] * b.limbs[0];
+        out.limbs.push_back(total & LIMB_MASK);
+        out.limbs.push_back(total >> LIMB_BITS);
+        out.negative = a.is_negative() != b.is_negative();
+        out.normalise();
         out;
 
-    a_limb_count + b_limb_count < KARATSUBA_THRESHOLD * 2;
-        schoolbook_multiply , a , b;
+    a.limb_count() + b.limb_count() < KARATSUBA_THRESHOLD * 2;
+        schoolbook_multiply(a, b);
 
-    karatsuba_multiply , a , b;
+    karatsuba_multiply(a, b);
 
 // --- Division -------------------------------------------------------------
 
@@ -714,37 +714,37 @@
 // The running remainder is folded into the numerator of the next limb, so the
 // whole step is one expression: (rest * BASE + limb) / divisor.
 
-    out = DivisionResult;
+    out = DivisionResult();
     divisor == 0;
-        panic , "bignum: division by zero";
+        panic("bignum: division by zero");
         out;
 
-    magnitude = abs , divisor;
-    out_quotient_limbs_resize , a_limb_count;
+    magnitude = abs(divisor);
+    out.quotient.limbs.resize(a.limb_count());
     rest = 0;
-    index = a_limb_count - 1;
+    index = a.limb_count() - 1;
     index >= 0;
-        numerator = rest * LIMB_BASE + a_limbs , index;
-        out_quotient_limbs , index = numerator / magnitude & LIMB_MASK;
+        numerator = rest * LIMB_BASE + a.limbs[index];
+        out.quotient.limbs[index] = (numerator / magnitude) & LIMB_MASK;
         rest = numerator % magnitude;
-        index--;
+        index -= 1;
 
-    out_quotient_negative = a_is_negative != divisor < 0;
-    out_quotient_normalise;
-    out_remainder_assign_small , rest;
-    out_remainder_negative = a_is_negative && rest != 0;
-    out_remainder_normalise;
-    out_exact = rest == 0;
+    out.quotient.negative = a.is_negative() != (divisor < 0);
+    out.quotient.normalise();
+    out.remainder.assign_small(rest);
+    out.remainder.negative = a.is_negative() && rest != 0;
+    out.remainder.normalise();
+    out.exact = rest == 0;
     out;
 
 // Estimate one quotient limb from the top two limbs of the running remainder
 // and the top limb of the divisor. The estimate is at most two too large,
 // which the correction loop in long_divide fixes up.
 
-    top = divisor_limbs , divisor_limb_count - 1;
-    high = rest_limb_at , offset + divisor_limb_count;
-    low = rest_limb_at , offset + divisor_limb_count - 1;
-    guess = high * LIMB_BASE + low / top;
+    top = divisor.limbs[divisor.limb_count() - 1];
+    high = rest.limb_at(offset + divisor.limb_count());
+    low = rest.limb_at(offset + divisor.limb_count() - 1);
+    guess = (high * LIMB_BASE + low) / top;
     guess > LIMB_MASK;
         guess = LIMB_MASK;
 
@@ -759,131 +759,131 @@
 // estimated, the shifted product is subtracted, and the estimate is corrected
 // downwards while the subtraction would have gone negative.
 
-    out = DivisionResult;
-    b_is_zero;
-        panic , "bignum: division by zero";
+    out = DivisionResult();
+    b.is_zero();
+        panic("bignum: division by zero");
         out;
 
-    dividend = a_absolute;
-    divisor = b_absolute;
-    dividend_compare_magnitude , divisor == Ordering_Less;
-        out_quotient = make_zero;
-        out_remainder = a_clone;
-        out_exact = a_is_zero;
+    dividend = a.absolute();
+    divisor = b.absolute();
+    dividend.compare_magnitude(divisor) == Ordering::Less;
+        out.quotient = make_zero();
+        out.remainder = a.clone();
+        out.exact = a.is_zero();
         out;
 
-    divisor_limb_count == 1;
-        small = divide_small , dividend , divisor_limbs , 0;
-        small_quotient_negative = a_is_negative != b_is_negative && !small_quotient_is_zero;
-        small_remainder_negative = a_is_negative && !small_remainder_is_zero;
-        small_quotient_normalise;
-        small_remainder_normalise;
+    divisor.limb_count() == 1;
+        small = divide_small(dividend, divisor.limbs[0]);
+        small.quotient.negative = a.is_negative() != b.is_negative() && !small.quotient.is_zero();
+        small.remainder.negative = a.is_negative() && !small.remainder.is_zero();
+        small.quotient.normalise();
+        small.remainder.normalise();
         small;
 
-    rest = dividend_clone;
-    steps = dividend_limb_count - divisor_limb_count;
-    out_quotient_limbs_resize , steps + 1;
+    rest = dividend.clone();
+    steps = dividend.limb_count() - divisor.limb_count();
+    out.quotient.limbs.resize(steps + 1);
     offset = steps;
     guard = 0;
     offset >= 0;
-        guess = estimate_quotient_limb , rest , divisor , offset;
-        trial = shift_left_limbs , multiply_small , divisor , guess , offset;
+        guess = estimate_quotient_limb(rest, divisor, offset);
+        trial = shift_left_limbs(multiply_small(divisor, guess), offset);
         // Walk the estimate down until the trial product fits. At most two
         // iterations are needed for a properly normalised divisor.
-        trial_compare_magnitude , rest == Ordering_Greater && guess > 0;
-            guess--;
-            trial = shift_left_limbs , multiply_small , divisor , guess , offset;
-            guard++;
+        trial.compare_magnitude(rest) == Ordering::Greater && guess > 0;
+            guess -= 1;
+            trial = shift_left_limbs(multiply_small(divisor, guess), offset);
+            guard += 1;
             guard > DIVISION_ITERATION_LIMIT;
-                panic , "bignum: division failed to converge";
+                panic("bignum: division failed to converge");
                 out;
 
         // And walk it up again in the rare case the estimate was too small.
-        next_trial = shift_left_limbs , multiply_small , divisor , guess + 1 , offset;
-        next_trial_compare_magnitude , rest != Ordering_Greater;
-            guess++;
+        next_trial = shift_left_limbs(multiply_small(divisor, guess + 1), offset);
+        next_trial.compare_magnitude(rest) != Ordering::Greater;
+            guess += 1;
             trial = next_trial;
-            next_trial = shift_left_limbs , multiply_small , divisor , guess + 1 , offset;
-            guard++;
+            next_trial = shift_left_limbs(multiply_small(divisor, guess + 1), offset);
+            guard += 1;
             guard > DIVISION_ITERATION_LIMIT;
-                panic , "bignum: division failed to converge";
+                panic("bignum: division failed to converge");
                 out;
 
-        rest = sub_magnitude , rest , trial;
-        out_quotient_limbs , offset = guess & LIMB_MASK;
+        rest = sub_magnitude(rest, trial);
+        out.quotient.limbs[offset] = guess & LIMB_MASK;
         trial;
-        offset--;
+        offset -= 1;
 
-    out_quotient_negative = a_is_negative != b_is_negative;
-    out_quotient_normalise;
-    out_remainder = rest;
-    out_remainder_negative = a_is_negative && !rest_is_zero;
-    out_remainder_normalise;
-    out_exact = out_remainder_is_zero;
+    out.quotient.negative = a.is_negative() != b.is_negative();
+    out.quotient.normalise();
+    out.remainder = rest;
+    out.remainder.negative = a.is_negative() && !rest.is_zero();
+    out.remainder.normalise();
+    out.exact = out.remainder.is_zero();
     out;
 
-    result = long_divide , a , b;
-    result_quotient;
+    result = long_divide(a, b);
+    result.quotient;
 
-    result = long_divide , a , b;
-    result_remainder;
+    result = long_divide(a, b);
+    result.remainder;
 
 // Mathematical modulus: always in [0, |b|), unlike remainder which follows
 // the sign of the dividend.
 
-    rest = remainder , a , b;
-    rest_is_negative;
-        magnitude = b_absolute;
-        rest = add , rest , magnitude;
+    rest = remainder(a, b);
+    rest.is_negative();
+        magnitude = b.absolute();
+        rest = add(rest, magnitude);
 
-    rest_normalise;
+    rest.normalise();
     rest;
 
-    long_divide , a , b_exact;
+    long_divide(a, b).exact;
 
     // --- Modular arithmetic ---------------------------------------------------
 
-    modulus , add , a , b , m;
+    modulus(add(a, b), m);
 
-    modulus , subtract , a , b , m;
+    modulus(subtract(a, b), m);
 
-    modulus , multiply , a , b , m;
+    modulus(multiply(a, b), m);
 
 // Square-and-multiply, scanning the exponent from the least significant bit
 // upwards and keeping the running base reduced at every step.
 
-    m_is_zero;
-        panic , "bignum: modulus must be non-zero";
-        make_zero;
+    m.is_zero();
+        panic("bignum: modulus must be non-zero");
+        make_zero();
 
-    result = make_one;
-    running = modulus , base , m;
-    bits = exponent_bit_length;
+    result = make_one();
+    running = modulus(base, m);
+    bits = exponent.bit_length();
     index = 0;
     index < bits;
-        exponent_get_bit , index == 1;
-            result = modulus , multiply , result , running , m;
+        exponent.get_bit(index) == 1;
+            result = modulus(multiply(result, running), m);
 
-        running = modulus , square , running , m;
-        index++;
+        running = modulus(square(running), m);
+        index += 1;
 
-    result_normalise;
+    result.normalise();
     result;
 
     // Plain exponentiation with a machine-integer exponent.
 
     exponent < 0;
-        panic , "bignum: negative exponent";
-        make_zero;
+        panic("bignum: negative exponent");
+        make_zero();
 
-    result = make_one;
-    running = base_clone;
+    result = make_one();
+    running = base.clone();
     rest = exponent;
     rest > 0;
-        rest & 1 == 1;
-            result = multiply , result , running;
+        (rest & 1) == 1;
+            result = multiply(result, running);
 
-        running = square , running;
+        running = square(running);
         rest = rest >> 1;
 
     result;
@@ -893,45 +893,45 @@
 // Euclid on magnitudes. Simple and correct; the binary variant below is the
 // one that is actually fast for large inputs.
 
-    x = a_absolute;
-    y = b_absolute;
-    !y_is_zero;
-        rest = remainder , x , y;
+    x = a.absolute();
+    y = b.absolute();
+    !y.is_zero();
+        rest = remainder(x, y);
         x = y;
         y = rest;
 
-    x_normalise;
+    x.normalise();
     x;
 
 // Binary (Stein) GCD: strip common factors of two, then repeatedly subtract
 // the smaller from the larger and re-strip.
 
-    x = a_absolute;
-    y = b_absolute;
-    x_is_zero;
+    x = a.absolute();
+    y = b.absolute();
+    x.is_zero();
         y;
 
-    y_is_zero;
+    y.is_zero();
         x;
 
-    common = min , x_lowest_set_bit , y_lowest_set_bit;
-    x = shift_right , x , x_lowest_set_bit;
-    y = shift_right , y , y_lowest_set_bit;
-    !y_is_zero;
-        x_compare_magnitude , y == Ordering_Greater;
-            swap , x , y;
+    common = min(x.lowest_set_bit(), y.lowest_set_bit());
+    x = shift_right(x, x.lowest_set_bit());
+    y = shift_right(y, y.lowest_set_bit());
+    !y.is_zero();
+        x.compare_magnitude(y) == Ordering::Greater;
+            swap(x, y);
 
-        y = sub_magnitude , y , x;
-        !y_is_zero;
-            y = shift_right , y , y_lowest_set_bit;
+        y = sub_magnitude(y, x);
+        !y.is_zero();
+            y = shift_right(y, y.lowest_set_bit());
 
-    shift_left , x , common;
+    shift_left(x, common);
 
-    a_is_zero || b_is_zero;
-        make_zero;
+    a.is_zero() || b.is_zero();
+        make_zero();
 
-    divisor = gcd , a , b;
-    divide , multiply , a , b_absolute , divisor;
+    divisor = gcd(a, b);
+    divide(multiply(a, b).absolute(), divisor);
 
 // --- Operator implementations ---------------------------------------------
 //
@@ -943,48 +943,48 @@
 
 // Sum of two signed numbers.
 
-    add , l , r;
+    add(l, r);
 
     // Difference, defined as l + (-r) but computed without materialising -r twice.
 
-    subtract , l , r;
+    subtract(l, r);
 
     // Product, dispatching between the one-limb path, schoolbook and Karatsuba.
 
-    multiply , l , r;
+    multiply(l, r);
 
 // Truncating division: the quotient rounds towards zero, so
 // (-7) / 2 == -3 and the identity l == (l / r) * r + l % r holds.
 
-    divide , l , r;
+    divide(l, r);
 
 // Remainder, which follows the sign of the dividend. Use modulus() when a
 // non-negative residue is wanted instead.
 
-    remainder , l , r;
+    remainder(l, r);
 
 // --- Comparison operators -------------------------------------------------
 //
 // All six route through the single three-way compare so that the sign rules
 // live in exactly one place.
 
-    l_compare , r == Ordering_Less;
+    l.compare(r) == Ordering::Less;
 
-    l_compare , r != Ordering_Greater;
+    l.compare(r) != Ordering::Greater;
 
-    l_compare , r == Ordering_Greater;
+    l.compare(r) == Ordering::Greater;
 
-    l_compare , r != Ordering_Less;
+    l.compare(r) != Ordering::Less;
 
-    l_compare , r == Ordering_Equal;
+    l.compare(r) == Ordering::Equal;
 
-    l_compare , r != Ordering_Equal;
+    l.compare(r) != Ordering::Equal;
 
 // --- Unary operators ------------------------------------------------------
 
 // Unary minus. Zero is its own negation, which negate() already guarantees.
 
-    negated , l;
+    negated(l);
 
 // --- Character tables -----------------------------------------------------
 //
@@ -1007,7 +1007,7 @@
     index = 0;
     index < count;
         result = result * 10;
-        index++;
+        index += 1;
 
     result;
 
@@ -1021,9 +1021,9 @@
     // Character for a digit value in [0, MAX_RADIX).
 
     upper;
-        DIGIT_TABLE_UPPER_at , value;
+        DIGIT_TABLE_UPPER.at(value);
 
-    DIGIT_TABLE_LOWER_at , value;
+    DIGIT_TABLE_LOWER.at(value);
 
 // --- Decimal parsing ------------------------------------------------------
 
@@ -1040,76 +1040,76 @@
 // chunked representation. Underscores are accepted as digit separators inside
 // the digit run even though the language's own lexer rejects them.
 
-    out = ParseResult;
-    text_size == 0;
-        out_status = ParseStatus_EmptyInput;
+    out = ParseResult();
+    text.size() == 0;
+        out.status = ParseStatus::EmptyInput;
         out;
 
     index = 0;
-    first = code_of , text_at , 0;
+    first = code_of(text.at(0));
     first == CHAR_MINUS || first == CHAR_PLUS;
-        out_negative = first == CHAR_MINUS;
+        out.negative = first == CHAR_MINUS;
         index = 1;
 
-    index >= text_size;
-        out_status = ParseStatus_EmptyInput;
+    index >= text.size();
+        out.status = ParseStatus::EmptyInput;
         out;
 
-    value = make_zero;
+    value = make_zero();
     chunk = 0;
     chunk_digits = 0;
     seen_digit = false;
-    index < text_size;
-        code = code_of , text_at , index;
+    index < text.size();
+        code = code_of(text.at(index));
         code == CHAR_UNDERSCORE;
             // A separator is only meaningful between digits, never leading.
             !seen_digit;
-                out_status = ParseStatus_BadDigit;
-                out_consumed = index;
+                out.status = ParseStatus::BadDigit;
+                out.consumed = index;
                 out;
 
-            index++;
+            index += 1;
 
-        digit = decimal_digit_value , code;
+        digit = decimal_digit_value(code);
         digit < 0;
-            out_status = ParseStatus_BadDigit;
-            out_consumed = index;
+            out.status = ParseStatus::BadDigit;
+            out.consumed = index;
             out;
 
         seen_digit = true;
         chunk = chunk * 10 + digit;
-        chunk_digits++;
+        chunk_digits += 1;
         chunk_digits == DECIMAL_DIGITS_PER_CHUNK;
-            value = add_small , multiply_small , value , DECIMAL_CHUNK_BASE , chunk;
+            value = add_small(multiply_small(value, DECIMAL_CHUNK_BASE), chunk);
             chunk = 0;
             chunk_digits = 0;
 
-        index++;
+        index += 1;
 
     !seen_digit;
-        out_status = ParseStatus_EmptyInput;
-        out_consumed = index;
+        out.status = ParseStatus::EmptyInput;
+        out.consumed = index;
         out;
 
     // Fold the short tail chunk in with the matching power of ten.
     chunk_digits > 0;
-        value = add_small , multiply_small , value , power_of_ten , chunk_digits , chunk;
+        value = add_small(multiply_small(value, power_of_ten(chunk_digits)), chunk);
 
-    value_negative = out_negative && !value_is_zero;
-    value_normalise;
-    out_value = value;
-    out_consumed = index;
-    out_status = ParseStatus_Ok;
+    value.negative = out.negative && !value.is_zero();
+    value.normalise();
+    out.value = value;
+    out.consumed = index;
+    out.status = ParseStatus::Ok;
     out;
 
     // Convenience wrapper for callers that do not care why a parse failed.
 
-    parsed = parse_decimal , text;
-    parsed_status != ParseStatus_Ok;
-        panic , "bignum: malformed decimal literal";
-        make_zero;
+    parsed = parse_decimal(text);
+    parsed.status != ParseStatus::Ok;
+        panic("bignum: malformed decimal literal");
+        make_zero();
 
-    parsed_value;
+    parsed.value;
 
 // --- Digit emission -------------------------------------------------------
 
@@ -1118,22 +1118,22 @@
 // chunk of a number wants; every following chunk is padded to the full chunk
 // width so that internal zeros survive.
 
-    digits = vector , int;
-    rest = abs , value;
+    digits = vector{int}();
+    rest = abs(value);
     rest == 0;
-        digits_push_back , 0;
+        digits.push_back(0);
 
     rest > 0;
-        digits_push_back , rest % 10;
+        digits.push_back(rest % 10);
         rest = rest / 10;
 
-    digits_size < width;
-        digits_push_back , 0;
+    digits.size() < width;
+        digits.push_back(0);
 
-    index = digits_size - 1;
+    index = digits.size() - 1;
     index >= 0;
-        target_push_back , digit_char , digits , index , false;
-        --index;
+        target.push_back(digit_char(digits[index], false));
+        index -= 1;
 
 // --- Decimal formatting ---------------------------------------------------
 
@@ -1143,33 +1143,33 @@
 // division by 10^8. The chunks come out least significant first, so they are
 // emitted in reverse; only the top chunk is unpadded.
 
-    out = string;
-    a_is_zero;
-        out_push_back , '0';
+    out = string();
+    a.is_zero();
+        out.push_back('0');
         out;
 
-    chunks = vector , int;
-    rest = a_absolute;
+    chunks = vector{int}();
+    rest = a.absolute();
     guard = 0;
-    !rest_is_zero;
-        step = divide_small , rest , DECIMAL_CHUNK_BASE;
+    !rest.is_zero();
+        step = divide_small(rest, DECIMAL_CHUNK_BASE);
         // The chunk base is below LIMB_BASE, so the remainder is one limb.
-        chunks_push_back , step_remainder_limb_at , 0;
-        rest = step_quotient;
-        ++guard;
+        chunks.push_back(step.remainder.limb_at(0));
+        rest = step.quotient;
+        guard += 1;
         guard > DIVISION_ITERATION_LIMIT;
-            panic , "bignum: decimal conversion failed to terminate";
+            panic("bignum: decimal conversion failed to terminate");
             out;
 
-    a_is_negative;
-        out_push_back , '-';
+    a.is_negative();
+        out.push_back('-');
 
-    index = chunks_size - 1;
-    append_padded_decimal , out , chunks , index , 0;
-    --index;
+    index = chunks.size() - 1;
+    append_padded_decimal(out, chunks[index], 0);
+    index -= 1;
     index >= 0;
-        append_padded_decimal , out , chunks , index , DECIMAL_DIGITS_PER_CHUNK;
-        index--;
+        append_padded_decimal(out, chunks[index], DECIMAL_DIGITS_PER_CHUNK);
+        index -= 1;
 
     out;
 
@@ -1181,21 +1181,21 @@
 // single expression; get_bit returns zero past the top of the number, so the
 // highest partial nibble needs no special case.
 
-    out = string;
-    a_is_zero;
-        out_push_back , '0';
+    out = string();
+    a.is_zero();
+        out.push_back('0');
         out;
 
-    a_is_negative;
-        out_push_back , '-';
+    a.is_negative();
+        out.push_back('-');
 
     // Round the bit length up to a whole nibble and start at its low bit.
-    position = a_bit_length + BITS_PER_NIBBLE - 1 / BITS_PER_NIBBLE
+    position = ((a.bit_length() + BITS_PER_NIBBLE - 1) / BITS_PER_NIBBLE)
         * BITS_PER_NIBBLE - BITS_PER_NIBBLE;
     position >= 0;
-        nibble = a_get_bit , position + 3 << 3 | a_get_bit , position + 2 << 2
-            | a_get_bit , position + 1 << 1 | a_get_bit , position;
-        out_push_back , digit_char , nibble & NIBBLE_MASK , upper;
+        nibble = (a.get_bit(position + 3) << 3) | (a.get_bit(position + 2) << 2)
+            | (a.get_bit(position + 1) << 1) | a.get_bit(position);
+        out.push_back(digit_char(nibble & NIBBLE_MASK, upper));
         position -= BITS_PER_NIBBLE;
 
     out;
@@ -1206,21 +1206,21 @@
 // is positive an underscore is inserted every `group` bits, counting from the
 // bottom, so that 2^12 - 1 with a group of four reads 1111_1111_1111.
 
-    out = string;
-    a_is_zero;
-        out_push_back , '0';
+    out = string();
+    a.is_zero();
+        out.push_back('0');
         out;
 
-    a_is_negative;
-        out_push_back , '-';
+    a.is_negative();
+        out.push_back('-');
 
-    position = a_bit_length - 1;
+    position = a.bit_length() - 1;
     position >= 0;
-        out_push_back , digit_char , a_get_bit , position & 1 , false;
+        out.push_back(digit_char(a.get_bit(position) & 1, false));
         group > 0 && position > 0 && position % group == 0;
-            out_push_back , '_';
+            out.push_back('_');
 
-        --position;
+        position -= 1;
 
     out;
 
@@ -1237,15 +1237,15 @@
 // above, each update is one expression mirroring the textbook recurrence
 // r' = r_prev - q * r rather than nested calls into divide and multiply.
 
-    out = ExtendedGcd;
-    old_rest = a_clone;
-    rest = b_clone;
-    old_x = make_one;
-    x = make_zero;
-    old_y = make_zero;
-    y = make_one;
+    out = ExtendedGcd();
+    old_rest = a.clone();
+    rest = b.clone();
+    old_x = make_one();
+    x = make_zero();
+    old_y = make_zero();
+    y = make_one();
     guard = 0;
-    !rest_is_zero;
+    !rest.is_zero();
         quotient = old_rest / rest;
         next_rest = old_rest - quotient * rest;
         next_x = old_x - quotient * x;
@@ -1256,32 +1256,32 @@
         x = next_x;
         old_y = y;
         y = next_y;
-        ++guard;
+        guard += 1;
         guard > DIVISION_ITERATION_LIMIT;
-            panic , "bignum: extended gcd failed to converge";
+            panic("bignum: extended gcd failed to converge");
             out;
 
-    out_divisor = old_rest;
-    out_x = old_x;
-    out_y = old_y;
+    out.divisor = old_rest;
+    out.x = old_x;
+    out.y = old_y;
     out;
 
 // Modular inverse of a modulo m, or a panic when the two are not coprime.
 // The Bezout coefficient x already satisfies x * a == 1 (mod m); it only has
 // to be pulled back into [0, m).
 
-    m_is_zero;
-        panic , "bignum: modulus must be non-zero";
-        make_zero;
+    m.is_zero();
+        panic("bignum: modulus must be non-zero");
+        make_zero();
 
-    reduced = modulus , a , m;
-    bezout = extended_gcd , reduced , m_absolute;
-    bezout_divisor != make_one;
-        panic , "bignum: value is not invertible modulo m";
-        make_zero;
+    reduced = modulus(a, m);
+    bezout = extended_gcd(reduced, m.absolute());
+    bezout.divisor != make_one();
+        panic("bignum: value is not invertible modulo m");
+        make_zero();
 
-    inverse = modulus , bezout_x , m_absolute;
-    inverse_is_negative == false;
+    inverse = modulus(bezout.x, m.absolute());
+    inverse.is_negative() == false;
     inverse;
 
 // --- Integer square root --------------------------------------------------
@@ -1293,35 +1293,35 @@
 // first non-decreasing step is the fixed point. The correction loop absorbs
 // the one-off overshoot integer truncation can leave behind.
 
-    a_is_negative;
-        panic , "bignum: square root of a negative number";
-        make_zero;
+    a.is_negative();
+        panic("bignum: square root of a negative number");
+        make_zero();
 
-    a_is_zero || a_compare_small , 1 == Ordering_Equal;
-        a_clone;
+    a.is_zero() || a.compare_small(1) == Ordering::Equal;
+        a.clone();
 
-    guess = shift_left , make_one , a_bit_length / 2 + 1;
+    guess = shift_left(make_one(), a.bit_length() / 2 + 1);
     guard = 0;
 
-        next = guess + a / guess >> 1;
+        next = (guess + a / guess) >> 1;
         next >= guess;
 
         guess = next;
-        guard++;
+        guard += 1;
         guard > DIVISION_ITERATION_LIMIT;
-            panic , "bignum: square root failed to converge";
+            panic("bignum: square root failed to converge");
 
     // Truncation can leave the estimate one too high; never more than one.
     guess * guess > a;
-        guess = guess - make_one;
+        guess = guess - make_one();
 
     guess * guess <= a;
     guess;
 
-    a_is_negative;
+    a.is_negative();
         false;
 
-    root = isqrt , a;
+    root = isqrt(a);
     root * root == a;
 
 // --- Factorials and binomials ---------------------------------------------
@@ -1330,14 +1330,14 @@
 // remotely computable, so the whole product runs through multiply_small.
 
     n < 0;
-        panic , "bignum: factorial of a negative number";
-        make_zero;
+        panic("bignum: factorial of a negative number");
+        make_zero();
 
-    result = make_one;
+    result = make_one();
     index = 2;
     index <= n;
-        result = multiply_small , result , index;
-        index++;
+        result = multiply_small(result, index);
+        index += 1;
 
     result;
 
@@ -1350,14 +1350,14 @@
 // one expression keeps the running value as small as the result allows.
 
     k < 0 || k > n;
-        make_zero;
+        make_zero();
 
-    chosen = min , k , n - k;
-    result = make_one;
+    chosen = min(k, n - k);
+    result = make_one();
     index = 1;
     index <= chosen;
-        result = divide_small , multiply_small , result , n - chosen + index , index_quotient;
-        ++index;
+        result = divide_small(multiply_small(result, n - chosen + index), index).quotient;
+        index += 1;
 
-    result_normalise;
+    result.normalise();
     result;

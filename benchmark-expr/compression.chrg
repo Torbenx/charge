@@ -94,71 +94,71 @@
 // from and writes to one of these, so the bit cursors only ever need to know
 // about a single container type.
 
-        data_size;
+        data.size();
 
-        data_size == 0;
+        data.size() == 0;
 
-        data_size - cursor;
+        data.size() - cursor;
 
-        cursor >= data_size;
+        cursor >= data.size();
 
         cursor = 0;
 
-        data_clear;
+        data.clear();
         cursor = 0;
 
-        data_reserve , n;
+        data.reserve(n);
 
     // Stores only the low eight bits; the caller is responsible for the
     // masking convention, but the assert keeps honest callers honest.
 
-        data_push_back , value & BYTE_MASK;
+        data.push_back(value & BYTE_MASK);
 
-        push , value & BYTE_MASK;
-        push , value >> BYTE_BITS & BYTE_MASK;
+        push(value & BYTE_MASK);
+        push((value >> BYTE_BITS) & BYTE_MASK);
 
-        push , value >> BYTE_BITS & BYTE_MASK;
-        push , value & BYTE_MASK;
+        push((value >> BYTE_BITS) & BYTE_MASK);
+        push(value & BYTE_MASK);
 
-        push , value & BYTE_MASK;
-        push , value >> 8 & BYTE_MASK;
-        push , value >> 16 & BYTE_MASK;
-        push , value >> 24 & BYTE_MASK;
+        push(value & BYTE_MASK);
+        push((value >> 8) & BYTE_MASK);
+        push((value >> 16) & BYTE_MASK);
+        push((value >> 24) & BYTE_MASK);
 
-        push , value >> 24 & BYTE_MASK;
-        push , value >> 16 & BYTE_MASK;
-        push , value >> 8 & BYTE_MASK;
-        push , value & BYTE_MASK;
+        push((value >> 24) & BYTE_MASK);
+        push((value >> 16) & BYTE_MASK);
+        push((value >> 8) & BYTE_MASK);
+        push(value & BYTE_MASK);
 
-        data_at , index & BYTE_MASK;
+        data.at(index) & BYTE_MASK;
 
-        value = data_at , cursor & BYTE_MASK;
-        cursor++;
+        value = data.at(cursor) & BYTE_MASK;
+        cursor += 1;
         value;
 
-        data_at , cursor & BYTE_MASK;
+        data.at(cursor) & BYTE_MASK;
 
-        data_at , cursor + offset & BYTE_MASK;
+        data.at(cursor + offset) & BYTE_MASK;
 
-        low = read;
-        high = read;
-        low | high << BYTE_BITS;
+        low = read();
+        high = read();
+        low | (high << BYTE_BITS);
 
-        high = read;
-        low = read;
-        high << BYTE_BITS | low;
+        high = read();
+        low = read();
+        (high << BYTE_BITS) | low;
 
-        b0 = read;
-        b1 = read;
-        b2 = read;
-        b3 = read;
-        b0 | b1 << 8 | b2 << 16 | b3 << 24;
+        b0 = read();
+        b1 = read();
+        b2 = read();
+        b3 = read();
+        b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
 
-        b0 = read;
-        b1 = read;
-        b2 = read;
-        b3 = read;
-        b0 << 24 | b1 << 16 | b2 << 8 | b3;
+        b0 = read();
+        b1 = read();
+        b2 = read();
+        b3 = read();
+        (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
 
     // Copy `count` bytes starting at `from` onto the end of the buffer. The
     // ranges are allowed to overlap; that is exactly what an LZ77 back
@@ -166,23 +166,23 @@
 
         i = 0;
         i < count;
-            data_push_back , data_at , from + i & BYTE_MASK;
-            ++i;
+            data.push_back(data.at(from + i) & BYTE_MASK);
+            i += 1;
 
         i = 0;
-        i < other_size;
-            data_push_back , other_at , i;
-            ++i;
+        i < other.size();
+            data.push_back(other.at(i));
+            i += 1;
 
-        data_size != other_size;
+        data.size() != other.size();
             false;
 
         i = 0;
-        i < data_size;
-            data_at , i & BYTE_MASK != other_at , i;
+        i < data.size();
+            (data.at(i) & BYTE_MASK) != other.at(i);
                 false;
 
-            i++;
+            i += 1;
 
         true;
 
@@ -213,20 +213,20 @@
     // accumulator the new bit is grafted onto.
 
         value = bit & 1;
-        order == BitOrder_MsbFirst;
-            accumulator = accumulator << 1 | value & WORD_MASK;
+        order == BitOrder::MsbFirst;
+            accumulator = ((accumulator << 1) | value) & WORD_MASK;
 
-            accumulator = accumulator | value << bit_count & WORD_MASK;
+            accumulator = (accumulator | (value << bit_count)) & WORD_MASK;
 
-        bit_count++;
-        bits_written++;
+        bit_count += 1;
+        bits_written += 1;
         bit_count == BYTE_BITS;
-            emit_byte;
+            emit_byte();
 
-        order == BitOrder_MsbFirst;
-            out_push , accumulator & BYTE_MASK;
+        order == BitOrder::MsbFirst;
+            out.push(accumulator & BYTE_MASK);
 
-            out_push , accumulator & BYTE_MASK;
+            out.push(accumulator & BYTE_MASK);
 
         accumulator = 0;
         bit_count = 0;
@@ -237,64 +237,64 @@
 
         i = count - 1;
         i >= 0;
-            put_bit , value >> i & 1;
-            --i;
+            put_bit((value >> i) & 1);
+            i -= 1;
 
             // Write `count` bits of `value`, least significant bit first.
 
         i = 0;
         i < count;
-            put_bit , value >> i & 1;
-            ++i;
+            put_bit((value >> i) & 1);
+            i += 1;
 
-        order == BitOrder_MsbFirst;
-            put_bits_msb , value , count;
+        order == BitOrder::MsbFirst;
+            put_bits_msb(value, count);
 
-            put_bits_lsb , value , count;
+            put_bits_lsb(value, count);
 
     // A Huffman code is stored most significant bit first but is emitted
     // into an LSB-first stream, so the bits come out reversed relative to
     // the code's numeric value.
 
-        order == BitOrder_LsbFirst;
+        order == BitOrder::LsbFirst;
             i = length - 1;
             i >= 0;
-                put_bit , code >> i & 1;
-                i--;
+                put_bit((code >> i) & 1);
+                i -= 1;
 
-            put_bits_msb , code , length;
+            put_bits_msb(code, length);
 
         bit_count == 0;
-            out_push , value & BYTE_MASK;
+            out.push(value & BYTE_MASK);
             bits_written += BYTE_BITS;
 
-            put_bits , value & BYTE_MASK , BYTE_BITS;
+            put_bits(value & BYTE_MASK, BYTE_BITS);
 
-        put_byte , value & BYTE_MASK;
-        put_byte , value >> BYTE_BITS & BYTE_MASK;
+        put_byte(value & BYTE_MASK);
+        put_byte((value >> BYTE_BITS) & BYTE_MASK);
 
-        put_short , value & SHORT_MASK;
-        put_short , value >> SHORT_BITS & SHORT_MASK;
+        put_short(value & SHORT_MASK);
+        put_short((value >> SHORT_BITS) & SHORT_MASK);
 
         // Pad with zero bits until the next byte boundary.
 
         bit_count != 0;
-            put_bit , 0;
+            put_bit(0);
 
     // Pad with one bits instead; some framing formats use this so that a
     // truncated stream is detectable.
 
         bit_count != 0;
-            put_bit , 1;
+            put_bit(1);
 
-        align;
+        align();
 
-        align;
+        align();
         i = 0;
         i < count;
-            out_push , source_at , from + i;
+            out.push(source.at(from + i));
             bits_written += BYTE_BITS;
-            i++;
+            i += 1;
 
 // --- Bit reader ----------------------------------------------------------
 
@@ -311,11 +311,11 @@
 
         bits_read;
 
-        source_cursor;
+        source.cursor;
 
         bit_count == 0;
 
-        source_remaining * BYTE_BITS + bit_count;
+        source.remaining() * BYTE_BITS + bit_count;
 
         overrun;
 
@@ -323,128 +323,128 @@
     // overrun flag and feeds zero bits so the decoder can unwind gracefully
     // instead of trapping.
 
-        source_exhausted;
+        source.exhausted();
             overrun = true;
-            order == BitOrder_MsbFirst;
-                accumulator = accumulator << BYTE_BITS & WORD_MASK;
+            order == BitOrder::MsbFirst;
+                accumulator = (accumulator << BYTE_BITS) & WORD_MASK;
 
                 0;
 
             bit_count += BYTE_BITS;
 
-        byte_value = source_read;
-        order == BitOrder_MsbFirst;
-            accumulator = accumulator << BYTE_BITS | byte_value & WORD_MASK;
+        byte_value = source.read();
+        order == BitOrder::MsbFirst;
+            accumulator = ((accumulator << BYTE_BITS) | byte_value) & WORD_MASK;
 
-            accumulator = accumulator | byte_value << bit_count & WORD_MASK;
+            accumulator = (accumulator | (byte_value << bit_count)) & WORD_MASK;
 
         bit_count += BYTE_BITS;
 
         // Guarantee at least `count` bits in the accumulator.
 
         bit_count < count;
-            refill_byte;
+            refill_byte();
 
         bit_count == 0;
-            refill_byte;
+            refill_byte();
 
         bit = 0;
-        order == BitOrder_MsbFirst;
-            bit = accumulator >> bit_count - 1 & 1;
-            --bit_count;
-            accumulator = accumulator & 1 << bit_count - 1;
+        order == BitOrder::MsbFirst;
+            bit = (accumulator >> (bit_count - 1)) & 1;
+            bit_count -= 1;
+            accumulator = accumulator & ((1 << bit_count) - 1);
 
             bit = accumulator & 1;
-            accumulator = accumulator >> 1 & WORD_MASK;
-            bit_count--;
+            accumulator = (accumulator >> 1) & WORD_MASK;
+            bit_count -= 1;
 
-        ++bits_read;
+        bits_read += 1;
         bit;
 
         value = 0;
         i = 0;
         i < count;
-            value = value << 1 | get_bit;
-            i++;
+            value = (value << 1) | get_bit();
+            i += 1;
 
         value;
 
         value = 0;
         i = 0;
         i < count;
-            value = value | get_bit << i;
-            i++;
+            value = value | (get_bit() << i);
+            i += 1;
 
         value;
 
         count == 0;
             0;
 
-        order == BitOrder_MsbFirst;
-            get_bits_msb , count;
+        order == BitOrder::MsbFirst;
+            get_bits_msb(count);
 
-            get_bits_lsb , count;
+            get_bits_lsb(count);
 
     // Look at the next `count` bits without consuming them. The value is
     // always returned in the reader's native order, which is what the flat
     // decode tables are indexed by.
 
-        refill , count;
-        order == BitOrder_MsbFirst;
-            accumulator >> bit_count - count & 1 << count - 1;
+        refill(count);
+        order == BitOrder::MsbFirst;
+            (accumulator >> (bit_count - count)) & ((1 << count) - 1);
 
-            accumulator & 1 << count - 1;
+            accumulator & ((1 << count) - 1);
 
             // Drop bits that a previous `peek_bits` reported on.
 
-        order == BitOrder_MsbFirst;
+        order == BitOrder::MsbFirst;
             bit_count -= count;
-            accumulator = accumulator & 1 << bit_count - 1;
+            accumulator = accumulator & ((1 << bit_count) - 1);
 
-            accumulator = accumulator >> count & WORD_MASK;
+            accumulator = (accumulator >> count) & WORD_MASK;
             bit_count -= count;
 
         bits_read += count;
 
         bit_count == 0;
-            source_exhausted;
+            source.exhausted();
                 overrun = true;
                 0;
 
             bits_read += BYTE_BITS;
-            source_read;
+            source.read();
 
-        get_bits , BYTE_BITS;
+        get_bits(BYTE_BITS);
 
-        low = get_byte;
-        high = get_byte;
-        low | high << BYTE_BITS;
+        low = get_byte();
+        high = get_byte();
+        low | (high << BYTE_BITS);
 
-        low = get_short;
-        high = get_short;
-        low | high << SHORT_BITS;
+        low = get_short();
+        high = get_short();
+        low | (high << SHORT_BITS);
 
         // Discard the partial byte currently in the accumulator.
 
         drop = bit_count % BYTE_BITS;
         drop != 0;
-            drop_bits , drop;
+            drop_bits(drop);
 
         accumulator = 0;
         bit_count = 0;
 
         // Copy `count` raw bytes out of an aligned stream; used by stored blocks.
 
-        align;
-        source_remaining < count;
+        align();
+        source.remaining() < count;
             overrun = true;
             false;
 
         i = 0;
         i < count;
-            sink_push , source_read;
+            sink.push(source.read());
             bits_read += BYTE_BITS;
-            ++i;
+            i += 1;
 
         true;
 
@@ -456,9 +456,9 @@
     value = code;
     i = 0;
     i < width;
-        result = result << 1 | value & 1;
-        value = value >> 1 & WORD_MASK;
-        i++;
+        result = (result << 1) | (value & 1);
+        value = (value >> 1) & WORD_MASK;
+        i += 1;
 
     result;
 
@@ -466,11 +466,11 @@
 // with explicit masks because the language has no hexadecimal literals.
 
     v = value & WORD_MASK;
-    v = v - v >> 1 & 1431655765;                            // 0x55555555
-    v = v & 858993459 + v >> 2 & 858993459;               // 0x33333333
-    v = v + v >> 4 & 252645135;                             // 0x0F0F0F0F
-    v = v + v >> 8;
-    v = v + v >> 16;
+    v = v - ((v >> 1) & 1431655765);                            // 0x55555555
+    v = (v & 858993459) + ((v >> 2) & 858993459);               // 0x33333333
+    v = (v + (v >> 4)) & 252645135;                             // 0x0F0F0F0F
+    v = v + (v >> 8);
+    v = v + (v >> 16);
     v & 63;
 
     // Index of the highest set bit, or -1 for zero.
@@ -480,24 +480,24 @@
         -1;
 
     position = 0;
-    v & 4294901760 != 0;                                 // 0xFFFF0000
-        v = v >> 16 & SHORT_MASK;
+    (v & 4294901760) != 0;                                 // 0xFFFF0000
+        v = (v >> 16) & SHORT_MASK;
         position += 16;
 
-    v & 65280 != 0;                                      // 0xFF00
-        v = v >> 8 & BYTE_MASK;
+    (v & 65280) != 0;                                      // 0xFF00
+        v = (v >> 8) & BYTE_MASK;
         position += 8;
 
-    v & 240 != 0;                                        // 0xF0
-        v = v >> 4 & NIBBLE_MASK;
+    (v & 240) != 0;                                        // 0xF0
+        v = (v >> 4) & NIBBLE_MASK;
         position += 4;
 
-    v & 12 != 0;                                         // 0x0C
-        v = v >> 2 & 3;
+    (v & 12) != 0;                                         // 0x0C
+        v = (v >> 2) & 3;
         position += 2;
 
-    v & 2 != 0;
-        ++position;
+    (v & 2) != 0;
+        position += 1;
 
     position;
 
@@ -506,25 +506,25 @@
     value <= 1;
         1;
 
-    v = value - 1 & WORD_MASK;
-    v = v | v >> 1;
-    v = v | v >> 2;
-    v = v | v >> 4;
-    v = v | v >> 8;
-    v = v | v >> 16;
-    v + 1 & WORD_MASK;
+    v = (value - 1) & WORD_MASK;
+    v = v | (v >> 1);
+    v = v | (v >> 2);
+    v = v | (v >> 4);
+    v = v | (v >> 8);
+    v = v | (v >> 16);
+    (v + 1) & WORD_MASK;
 
 // --- Frequency counting --------------------------------------------------
 
 // A histogram over one alphabet. `total` and `used` are maintained
 // incrementally so the tree builder never has to rescan the table.
 
-        counts_clear;
-        counts_resize , alphabet;
+        counts.clear();
+        counts.resize(alphabet);
         i = 0;
         i < alphabet;
-            counts_at , i = 0;
-            ++i;
+            counts.at(i) = 0;
+            i += 1;
 
         alphabet = alphabet;
         total = 0;
@@ -532,19 +532,19 @@
 
         alphabet;
 
-        counts_at , symbol;
+        counts.at(symbol);
 
-        counts_at , symbol == 0;
-            used++;
+        counts.at(symbol) == 0;
+            used += 1;
 
-        counts_at , symbol += 1;
-        total++;
+        counts.at(symbol) += 1;
+        total += 1;
 
-        counts_at , symbol == 0;
+        counts.at(symbol) == 0;
             count > 0;
-                ++used;
+                used += 1;
 
-        counts_at , symbol += count;
+        counts.at(symbol) += count;
         total += count;
 
     // Count every byte of a buffer. This is the hottest loop in the encoder
@@ -552,30 +552,30 @@
     // single mask.
 
         i = 0;
-        n = input_size;
+        n = input.size();
         i < n;
-            symbol = input_at , i & BYTE_MASK;
-            counts_at , symbol == 0;
-                ++used;
+            symbol = input.at(i) & BYTE_MASK;
+            counts.at(symbol) == 0;
+                used += 1;
 
-            counts_at , symbol += 1;
-            i++;
+            counts.at(symbol) += 1;
+            i += 1;
 
         total += n;
 
     // Count pairs of adjacent bytes into a 65536 entry table; used by the
     // order-1 model in the arithmetic coder path.
 
-        input_size < 2;
+        input.size() < 2;
 
-        previous = input_at , 0;
+        previous = input.at(0);
         i = 1;
-        i < input_size;
-            current = input_at , i;
-            symbol = previous & BYTE_MASK << BYTE_BITS | current & BYTE_MASK;
-            add , symbol;
+        i < input.size();
+            current = input.at(i);
+            symbol = ((previous & BYTE_MASK) << BYTE_BITS) | (current & BYTE_MASK);
+            add(symbol);
             previous = current;
-            i++;
+            i += 1;
 
     // Guarantee at least two used symbols. A Huffman tree over a single
     // symbol has no code at all, which every decoder would reject, so the
@@ -586,13 +586,13 @@
         symbol < alphabet;
             used >= 2;
 
-            counts_at , symbol == 0;
-                counts_at , symbol = 1;
-                used++;
-                total++;
-                padded++;
+            counts.at(symbol) == 0;
+                counts.at(symbol) = 1;
+                used += 1;
+                total += 1;
+                padded += 1;
 
-            symbol++;
+            symbol += 1;
 
         padded;
 
@@ -603,14 +603,14 @@
         new_used = 0;
         i = 0;
         i < alphabet;
-            count = counts_at , i;
+            count = counts.at(i);
             count > 0;
-                halved = count + 1 >> MODEL_RESCALE_SHIFT;
-                counts_at , i = halved;
+                halved = (count + 1) >> MODEL_RESCALE_SHIFT;
+                counts.at(i) = halved;
                 new_total += halved;
-                new_used++;
+                new_used += 1;
 
-            i++;
+            i += 1;
 
         total = new_total;
         used = new_used;
@@ -618,10 +618,10 @@
         best = 0;
         i = 0;
         i < alphabet;
-            counts_at , i > best;
-                best = counts_at , i;
+            counts.at(i) > best;
+                best = counts.at(i);
 
-            i++;
+            i += 1;
 
         best;
 
@@ -634,12 +634,12 @@
         accumulated = 0;
         i = 0;
         i < alphabet;
-            count = counts_at , i;
+            count = counts.at(i);
             count > 0;
-                ratio = total * 1000 / count;
-                accumulated += count * log2_millibits , ratio;
+                ratio = (total * 1000) / count;
+                accumulated += count * log2_millibits(ratio);
 
-            i++;
+            i += 1;
 
         accumulated / total;
 
@@ -650,12 +650,12 @@
     scaled <= 1000;
         0;
 
-    whole = highest_bit , scaled / 1000;
+    whole = highest_bit(scaled / 1000);
     residue = scaled / 1000;
     fraction = 0;
     whole > 0;
         anchor = 1 << whole;
-        fraction = residue - anchor * 1000 / anchor;
+        fraction = ((residue - anchor) * 1000) / anchor;
 
     whole * 1000 + fraction;
 
@@ -674,16 +674,16 @@
 // deterministic: two nodes of equal weight are ordered by insertion index,
 // which makes the resulting code lengths reproducible across runs.
 
-        heap_size;
+        heap.size();
 
-        heap_size == 0;
+        heap.size() == 0;
 
-        heap_clear;
-        keys_clear;
-        ties_clear;
+        heap.clear();
+        keys.clear();
+        ties.clear();
         sequence = 0;
 
-        index - 1 / 2;
+        (index - 1) / 2;
 
         index * 2 + 1;
 
@@ -691,70 +691,70 @@
 
         // Strict weak ordering on the packed key.
 
-        keys_at , a != keys_at , b;
-            keys_at , a < keys_at , b;
+        keys.at(a) != keys.at(b);
+            keys.at(a) < keys.at(b);
 
-        ties_at , a < ties_at , b;
+        ties.at(a) < ties.at(b);
 
-        swap , heap_at , a , heap_at , b;
-        swap , keys_at , a , keys_at , b;
-        swap , ties_at , a , ties_at , b;
+        swap(heap.at(a), heap.at(b));
+        swap(keys.at(a), keys.at(b));
+        swap(ties.at(a), ties.at(b));
 
-        heap_push_back , node;
-        keys_push_back , weight;
-        ties_push_back , sequence;
-        sequence++;
-        sift_up , heap_size - 1;
+        heap.push_back(node);
+        keys.push_back(weight);
+        ties.push_back(sequence);
+        sequence += 1;
+        sift_up(heap.size() - 1);
 
         index = start;
         index > 0;
-            parent = parent_of , index;
-            !less , index , parent;
+            parent = parent_of(index);
+            !less(index, parent);
 
-            swap_entries , index , parent;
+            swap_entries(index, parent);
             index = parent;
 
         index = start;
-        count = heap_size;
+        count = heap.size();
 
-            left = left_of , index;
+            left = left_of(index);
             left >= count;
 
             smallest = left;
-            right = right_of , index;
+            right = right_of(index);
             right < count;
-                less , right , left;
+                less(right, left);
                     smallest = right;
 
-            !less , smallest , index;
+            !less(smallest, index);
 
-            swap_entries , index , smallest;
+            swap_entries(index, smallest);
             index = smallest;
 
-        heap_at , 0;
+        heap.at(0);
 
-        keys_at , 0;
+        keys.at(0);
 
-        result = heap_at , 0;
-        last = heap_size - 1;
-        swap_entries , 0 , last;
-        heap_pop_back;
-        keys_pop_back;
-        ties_pop_back;
-        heap_size > 1;
-            sift_down , 0;
+        result = heap.at(0);
+        last = heap.size() - 1;
+        swap_entries(0, last);
+        heap.pop_back();
+        keys.pop_back();
+        ties.pop_back();
+        heap.size() > 1;
+            sift_down(0);
 
         result;
 
         // Verify the heap invariant; the harness calls this after a build.
 
         i = 1;
-        i < heap_size;
-            parent = i - 1 / 2;
-            keys_at , i < keys_at , parent;
+        i < heap.size();
+            parent = (i - 1) / 2;
+            keys.at(i) < keys.at(parent);
                 false;
 
-            i++;
+            i += 1;
 
         true;
 
@@ -767,109 +767,109 @@
 // are sorted by (length, symbol) and codes are handed out in increasing
 // numeric order, so the decoder only needs the length of each symbol.
 
-        nodes_clear;
-        lengths_clear;
-        codes_clear;
-        queue_clear;
+        nodes.clear();
+        lengths.clear();
+        codes.clear();
+        queue.clear();
         root = -1;
         max_length = 0;
         symbol_count = 0;
 
-        nodes_size;
+        nodes.size();
 
-        node = HuffmanNode;
-        node_symbol = symbol;
-        node_weight = weight;
-        node_left = -1;
-        node_right = -1;
-        nodes_push_back , node;
-        nodes_size - 1;
+        node = HuffmanNode();
+        node.symbol = symbol;
+        node.weight = weight;
+        node.left = -1;
+        node.right = -1;
+        nodes.push_back(node);
+        nodes.size() - 1;
 
-        node = HuffmanNode;
-        node_symbol = -1;
-        node_left = left;
-        node_right = right;
-        node_weight = nodes_at , left_weight + nodes_at , right_weight;
-        nodes_push_back , node;
-        nodes_size - 1;
+        node = HuffmanNode();
+        node.symbol = -1;
+        node.left = left;
+        node.right = right;
+        node.weight = nodes.at(left).weight + nodes.at(right).weight;
+        nodes.push_back(node);
+        nodes.size() - 1;
 
     // Classic two-pop construction. Every used symbol becomes a leaf, then
     // the two lightest subtrees are repeatedly merged until one remains.
 
-        clear;
-        symbol_count = frequencies_size;
-        lengths_resize , frequencies_size;
-        codes_resize , frequencies_size;
+        clear();
+        symbol_count = frequencies.size();
+        lengths.resize(frequencies.size());
+        codes.resize(frequencies.size());
         symbol = 0;
-        symbol < frequencies_size;
-            lengths_at , symbol = 0;
-            codes_at , symbol = 0;
-            symbol++;
+        symbol < frequencies.size();
+            lengths.at(symbol) = 0;
+            codes.at(symbol) = 0;
+            symbol += 1;
 
         leaves = 0;
         symbol = 0;
-        symbol < frequencies_size;
-            weight = frequencies_at , symbol;
+        symbol < frequencies.size();
+            weight = frequencies.at(symbol);
             weight > 0;
-                node = new_leaf , symbol , weight;
-                queue_push , node , weight;
-                ++leaves;
+                node = new_leaf(symbol, weight);
+                queue.push(node, weight);
+                leaves += 1;
 
-            ++symbol;
+            symbol += 1;
 
         leaves == 0;
             false;
 
         leaves == 1;
             // Degenerate alphabet: give the single symbol a one bit code.
-            only = queue_pop;
+            only = queue.pop();
             root = only;
-            lengths_at , nodes_at , only_symbol = 1;
+            lengths.at(nodes.at(only).symbol) = 1;
             max_length = 1;
-            assign_canonical;
+            assign_canonical();
             true;
 
-        queue_size > 1;
-            left = queue_pop;
-            right = queue_pop;
-            merged = new_internal , left , right;
-            queue_push , merged , nodes_at , merged_weight;
+        queue.size() > 1;
+            left = queue.pop();
+            right = queue.pop();
+            merged = new_internal(left, right);
+            queue.push(merged, nodes.at(merged).weight);
 
-        root = queue_pop;
-        measure_depths , root , 0;
+        root = queue.pop();
+        measure_depths(root, 0);
         max_length > MAX_CODE_LENGTH;
-            limit_code_lengths , MAX_CODE_LENGTH;
+            limit_code_lengths(MAX_CODE_LENGTH);
 
-        assign_canonical;
+        assign_canonical();
         true;
 
     // Walk the tree iteratively with an explicit stack, recording the depth
     // of every leaf. Recursion would be fine here but the iterative form is
     // what the production encoder uses, so the benchmark keeps it.
 
-        stack_nodes = vector , int;
-        stack_depths = vector , int;
-        stack_nodes_push_back , root;
-        stack_depths_push_back , anchor;
+        stack_nodes = vector{int}();
+        stack_depths = vector{int}();
+        stack_nodes.push_back(root);
+        stack_depths.push_back(anchor);
         max_length = 0;
-        !stack_nodes_empty;
-            node = stack_nodes_back;
-            depth = stack_depths_back;
-            stack_nodes_pop_back;
-            stack_depths_pop_back;
-            entry = nodes_at , node;
-            entry_is_leaf;
-                lengths_at , entry_symbol = depth;
+        !stack_nodes.empty();
+            node = stack_nodes.back();
+            depth = stack_depths.back();
+            stack_nodes.pop_back();
+            stack_depths.pop_back();
+            entry = nodes.at(node);
+            entry.is_leaf();
+                lengths.at(entry.symbol) = depth;
                 depth > max_length;
                     max_length = depth;
 
-                entry_left >= 0;
-                    stack_nodes_push_back , entry_left;
-                    stack_depths_push_back , depth + 1;
+                entry.left >= 0;
+                    stack_nodes.push_back(entry.left);
+                    stack_depths.push_back(depth + 1);
 
-                entry_right >= 0;
-                    stack_nodes_push_back , entry_right;
-                    stack_depths_push_back , depth + 1;
+                entry.right >= 0;
+                    stack_nodes.push_back(entry.right);
+                    stack_depths.push_back(depth + 1);
 
         stack_nodes;
         stack_depths;
@@ -882,30 +882,30 @@
     // back by lengthening the shortest codes one bit at a time, starting
     // from the deepest, until the sum drops back to exactly 2^limit.
 
-        histogram = vector , int , MAX_CODE_LENGTH + 2;
+        histogram = vector{int}(MAX_CODE_LENGTH + 2);
         i = 0;
         i < MAX_CODE_LENGTH + 2;
-            histogram_at , i = 0;
-            ++i;
+            histogram.at(i) = 0;
+            i += 1;
 
         symbol = 0;
         symbol < symbol_count;
-            length = lengths_at , symbol;
+            length = lengths.at(symbol);
             length > limit;
                 length = limit;
-                lengths_at , symbol = limit;
+                lengths.at(symbol) = limit;
 
             length > 0;
-                histogram_at , length += 1;
+                histogram.at(length) += 1;
 
-            symbol++;
+            symbol += 1;
 
         // Kraft sum scaled so that a complete code sums to 1 << limit.
         kraft = 0;
         length = 1;
         length <= limit;
-            kraft += histogram_at , length << limit - length;
-            ++length;
+            kraft += histogram.at(length) << (limit - length);
+            length += 1;
 
         target = 1 << limit;
         kraft > target;
@@ -913,65 +913,65 @@
             // one level above the limit's floor, and move one symbol down.
             donor = limit - 1;
             donor > 0;
-                histogram_at , donor > 0;
+                histogram.at(donor) > 0;
 
-                --donor;
+                donor -= 1;
 
             donor == 0;
 
-            histogram_at , donor -= 1;
-            histogram_at , donor + 1 += 1;
+            histogram.at(donor) -= 1;
+            histogram.at(donor + 1) += 1;
             donor + 1 < limit;
-                histogram_at , limit -= 1;
-                histogram_at , limit - 1 += 1;
+                histogram.at(limit) -= 1;
+                histogram.at(limit - 1) += 1;
 
-            kraft -= 1 << limit - donor - 1;
+            kraft -= 1 << (limit - donor - 1);
 
         // The sum may now sit below the target; hand the slack back to the
         // shortest codes so the code stays complete.
         kraft < target;
             taker = limit;
             taker > 0;
-                histogram_at , taker > 0;
+                histogram.at(taker) > 0;
 
-                taker--;
+                taker -= 1;
 
             taker <= 1;
 
-            histogram_at , taker -= 1;
-            histogram_at , taker - 1 += 1;
-            kraft += 1 << limit - taker;
+            histogram.at(taker) -= 1;
+            histogram.at(taker - 1) += 1;
+            kraft += 1 << (limit - taker);
 
-        rebuild_lengths_from_histogram , histogram , limit;
+        rebuild_lengths_from_histogram(histogram, limit);
         histogram;
 
     // Re-hand out the adjusted lengths, giving the shortest codes to the
     // heaviest symbols. Symbols are visited in decreasing weight order,
     // which is what keeps the rebalanced code close to optimal.
 
-        order = vector , int;
+        order = vector{int}();
         symbol = 0;
         symbol < symbol_count;
-            lengths_at , symbol > 0;
-                order_push_back , symbol;
+            lengths.at(symbol) > 0;
+                order.push_back(symbol);
 
-            symbol++;
+            symbol += 1;
 
-        sort_by_weight , order;
+        sort_by_weight(order);
 
         cursor = 0;
         length = 1;
         length <= limit;
-            remaining = histogram_at , length;
+            remaining = histogram.at(length);
             remaining > 0;
-                cursor >= order_size;
+                cursor >= order.size();
                     remaining = 0;
 
-                    lengths_at , order_at , cursor = length;
-                    ++cursor;
-                    --remaining;
+                    lengths.at(order.at(cursor)) = length;
+                    cursor += 1;
+                    remaining -= 1;
 
-            ++length;
+            length += 1;
 
         max_length = limit;
         order;
@@ -981,67 +981,67 @@
     // sort has to be stable for the canonical assignment to be reproducible.
 
         i = 1;
-        i < order_size;
-            key = order_at , i;
-            key_weight = weight_of_symbol , key;
+        i < order.size();
+            key = order.at(i);
+            key_weight = weight_of_symbol(key);
             j = i - 1;
             j >= 0;
-                weight_of_symbol , order_at , j >= key_weight;
+                weight_of_symbol(order.at(j)) >= key_weight;
 
-                order_at , j + 1 = order_at , j;
-                j--;
+                order.at(j + 1) = order.at(j);
+                j -= 1;
 
-            order_at , j + 1 = key;
-            ++i;
+            order.at(j + 1) = key;
+            i += 1;
 
         i = 0;
-        i < nodes_size;
-            node = nodes_at , i;
-            node_is_leaf;
-                node_symbol == symbol;
-                    node_weight;
+        i < nodes.size();
+            node = nodes.at(i);
+            node.is_leaf();
+                node.symbol == symbol;
+                    node.weight;
 
-            ++i;
+            i += 1;
 
         0;
 
     // Canonical assignment: count codes of each length, compute the first
     // code of each length, then hand codes out in symbol order.
 
-        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
-        next_code = vector , int , MAX_CODE_LENGTH + 1;
+        count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
+        next_code = vector{int}(MAX_CODE_LENGTH + 1);
         i = 0;
         i <= MAX_CODE_LENGTH;
-            count_per_length_at , i = 0;
-            next_code_at , i = 0;
-            i++;
+            count_per_length.at(i) = 0;
+            next_code.at(i) = 0;
+            i += 1;
 
         symbol = 0;
         symbol < symbol_count;
-            length = lengths_at , symbol;
+            length = lengths.at(symbol);
             length > 0;
-                count_per_length_at , length += 1;
+                count_per_length.at(length) += 1;
 
-            ++symbol;
+            symbol += 1;
 
         code = 0;
-        count_per_length_at , 0 = 0;
+        count_per_length.at(0) = 0;
         bits = 1;
         bits <= MAX_CODE_LENGTH;
-            code = code + count_per_length_at , bits - 1 << 1;
-            next_code_at , bits = code;
-            ++bits;
+            code = (code + count_per_length.at(bits - 1)) << 1;
+            next_code.at(bits) = code;
+            bits += 1;
 
         symbol = 0;
         symbol < symbol_count;
-            length = lengths_at , symbol;
+            length = lengths.at(symbol);
             length > 0;
-                codes_at , symbol = next_code_at , length;
-                next_code_at , length += 1;
+                codes.at(symbol) = next_code.at(length);
+                next_code.at(length) += 1;
 
-                codes_at , symbol = 0;
+                codes.at(symbol) = 0;
 
-            ++symbol;
+            symbol += 1;
 
         count_per_length;
         next_code;
@@ -1051,26 +1051,26 @@
         total = 0;
         symbol = 0;
         symbol < symbol_count;
-            length = lengths_at , symbol;
+            length = lengths.at(symbol);
             length > 0;
-                total += 1 << max_length - length;
+                total += 1 << (max_length - length);
 
-            ++symbol;
+            symbol += 1;
 
         total;
 
         max_length == 0;
             false;
 
-        kraft_sum == 1 << max_length;
+        kraft_sum() == (1 << max_length);
 
         // Total compressed size of the alphabet under this code, in bits.
 
         total = 0;
         symbol = 0;
         symbol < symbol_count;
-            total += lengths_at , symbol * frequencies_at , symbol;
-            ++symbol;
+            total += lengths.at(symbol) * frequencies.at(symbol);
+            symbol += 1;
 
         total;
 
@@ -1080,90 +1080,90 @@
 // pre-reversed copy for LSB-first output. Writing a symbol then costs one
 // array read and one `put_code`.
 
-        codes_clear;
-        lengths_clear;
-        reversed_clear;
-        codes_resize , tree_symbol_count;
-        lengths_resize , tree_symbol_count;
-        reversed_resize , tree_symbol_count;
-        symbol_count = tree_symbol_count;
-        max_length = tree_max_length;
+        codes.clear();
+        lengths.clear();
+        reversed.clear();
+        codes.resize(tree.symbol_count);
+        lengths.resize(tree.symbol_count);
+        reversed.resize(tree.symbol_count);
+        symbol_count = tree.symbol_count;
+        max_length = tree.max_length;
         symbol = 0;
-        symbol < tree_symbol_count;
-            length = tree_lengths_at , symbol;
-            code = tree_codes_at , symbol;
-            lengths_at , symbol = length;
-            codes_at , symbol = code;
-            reversed_at , symbol = reverse_bits , code , length;
-            symbol++;
+        symbol < tree.symbol_count;
+            length = tree.lengths.at(symbol);
+            code = tree.codes.at(symbol);
+            lengths.at(symbol) = length;
+            codes.at(symbol) = code;
+            reversed.at(symbol) = reverse_bits(code, length);
+            symbol += 1;
 
     // Build directly from a length vector, which is what the decoder side
     // does when it reconstructs a dynamic block's code from the header.
 
-        codes_clear;
-        lengths_clear;
-        reversed_clear;
-        codes_resize , lengths_size;
-        lengths_resize , lengths_size;
-        reversed_resize , lengths_size;
-        symbol_count = lengths_size;
+        codes.clear();
+        lengths.clear();
+        reversed.clear();
+        codes.resize(lengths.size());
+        lengths.resize(lengths.size());
+        reversed.resize(lengths.size());
+        symbol_count = lengths.size();
         max_length = 0;
 
-        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
+        count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
         i = 0;
         i <= MAX_CODE_LENGTH;
-            count_per_length_at , i = 0;
-            i++;
+            count_per_length.at(i) = 0;
+            i += 1;
 
         symbol = 0;
-        symbol < lengths_size;
-            length = lengths_at , symbol;
-            lengths_at , symbol = length;
+        symbol < lengths.size();
+            length = lengths.at(symbol);
+            lengths.at(symbol) = length;
             length > 0;
-                count_per_length_at , length += 1;
+                count_per_length.at(length) += 1;
                 length > max_length;
                     max_length = length;
 
-            ++symbol;
+            symbol += 1;
 
-        next_code = vector , int , MAX_CODE_LENGTH + 1;
+        next_code = vector{int}(MAX_CODE_LENGTH + 1);
         code = 0;
-        count_per_length_at , 0 = 0;
+        count_per_length.at(0) = 0;
         bits = 1;
         bits <= MAX_CODE_LENGTH;
-            code = code + count_per_length_at , bits - 1 << 1;
-            next_code_at , bits = code;
-            bits++;
+            code = (code + count_per_length.at(bits - 1)) << 1;
+            next_code.at(bits) = code;
+            bits += 1;
 
         symbol = 0;
-        symbol < lengths_size;
-            length = lengths_at , symbol;
+        symbol < lengths.size();
+            length = lengths.at(symbol);
             length > 0;
-                assigned = next_code_at , length;
-                next_code_at , length += 1;
-                codes_at , symbol = assigned;
-                reversed_at , symbol = reverse_bits , assigned , length;
+                assigned = next_code.at(length);
+                next_code.at(length) += 1;
+                codes.at(symbol) = assigned;
+                reversed.at(symbol) = reverse_bits(assigned, length);
 
-                codes_at , symbol = 0;
-                reversed_at , symbol = 0;
+                codes.at(symbol) = 0;
+                reversed.at(symbol) = 0;
 
-            symbol++;
+            symbol += 1;
 
         count_per_length;
         next_code;
 
-        lengths_at , symbol;
+        lengths.at(symbol);
 
-        codes_at , symbol;
+        codes.at(symbol);
 
-        lengths_at , symbol > 0;
+        lengths.at(symbol) > 0;
 
-        writer_put_code , codes_at , symbol , lengths_at , symbol;
+        writer.put_code(codes.at(symbol), lengths.at(symbol));
 
     // Fast path for an LSB-first stream: the reversal has already been paid
     // for at table build time.
 
-        writer_put_bits_lsb , reversed_at , symbol , lengths_at , symbol;
+        writer.put_bits_lsb(reversed.at(symbol), lengths.at(symbol));
 
 // --- Decode table --------------------------------------------------------
 
@@ -1183,38 +1183,38 @@
 // that suffix maps to the same entry. That is the replication loop below,
 // which strides by `1 << length` over the whole root table.
 
-        root_clear;
-        sub_clear;
+        root.clear();
+        sub.clear();
         symbol_count = 0;
         max_length = 0;
         under_subscribed = false;
 
-        root_size;
+        root.size();
 
-        clear;
-        symbol_count = lengths_size;
+        clear();
+        symbol_count = lengths.size();
 
-        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
+        count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
         i = 0;
         i <= MAX_CODE_LENGTH;
-            count_per_length_at , i = 0;
-            ++i;
+            count_per_length.at(i) = 0;
+            i += 1;
 
         used = 0;
         symbol = 0;
-        symbol < lengths_size;
-            length = lengths_at , symbol;
+        symbol < lengths.size();
+            length = lengths.at(symbol);
             length > 0;
                 length > MAX_CODE_LENGTH;
                     count_per_length;
                     false;
 
-                count_per_length_at , length += 1;
-                ++used;
+                count_per_length.at(length) += 1;
+                used += 1;
                 length > max_length;
                     max_length = length;
 
-            ++symbol;
+            symbol += 1;
 
         used == 0;
             under_subscribed = true;
@@ -1227,12 +1227,12 @@
         bits = 1;
         bits <= MAX_CODE_LENGTH;
             left = left << 1;
-            left -= count_per_length_at , bits;
+            left -= count_per_length.at(bits);
             left < 0;
                 count_per_length;
                 false;
 
-            bits++;
+            bits += 1;
 
         left > 0;
             under_subscribed = true;
@@ -1240,41 +1240,41 @@
                 count_per_length;
                 false;
 
-        next_code = vector , int , MAX_CODE_LENGTH + 1;
+        next_code = vector{int}(MAX_CODE_LENGTH + 1);
         code = 0;
         bits = 1;
         bits <= MAX_CODE_LENGTH;
-            code = code + count_per_length_at , bits - 1 << 1;
-            next_code_at , bits = code;
-            bits++;
+            code = (code + count_per_length.at(bits - 1)) << 1;
+            next_code.at(bits) = code;
+            bits += 1;
 
-        root_bits = min_int , ROOT_BITS , max_length;
+        root_bits = min_int(ROOT_BITS, max_length);
         root_count = 1 << root_bits;
-        root_resize , root_count;
+        root.resize(root_count);
         slot = 0;
         slot < root_count;
-            blank = DecodeEntry;
-            blank_symbol = -1;
-            blank_bits = 0;
-            blank_sub_table = -1;
-            root_at , slot = blank;
-            ++slot;
+            blank = DecodeEntry();
+            blank.symbol = -1;
+            blank.bits = 0;
+            blank.sub_table = -1;
+            root.at(slot) = blank;
+            slot += 1;
 
         root_bits = root_bits;
 
         symbol = 0;
-        symbol < lengths_size;
-            length = lengths_at , symbol;
+        symbol < lengths.size();
+            length = lengths.at(symbol);
             length > 0;
-                assigned = next_code_at , length;
-                next_code_at , length += 1;
-                index = reverse_bits , assigned , length;
+                assigned = next_code.at(length);
+                next_code.at(length) += 1;
+                index = reverse_bits(assigned, length);
                 length <= root_bits;
-                    fill_root , index , length , symbol , root_bits;
+                    fill_root(index, length, symbol, root_bits);
 
-                    fill_sub , index , length , symbol , root_bits;
+                    fill_sub(index, length, symbol, root_bits);
 
-            ++symbol;
+            symbol += 1;
 
         count_per_length;
         next_code;
@@ -1286,72 +1286,72 @@
         limit = 1 << root_bits;
         slot = index;
         slot < limit;
-            entry = DecodeEntry;
-            entry_symbol = symbol;
-            entry_bits = length;
-            entry_sub_table = -1;
-            entry_sub_bits = 0;
-            root_at , slot = entry;
+            entry = DecodeEntry();
+            entry.symbol = symbol;
+            entry.bits = length;
+            entry.sub_table = -1;
+            entry.sub_bits = 0;
+            root.at(slot) = entry;
             slot += stride;
 
     // Route a long code through a secondary table. The root entry records
     // where the secondary table starts and how many extra bits it consumes.
 
-        root_index = index & 1 << root_bits - 1;
+        root_index = index & ((1 << root_bits) - 1);
         extra = length - root_bits;
-        anchor = root_at , root_index_sub_table;
+        anchor = root.at(root_index).sub_table;
         anchor < 0;
-            anchor = sub_size;
+            anchor = sub.size();
             span = 1 << SUB_BITS;
             i = 0;
             i < span;
-                blank = DecodeEntry;
-                blank_symbol = -1;
-                blank_bits = 0;
-                blank_sub_table = -1;
-                sub_push_back , blank;
-                ++i;
+                blank = DecodeEntry();
+                blank.symbol = -1;
+                blank.bits = 0;
+                blank.sub_table = -1;
+                sub.push_back(blank);
+                i += 1;
 
-            link = DecodeEntry;
-            link_symbol = -1;
-            link_bits = root_bits;
-            link_sub_table = anchor;
-            link_sub_bits = SUB_BITS;
-            root_at , root_index = link;
+            link = DecodeEntry();
+            link.symbol = -1;
+            link.bits = root_bits;
+            link.sub_table = anchor;
+            link.sub_bits = SUB_BITS;
+            root.at(root_index) = link;
 
-        sub_index = index >> root_bits & 1 << SUB_BITS - 1;
+        sub_index = (index >> root_bits) & ((1 << SUB_BITS) - 1);
         stride = 1 << extra;
         limit = 1 << SUB_BITS;
         slot = sub_index;
         slot < limit;
-            entry = DecodeEntry;
-            entry_symbol = symbol;
-            entry_bits = extra;
-            entry_sub_table = -1;
-            entry_sub_bits = 0;
-            sub_at , anchor + slot = entry;
+            entry = DecodeEntry();
+            entry.symbol = symbol;
+            entry.bits = extra;
+            entry.sub_table = -1;
+            entry.sub_bits = 0;
+            sub.at(anchor + slot) = entry;
             slot += stride;
 
     // Decode one symbol. Peek enough bits for the root lookup, consume only
     // as many as the code actually uses, and follow a link if present.
 
-        peeked = reader_peek_bits , root_bits;
-        entry = root_at , peeked;
-        entry_bits == 0;
+        peeked = reader.peek_bits(root_bits);
+        entry = root.at(peeked);
+        entry.bits == 0;
             -1;
 
-        !entry_is_link;
-            reader_drop_bits , entry_bits;
-            entry_symbol;
+        !entry.is_link();
+            reader.drop_bits(entry.bits);
+            entry.symbol;
 
-        reader_drop_bits , root_bits;
-        extra = reader_peek_bits , entry_sub_bits;
-        leaf = sub_at , entry_sub_table + extra;
-        leaf_bits == 0;
+        reader.drop_bits(root_bits);
+        extra = reader.peek_bits(entry.sub_bits);
+        leaf = sub.at(entry.sub_table + extra);
+        leaf.bits == 0;
             -1;
 
-        reader_drop_bits , leaf_bits;
-        leaf_symbol;
+        reader.drop_bits(leaf.bits);
+        leaf.symbol;
 
     // Slow reference decoder that walks the code bit by bit. Used by the
     // harness to cross-check the table-driven path.
@@ -1360,29 +1360,29 @@
         length = 0;
         first = 0;
         index = 0;
-        count_per_length = vector , int , MAX_CODE_LENGTH + 1;
+        count_per_length = vector{int}(MAX_CODE_LENGTH + 1);
         i = 0;
         i <= MAX_CODE_LENGTH;
-            count_per_length_at , i = 0;
-            i++;
+            count_per_length.at(i) = 0;
+            i += 1;
 
         symbol = 0;
-        symbol < lengths_size;
-            lengths_at , symbol > 0;
-                count_per_length_at , lengths_at , symbol += 1;
+        symbol < lengths.size();
+            lengths.at(symbol) > 0;
+                count_per_length.at(lengths.at(symbol)) += 1;
 
-            symbol++;
+            symbol += 1;
 
         length < MAX_CODE_LENGTH;
-            length++;
-            code = code | reader_get_bit;
-            count = count_per_length_at , length;
+            length += 1;
+            code = code | reader.get_bit();
+            count = count_per_length.at(length);
             code - first < count;
                 count_per_length;
-                index + code - first;
+                index + (code - first);
 
             index += count;
-            first = first + count << 1;
+            first = (first + count) << 1;
             code = code << 1;
 
         count_per_length;
@@ -1416,30 +1416,30 @@
 
         length >= MIN_MATCH;
 
-        is_literal;
+        is_literal();
             8;
 
         // A rough model: the length code plus the distance code plus their
         // extra bits. Good enough to decide between block types.
-        24 + extra_length_bits , length_code_of , length + extra_distance_bits , distance_code_of , distance;
+        24 + extra_length_bits(length_code_of(length)) + extra_distance_bits(distance_code_of(distance));
 
         // A candidate match returned by the match finder.
 
         length >= MIN_MATCH && distance > 0 && distance <= MAX_DISTANCE;
 
-        length != other_length;
-            length > other_length;
+        length != other.length;
+            length > other.length;
 
         // Equal lengths: prefer the nearer match, its distance code is
         // cheaper to encode.
-        distance < other_distance;
+        distance < other.distance;
 
 // --- Compression levels --------------------------------------------------
 
 // The knobs the match finder honours. Higher levels search longer chains and
 // enable lazy matching; the lowest level skips the finder entirely.
 
-        clamped = clamp_int , level , 0 , 9;
+        clamped = clamp_int(level, 0, 9);
         clamped == 0;
             good_length = 0;
             max_lazy = 0;
@@ -1499,19 +1499,19 @@
 // table, and every head entry starts a chain of earlier positions with the
 // same hash, threaded through a `previous` array indexed by window offset.
 
-        head_clear;
-        head_resize , HASH_SIZE;
+        head.clear();
+        head.resize(HASH_SIZE);
         i = 0;
         i < HASH_SIZE;
-            head_at , i = NO_POSITION;
-            i++;
+            head.at(i) = NO_POSITION;
+            i += 1;
 
-        previous_clear;
-        previous_resize , WINDOW_SIZE;
+        previous.clear();
+        previous.resize(WINDOW_SIZE);
         i = 0;
         i < WINDOW_SIZE;
-            previous_at , i = NO_POSITION;
-            ++i;
+            previous.at(i) = NO_POSITION;
+            i += 1;
 
         running_hash = 0;
         inserted = 0;
@@ -1520,25 +1520,25 @@
     // the new byte, and mask back down to HASH_BITS. After MIN_MATCH updates
     // the accumulator depends on exactly the last three bytes.
 
-        running_hash = running_hash << HASH_SHIFT ^ next_byte & BYTE_MASK & HASH_MASK;
+        running_hash = ((running_hash << HASH_SHIFT) ^ (next_byte & BYTE_MASK)) & HASH_MASK;
         running_hash;
 
     // Compute the hash of the three bytes at `position` without touching the
     // rolling state; used when the finder skips ahead.
 
-        position + MIN_MATCH > input_size;
+        position + MIN_MATCH > input.size();
             0;
 
         h = 0;
-        h = h << HASH_SHIFT ^ input_at , position & HASH_MASK;
-        h = h << HASH_SHIFT ^ input_at , position + 1 & HASH_MASK;
-        h = h << HASH_SHIFT ^ input_at , position + 2 & HASH_MASK;
+        h = ((h << HASH_SHIFT) ^ input.at(position)) & HASH_MASK;
+        h = ((h << HASH_SHIFT) ^ input.at(position + 1)) & HASH_MASK;
+        h = ((h << HASH_SHIFT) ^ input.at(position + 2)) & HASH_MASK;
         h;
 
         slot = position & WINDOW_MASK;
-        previous_at , slot = head_at , hash_value;
-        head_at , hash_value = position;
-        ++inserted;
+        previous.at(slot) = head.at(hash_value);
+        head.at(hash_value) = position;
+        inserted += 1;
 
     // Insert every position in [from, to) so that later searches see them.
     // The encoder calls this after emitting a long match, because the bytes
@@ -1546,20 +1546,20 @@
 
         position = from;
         position < to;
-            position + MIN_MATCH <= input_size;
-                insert , hash_at , input , position , position;
+            position + MIN_MATCH <= input.size();
+                insert(hash_at(input, position), position);
 
-            ++position;
+            position += 1;
 
     // Length of the common prefix of the two positions, capped at `limit`.
     // This is the innermost loop of the whole encoder.
 
         length = 0;
         length < limit;
-            input_at , a + length != input_at , b + length;
+            input.at(a + length) != input.at(b + length);
                 length;
 
-            length++;
+            length += 1;
 
         limit;
 
@@ -1567,27 +1567,27 @@
     // walk stops at the chain limit, at the window edge, or as soon as a
     // match reaches `nice_length`.
 
-        best = Match;
-        best_length = 0;
-        best_distance = 0;
-        best_position = position;
+        best = Match();
+        best.length = 0;
+        best.distance = 0;
+        best.position = position;
 
-        position + MIN_MATCH > input_size;
+        position + MIN_MATCH > input.size();
             best;
 
-        limit = min_int , MAX_MATCH , input_size - position;
+        limit = min_int(MAX_MATCH, input.size() - position);
         limit < MIN_MATCH;
             best;
 
-        hash_value = hash_at , input , position;
-        candidate = head_at , hash_value;
-        chain_left = chain_limit_of , previous_length , config;
-        window_floor = max_int , 0 , position - MAX_DISTANCE;
+        hash_value = hash_at(input, position);
+        candidate = head.at(hash_value);
+        chain_left = chain_limit_of(previous_length, config);
+        window_floor = max_int(0, position - MAX_DISTANCE);
 
         candidate >= 0;
             chain_left <= 0;
 
-            chain_left--;
+            chain_left -= 1;
             candidate < window_floor;
 
             candidate >= position;
@@ -1595,24 +1595,24 @@
             // Cheap rejection: the byte one past the current best has to
             // match, otherwise the candidate cannot possibly be longer.
             worth_trying = true;
-            best_length > 0;
-                input_at , candidate + best_length != input_at , position + best_length;
+            best.length > 0;
+                input.at(candidate + best.length) != input.at(position + best.length);
                     worth_trying = false;
 
             worth_trying;
-                length = match_length , input , candidate , position , limit;
+                length = match_length(input, candidate, position, limit);
                 length >= MIN_MATCH;
-                    length > best_length;
-                        best_length = length;
-                        best_distance = position - candidate;
-                        length >= config_nice_length;
+                    length > best.length;
+                        best.length = length;
+                        best.distance = position - candidate;
+                        length >= config.nice_length;
                             best;
 
-            candidate = previous_at , candidate & WINDOW_MASK;
+            candidate = previous.at(candidate & WINDOW_MASK);
 
         best;
 
-        config_chain_limit_for , previous_length;
+        config.chain_limit_for(previous_length);
 
         // Diagnostic: average chain length over the whole head table.
 
@@ -1620,19 +1620,19 @@
         chains = 0;
         i = 0;
         i < HASH_SIZE;
-            node = head_at , i;
+            node = head.at(i);
             node >= 0;
-                ++chains;
+                chains += 1;
                 depth = 0;
                 node >= 0;
                     depth >= 64;
 
-                    ++depth;
-                    node = previous_at , node & WINDOW_MASK;
+                    depth += 1;
+                    node = previous.at(node & WINDOW_MASK);
 
                 total += depth;
 
-            ++i;
+            i += 1;
 
         chains == 0;
             0;
@@ -1645,12 +1645,12 @@
 // resolve back references; the encoder keeps the whole input in memory and
 // uses absolute positions instead, so the window is decode-side only.
 
-        bytes_clear;
-        bytes_resize , capacity;
+        bytes.clear();
+        bytes.resize(capacity);
         i = 0;
         i < capacity;
-            bytes_at , i = 0;
-            ++i;
+            bytes.at(i) = 0;
+            i += 1;
 
         capacity = capacity;
         mask = capacity - 1;
@@ -1663,15 +1663,15 @@
 
         position & mask;
 
-        bytes_at , write_position = value & BYTE_MASK;
-        write_position = write_position + 1 & mask;
+        bytes.at(write_position) = value & BYTE_MASK;
+        write_position = (write_position + 1) & mask;
         filled < capacity;
-            ++filled;
+            filled += 1;
 
             // Byte `distance` positions back from the write cursor.
 
-        index = write_position - distance & mask;
-        bytes_at , index & BYTE_MASK;
+        index = (write_position - distance) & mask;
+        bytes.at(index) & BYTE_MASK;
 
         distance > 0 && distance <= filled;
 
@@ -1680,20 +1680,20 @@
     // because each byte is written before the byte that references it is
     // read, which is exactly the run-extension trick LZ77 relies on.
 
-        !can_reference , distance;
+        !can_reference(distance);
             false;
 
         i = 0;
         i < length;
-            value = behind , distance;
-            sink_push , value;
-            push , value;
-            i++;
+            value = behind(distance);
+            sink.push(value);
+            push(value);
+            i += 1;
 
         true;
 
-        sink_push , value & BYTE_MASK;
-        push , value & BYTE_MASK;
+        sink.push(value & BYTE_MASK);
+        push(value & BYTE_MASK);
 
 // --- LZ77 encoder --------------------------------------------------------
 
@@ -1704,101 +1704,101 @@
 // a literal and the longer match is taken instead. This costs one extra
 // chain walk per position but typically buys a few percent.
 
-        config_from_level , level;
-        chain_init;
-        tokens_clear;
+        config.from_level(level);
+        chain.init();
+        tokens.clear();
         literal_count = 0;
         match_count = 0;
         matched_bytes = 0;
         literal_bytes = 0;
 
-        tokens_size;
+        tokens.size();
 
-        token = Token;
-        token_literal = value & BYTE_MASK;
-        token_length = 0;
-        token_distance = 0;
-        tokens_push_back , token;
-        ++literal_count;
-        ++literal_bytes;
+        token = Token();
+        token.literal = value & BYTE_MASK;
+        token.length = 0;
+        token.distance = 0;
+        tokens.push_back(token);
+        literal_count += 1;
+        literal_bytes += 1;
 
-        token = Token;
-        token_literal = 0;
-        token_length = length;
-        token_distance = distance;
-        tokens_push_back , token;
-        ++match_count;
+        token = Token();
+        token.literal = 0;
+        token.length = length;
+        token.distance = distance;
+        tokens.push_back(token);
+        match_count += 1;
         matched_bytes += length;
 
     // The main loop. `position` is the next byte to encode; `pending`
     // carries the match found at the previous position while the encoder
     // decides whether to keep it.
 
-        tokens_clear;
-        config_stored_only;
+        tokens.clear();
+        config.stored_only;
             i = 0;
-            i < input_size;
-                push_literal , input_at , i;
-                i++;
+            i < input.size();
+                push_literal(input.at(i));
+                i += 1;
 
         position = 0;
         have_pending = false;
-        pending = Match;
-        pending_length = 0;
-        pending_distance = 0;
-        pending_position = 0;
+        pending = Match();
+        pending.length = 0;
+        pending.distance = 0;
+        pending.position = 0;
 
-        position < input_size;
-            current = Match;
-            current_length = 0;
-            current_distance = 0;
-            current_position = position;
-            position + MIN_MATCH <= input_size;
+        position < input.size();
+            current = Match();
+            current.length = 0;
+            current.distance = 0;
+            current.position = position;
+            position + MIN_MATCH <= input.size();
                 previous_length = 0;
                 have_pending;
-                    previous_length = pending_length;
+                    previous_length = pending.length;
 
-                current = chain_find_best , input , position , previous_length , config;
+                current = chain.find_best(input, position, previous_length, config);
 
             have_pending;
-                current_length > pending_length;
+                current.length > pending.length;
                     // The later match wins: flush the deferred byte as a
                     // literal and defer again on the new candidate.
-                    push_literal , input_at , pending_position;
-                    insert_position , input , pending_position;
+                    push_literal(input.at(pending.position));
+                    insert_position(input, pending.position);
                     pending = current;
-                    pending_position = position;
-                    position++;
+                    pending.position = position;
+                    position += 1;
 
                     // Keep the deferred match.
-                    push_match , pending_length , pending_distance;
-                    start = pending_position;
-                    stop = start + pending_length;
-                    chain_insert_range , input , start , stop;
+                    push_match(pending.length, pending.distance);
+                    start = pending.position;
+                    stop = start + pending.length;
+                    chain.insert_range(input, start, stop);
                     have_pending = false;
                     position = stop;
 
-                current_valid;
-                    config_use_lazy && current_length < config_max_lazy;
+                current.valid();
+                    config.use_lazy && current.length < config.max_lazy;
                         pending = current;
-                        pending_position = position;
+                        pending.position = position;
                         have_pending = true;
-                        insert_position , input , position;
-                        ++position;
+                        insert_position(input, position);
+                        position += 1;
 
-                        push_match , current_length , current_distance;
-                        chain_insert_range , input , position , position + current_length;
-                        position += current_length;
+                        push_match(current.length, current.distance);
+                        chain.insert_range(input, position, position + current.length);
+                        position += current.length;
 
-                    push_literal , input_at , position;
-                    insert_position , input , position;
-                    ++position;
+                    push_literal(input.at(position));
+                    insert_position(input, position);
+                    position += 1;
 
         have_pending;
-            push_literal , input_at , pending_position;
+            push_literal(input.at(pending.position));
 
-        position + MIN_MATCH <= input_size;
-            chain_insert , chain_hash_at , input , position , position;
+        position + MIN_MATCH <= input.size();
+            chain.insert(chain.hash_at(input, position), position);
 
     // Ratio of matched bytes to total bytes, in percent. The block splitter
     // uses it to decide whether a stored block would be smaller.
@@ -1807,13 +1807,13 @@
         total == 0;
             0;
 
-        matched_bytes * 100 / total;
+        (matched_bytes * 100) / total;
 
         total = 0;
         i = 0;
-        i < tokens_size;
-            total += tokens_at , i_cost_estimate;
-            i++;
+        i < tokens.size();
+            total += tokens.at(i).cost_estimate();
+            i += 1;
 
         total;
 
@@ -1821,26 +1821,26 @@
 
 // Replays a token stream through a sliding window.
 
-    window = SlidingWindow;
-    window_init , WINDOW_SIZE;
+    window = SlidingWindow();
+    window.init(WINDOW_SIZE);
     i = 0;
-    i < tokens_size;
-        token = tokens_at , i;
-        token_is_literal;
-            window_emit_literal , output , token_literal;
+    i < tokens.size();
+        token = tokens.at(i);
+        token.is_literal();
+            window.emit_literal(output, token.literal);
 
-            !window_can_reference , token_distance;
+            !window.can_reference(token.distance);
                 window;
-                Status_BadDistance;
+                Status::BadDistance;
 
-            !window_copy_match , output , token_distance , token_length;
+            !window.copy_match(output, token.distance, token.length);
                 window;
-                Status_CorruptStream;
+                Status::CorruptStream;
 
-        ++i;
+        i += 1;
 
     window;
-    Status_Ok;
+    Status::Ok;
 
 // --- Deflate symbol tables ----------------------------------------------
 
@@ -1854,86 +1854,86 @@
 //
 // and each base is the previous base plus 2^extra of the previous code.
 
-        build_length_tables;
-        build_distance_tables;
-        build_code_length_order;
-        build_reverse_maps;
+        build_length_tables();
+        build_distance_tables();
+        build_code_length_order();
+        build_reverse_maps();
         ready = true;
 
-        length_base_clear;
-        length_extra_clear;
-        length_base_resize , 29;
-        length_extra_resize , 29;
+        length_base.clear();
+        length_extra.clear();
+        length_base.resize(29);
+        length_extra.resize(29);
 
         running = 3;
         code = 0;
         code < 28;
-            extra = code - 4 / 4;
+            extra = (code - 4) / 4;
             code < 8;
                 extra = 0;
 
             extra > 5;
                 extra = 5;
 
-            length_extra_at , code = extra;
-            length_base_at , code = running;
+            length_extra.at(code) = extra;
+            length_base.at(code) = running;
             running += 1 << extra;
-            ++code;
+            code += 1;
 
         // The final code is the special case: length 258 with no extra bits.
-        length_extra_at , 28 = 0;
-        length_base_at , 28 = MAX_MATCH;
+        length_extra.at(28) = 0;
+        length_base.at(28) = MAX_MATCH;
 
-        distance_base_clear;
-        distance_extra_clear;
-        distance_base_resize , DISTANCE_SYMBOLS;
-        distance_extra_resize , DISTANCE_SYMBOLS;
+        distance_base.clear();
+        distance_extra.clear();
+        distance_base.resize(DISTANCE_SYMBOLS);
+        distance_extra.resize(DISTANCE_SYMBOLS);
 
         running = 1;
         code = 0;
         code < DISTANCE_SYMBOLS;
-            extra = code / 2 - 1;
+            extra = (code / 2) - 1;
             code < 4;
                 extra = 0;
 
             extra > 13;
                 extra = 13;
 
-            distance_extra_at , code = extra;
-            distance_base_at , code = running;
+            distance_extra.at(code) = extra;
+            distance_base.at(code) = running;
             running += 1 << extra;
-            ++code;
+            code += 1;
 
     // The code length alphabet is transmitted in a permuted order chosen so
     // that the rarely used lengths sit at the end and can be truncated.
 
-        code_length_order_clear;
-        code_length_order_push_back , 16;
-        code_length_order_push_back , 17;
-        code_length_order_push_back , 18;
-        code_length_order_push_back , 0;
+        code_length_order.clear();
+        code_length_order.push_back(16);
+        code_length_order.push_back(17);
+        code_length_order.push_back(18);
+        code_length_order.push_back(0);
         offset = 8;
         step = 0;
         step < 8;
-            code_length_order_push_back , offset;
-            code_length_order_push_back , BYTE_BITS - 1 - step - 1 + 1;
-            ++offset;
-            ++step;
+            code_length_order.push_back(offset);
+            code_length_order.push_back(BYTE_BITS - 1 - step - 1 + 1);
+            offset += 1;
+            step += 1;
 
         // Regenerate the tail deterministically: 8,7,9,6,10,5,11,4,12,3,
         // 13,2,14,1,15 alternates outward from the middle of the alphabet.
-        code_length_order_clear;
-        code_length_order_push_back , 16;
-        code_length_order_push_back , 17;
-        code_length_order_push_back , 18;
-        code_length_order_push_back , 0;
+        code_length_order.clear();
+        code_length_order.push_back(16);
+        code_length_order.push_back(17);
+        code_length_order.push_back(18);
+        code_length_order.push_back(0);
         high = 8;
         low = 7;
         high <= 15;
-            code_length_order_push_back , high;
-            code_length_order_push_back , low;
-            ++high;
-            --low;
+            code_length_order.push_back(high);
+            code_length_order.push_back(low);
+            high += 1;
+            low -= 1;
 
     // Invert the base tables into direct lookups so the encoder does not
     // binary search on every token. `length_to_code` has MAX_MATCH + 1
@@ -1941,70 +1941,70 @@
     // over 32768 distances would be wasteful: the low 256 distances index
     // directly, the rest index by distance >> 7.
 
-        length_to_code_clear;
-        length_to_code_resize , MAX_MATCH + 1;
+        length_to_code.clear();
+        length_to_code.resize(MAX_MATCH + 1);
         length = 0;
         length <= MAX_MATCH;
-            length_to_code_at , length = 0;
-            length++;
+            length_to_code.at(length) = 0;
+            length += 1;
 
         code = 0;
         code < 29;
-            anchor = length_base_at , code;
-            span = 1 << length_extra_at , code;
+            anchor = length_base.at(code);
+            span = 1 << length_extra.at(code);
             offset = 0;
             offset < span;
                 value = anchor + offset;
                 value <= MAX_MATCH;
-                    length_to_code_at , value = code;
+                    length_to_code.at(value) = code;
 
-                offset++;
+                offset += 1;
 
-            ++code;
+            code += 1;
 
-        length_to_code_at , MAX_MATCH = 28;
+        length_to_code.at(MAX_MATCH) = 28;
 
-        distance_to_code_low_clear;
-        distance_to_code_low_resize , 257;
-        distance_to_code_high_clear;
-        distance_to_code_high_resize , 257;
+        distance_to_code_low.clear();
+        distance_to_code_low.resize(257);
+        distance_to_code_high.clear();
+        distance_to_code_high.resize(257);
         i = 0;
         i <= 256;
-            distance_to_code_low_at , i = 0;
-            distance_to_code_high_at , i = 0;
-            ++i;
+            distance_to_code_low.at(i) = 0;
+            distance_to_code_high.at(i) = 0;
+            i += 1;
 
         code = 0;
         code < DISTANCE_SYMBOLS;
-            anchor = distance_base_at , code;
-            span = 1 << distance_extra_at , code;
+            anchor = distance_base.at(code);
+            span = 1 << distance_extra.at(code);
             offset = 0;
             offset < span;
                 distance = anchor + offset;
                 distance <= 256;
-                    distance_to_code_low_at , distance = code;
+                    distance_to_code_low.at(distance) = code;
 
                     distance <= MAX_DISTANCE;
-                        bucket = distance - 1 >> 7;
+                        bucket = (distance - 1) >> 7;
                         bucket <= 256;
-                            distance_to_code_high_at , bucket = code;
+                            distance_to_code_high.at(bucket) = code;
 
-                offset++;
+                offset += 1;
 
-            ++code;
+            code += 1;
 
-        length_to_code_at , clamp_int , length , MIN_MATCH , MAX_MATCH;
+        length_to_code.at(clamp_int(length, MIN_MATCH, MAX_MATCH));
 
         distance <= 256;
-            distance_to_code_low_at , distance;
+            distance_to_code_low.at(distance);
 
-        distance_to_code_high_at , distance - 1 >> 7;
+        distance_to_code_high.at((distance - 1) >> 7);
 
-        code = length_code , length;
-        length - length_base_at , code;
+        code = length_code(length);
+        length - length_base.at(code);
 
-        code = distance_code , distance;
-        distance - distance_base_at , code;
+        code = distance_code(distance);
+        distance - distance_base.at(code);
 
 // Free-function forms used by `Token::cost_estimate`, which has no access to
 // a table instance. They recompute the same regular structure arithmetically.
@@ -2015,12 +2015,12 @@
     code < 8;
         0;
 
-    clamp_int , code - 4 / 4 , 0 , 5;
+    clamp_int((code - 4) / 4, 0, 5);
 
     code < 4;
         0;
 
-    clamp_int , code / 2 - 1 , 0 , 13;
+    clamp_int((code / 2) - 1, 0, 13);
 
     length >= MAX_MATCH;
         28;
@@ -2028,24 +2028,24 @@
     code = 0;
     anchor = 3;
     code < 28;
-        span = 1 << extra_length_bits , code;
+        span = 1 << extra_length_bits(code);
         length < anchor + span;
             code;
 
         anchor += span;
-        code++;
+        code += 1;
 
     28;
 
     code = 0;
     anchor = 1;
     code < DISTANCE_SYMBOLS;
-        span = 1 << extra_distance_bits , code;
+        span = 1 << extra_distance_bits(code);
         distance < anchor + span;
             code;
 
         anchor += span;
-        code++;
+        code += 1;
 
     DISTANCE_SYMBOLS - 1;
 
@@ -2053,27 +2053,27 @@
 // assignment rather than by a transmitted table: literals 0..143 get 8 bits,
 // 144..255 get 9, 256..279 get 7 and 280..287 get 8. Distances are all 5.
 
-    lengths_clear;
-    lengths_resize , MAX_SYMBOLS;
+    lengths.clear();
+    lengths.resize(MAX_SYMBOLS);
     symbol = 0;
     symbol < MAX_SYMBOLS;
         symbol < 144;
-            lengths_at , symbol = 8;
+            lengths.at(symbol) = 8;
         symbol < 256;
-            lengths_at , symbol = 9;
+            lengths.at(symbol) = 9;
         symbol < 280;
-            lengths_at , symbol = 7;
+            lengths.at(symbol) = 7;
 
-            lengths_at , symbol = 8;
+            lengths.at(symbol) = 8;
 
-        symbol++;
+        symbol += 1;
 
-    lengths_clear;
-    lengths_resize , DISTANCE_SYMBOLS + 2;
+    lengths.clear();
+    lengths.resize(DISTANCE_SYMBOLS + 2);
     symbol = 0;
     symbol < DISTANCE_SYMBOLS + 2;
-        lengths_at , symbol = 5;
-        ++symbol;
+        lengths.at(symbol) = 5;
+        symbol += 1;
 
 // --- Code length run encoding -------------------------------------------
 
@@ -2086,46 +2086,46 @@
 //
 // `RunEncoder` turns a length vector into that symbol stream.
 
-        symbols_clear;
-        extras_clear;
-        extra_bits_clear;
+        symbols.clear();
+        extras.clear();
+        extra_bits.clear();
 
-        symbols_size;
+        symbols.size();
 
-        symbols_push_back , symbol;
-        extras_push_back , extra;
-        extra_bits_push_back , bits;
+        symbols.push_back(symbol);
+        extras.push_back(extra);
+        extra_bits.push_back(bits);
 
-        clear;
+        clear();
         index = 0;
         previous = -1;
         index < used;
-            current = lengths_at , index;
+            current = lengths.at(index);
             // Measure the run of equal lengths starting here.
             run = 1;
             index + run < used;
-                lengths_at , index + run != current;
+                lengths.at(index + run) != current;
 
-                ++run;
+                run += 1;
 
             current == 0;
                 // Zero runs use the dedicated 17 / 18 symbols.
                 run >= 11;
-                    take = min_int , run , 138;
-                    emit , 18 , take - 11 , 7;
+                    take = min_int(run, 138);
+                    emit(18, take - 11, 7);
                     run -= take;
                     index += take;
 
                 run >= 3;
-                    take = min_int , run , 10;
-                    emit , 17 , take - 3 , 3;
+                    take = min_int(run, 10);
+                    emit(17, take - 3, 3);
                     run -= take;
                     index += take;
 
                 run > 0;
-                    emit , 0 , 0 , 0;
-                    --run;
-                    index++;
+                    emit(0, 0, 0);
+                    run -= 1;
+                    index += 1;
 
                 previous = 0;
 
@@ -2133,39 +2133,39 @@
                 // symbol 16 for the remainder.
                 remaining = run;
                 previous != current;
-                    emit , current , 0 , 0;
-                    remaining--;
-                    index++;
+                    emit(current, 0, 0);
+                    remaining -= 1;
+                    index += 1;
 
                 remaining >= 3;
-                    take = min_int , remaining , 6;
-                    emit , 16 , take - 3 , 2;
+                    take = min_int(remaining, 6);
+                    emit(16, take - 3, 2);
                     remaining -= take;
                     index += take;
 
                 remaining > 0;
-                    emit , current , 0 , 0;
-                    remaining--;
-                    ++index;
+                    emit(current, 0, 0);
+                    remaining -= 1;
+                    index += 1;
 
                 previous = current;
 
                 // Histogram over the code length alphabet, used to build its own code.
 
         i = 0;
-        i < symbols_size;
-            frequencies_add , symbols_at , i;
-            ++i;
+        i < symbols.size();
+            frequencies.add(symbols.at(i));
+            i += 1;
 
 // --- Deflate encoder -----------------------------------------------------
 
 // The full pipeline: LZ77 the input, histogram the resulting tokens, build
 // dynamic codes, compare the three block encodings and emit the cheapest.
 
-        tables_init;
-        lz_init , level;
-        writer_init , BitOrder_LsbFirst;
-        config_from_level , level;
+        tables.init();
+        lz.init(level);
+        writer.init(BitOrder::LsbFirst);
+        config.from_level(level);
         blocks_stored = 0;
         blocks_fixed = 0;
         blocks_dynamic = 0;
@@ -2180,7 +2180,7 @@
         total = 3;
         symbol = 0;
         symbol < LITERAL_SYMBOLS;
-            count = literals_at , symbol;
+            count = literals.at(symbol);
             count > 0;
                 bits = 8;
                 symbol >= 144;
@@ -2193,49 +2193,49 @@
                     bits = 8;
 
                 total += count * bits;
-                total += count * extra_length_bits , symbol - 257;
+                total += count * extra_length_bits(symbol - 257);
 
-            ++symbol;
+            symbol += 1;
 
         symbol = 0;
         symbol < DISTANCE_SYMBOLS;
-            count = distances_at , symbol;
+            count = distances.at(symbol);
             count > 0;
-                total += count * 5 + extra_distance_bits , symbol;
+                total += count * (5 + extra_distance_bits(symbol));
 
-            ++symbol;
+            symbol += 1;
 
         total;
 
         total = 3 + header_bits;
-        total += literal_tree_encoded_bits , literals;
-        total += distance_tree_encoded_bits , distances;
+        total += literal_tree.encoded_bits(literals);
+        total += distance_tree.encoded_bits(distances);
         symbol = 257;
         symbol < LITERAL_SYMBOLS;
-            total += literals_at , symbol * extra_length_bits , symbol - 257;
-            ++symbol;
+            total += literals.at(symbol) * extra_length_bits(symbol - 257);
+            symbol += 1;
 
         symbol = 0;
         symbol < DISTANCE_SYMBOLS;
-            total += distances_at , symbol * extra_distance_bits , symbol;
-            symbol++;
+            total += distances.at(symbol) * extra_distance_bits(symbol);
+            symbol += 1;
 
         total;
 
         // --- Histograms ------------------------------------------------------
 
         i = 0;
-        i < tokens_size;
-            token = tokens_at , i;
-            token_is_literal;
-                literals_add , token_literal & BYTE_MASK;
+        i < tokens.size();
+            token = tokens.at(i);
+            token.is_literal();
+                literals.add(token.literal & BYTE_MASK);
 
-                literals_add , 257 + tables_length_code , token_length;
-                distances_add , tables_distance_code , token_distance;
+                literals.add(257 + tables.length_code(token.length));
+                distances.add(tables.distance_code(token.distance));
 
-            ++i;
+            i += 1;
 
-        literals_add , END_OF_BLOCK;
+        literals.add(END_OF_BLOCK);
 
         // --- Block emission --------------------------------------------------
 
@@ -2243,32 +2243,32 @@
         final_block;
             flag = 1;
 
-        writer_put_bits_lsb , flag , 1;
-        kind == BlockType_Stored;
-            writer_put_bits_lsb , 0 , 2;
-        kind == BlockType_Fixed;
-            writer_put_bits_lsb , 1 , 2;
+        writer.put_bits_lsb(flag, 1);
+        kind == BlockType::Stored;
+            writer.put_bits_lsb(0, 2);
+        kind == BlockType::Fixed;
+            writer.put_bits_lsb(1, 2);
 
-            writer_put_bits_lsb , 2 , 2;
+            writer.put_bits_lsb(2, 2);
 
-        write_block_header , BlockType_Stored , final_block;
-        writer_align;
-        writer_put_short , count & SHORT_MASK;
-        writer_put_short , ~count & SHORT_MASK;
-        writer_raw_copy , input , from , count;
-        ++blocks_stored;
+        write_block_header(BlockType::Stored, final_block);
+        writer.align();
+        writer.put_short(count & SHORT_MASK);
+        writer.put_short((~count) & SHORT_MASK);
+        writer.raw_copy(input, from, count);
+        blocks_stored += 1;
 
-        write_block_header , BlockType_Fixed , final_block;
-        literal_lengths = vector , int;
-        distance_lengths = vector , int;
-        build_fixed_literal_lengths , literal_lengths;
-        build_fixed_distance_lengths , distance_lengths;
-        literal_table = EncodeTable;
-        distance_table = EncodeTable;
-        literal_table_build_from_lengths , literal_lengths;
-        distance_table_build_from_lengths , distance_lengths;
-        write_token_stream , tokens , literal_table , distance_table;
-        blocks_fixed++;
+        write_block_header(BlockType::Fixed, final_block);
+        literal_lengths = vector{int}();
+        distance_lengths = vector{int}();
+        build_fixed_literal_lengths(literal_lengths);
+        build_fixed_distance_lengths(distance_lengths);
+        literal_table = EncodeTable();
+        distance_table = EncodeTable();
+        literal_table.build_from_lengths(literal_lengths);
+        distance_table.build_from_lengths(distance_lengths);
+        write_token_stream(tokens, literal_table, distance_table);
+        blocks_fixed += 1;
         literal_lengths;
         distance_lengths;
 
@@ -2276,134 +2276,134 @@
     // length code lengths in permuted order, and the run encoded lengths.
 
         bits_written = 0;
-        writer_put_bits_lsb , literal_used - 257 , 5;
-        writer_put_bits_lsb , distance_used - 1 , 5;
+        writer.put_bits_lsb(literal_used - 257, 5);
+        writer.put_bits_lsb(distance_used - 1, 5);
 
         // Trim trailing zero entries from the permuted code length vector.
         transmitted = CODE_LENGTH_SYMBOLS;
         transmitted > 4;
-            slot = tables_code_length_order_at , transmitted - 1;
-            code_length_lengths_at , slot != 0;
+            slot = tables.code_length_order.at(transmitted - 1);
+            code_length_lengths.at(slot) != 0;
 
-            transmitted--;
+            transmitted -= 1;
 
-        writer_put_bits_lsb , transmitted - 4 , 4;
+        writer.put_bits_lsb(transmitted - 4, 4);
         bits_written += 14;
 
         i = 0;
         i < transmitted;
-            slot = tables_code_length_order_at , i;
-            writer_put_bits_lsb , code_length_lengths_at , slot , 3;
+            slot = tables.code_length_order.at(i);
+            writer.put_bits_lsb(code_length_lengths.at(slot), 3);
             bits_written += 3;
-            i++;
+            i += 1;
 
         i = 0;
-        i < runs_symbols_size;
-            symbol = runs_symbols_at , i;
-            code_length_table_emit_reversed , writer , symbol;
-            bits_written += code_length_table_length_of , symbol;
-            extra_count = runs_extra_bits_at , i;
+        i < runs.symbols.size();
+            symbol = runs.symbols.at(i);
+            code_length_table.emit_reversed(writer, symbol);
+            bits_written += code_length_table.length_of(symbol);
+            extra_count = runs.extra_bits.at(i);
             extra_count > 0;
-                writer_put_bits_lsb , runs_extras_at , i , extra_count;
+                writer.put_bits_lsb(runs.extras.at(i), extra_count);
                 bits_written += extra_count;
 
-            ++i;
+            i += 1;
 
         literal_lengths;
         distance_lengths;
         bits_written;
 
         i = 0;
-        i < tokens_size;
-            token = tokens_at , i;
-            token_is_literal;
-                literal_table_emit_reversed , writer , token_literal & BYTE_MASK;
+        i < tokens.size();
+            token = tokens.at(i);
+            token.is_literal();
+                literal_table.emit_reversed(writer, token.literal & BYTE_MASK);
 
-                length_code = tables_length_code , token_length;
-                literal_table_emit_reversed , writer , 257 + length_code;
-                length_extra = tables_length_extra_at , length_code;
+                length_code = tables.length_code(token.length);
+                literal_table.emit_reversed(writer, 257 + length_code);
+                length_extra = tables.length_extra.at(length_code);
                 length_extra > 0;
-                    writer_put_bits_lsb , token_length - tables_length_base_at , length_code , length_extra;
+                    writer.put_bits_lsb(token.length - tables.length_base.at(length_code), length_extra);
 
-                distance_code = tables_distance_code , token_distance;
-                distance_table_emit_reversed , writer , distance_code;
-                distance_extra = tables_distance_extra_at , distance_code;
+                distance_code = tables.distance_code(token.distance);
+                distance_table.emit_reversed(writer, distance_code);
+                distance_extra = tables.distance_extra.at(distance_code);
                 distance_extra > 0;
-                    writer_put_bits_lsb , token_distance - tables_distance_base_at , distance_code , distance_extra;
+                    writer.put_bits_lsb(token.distance - tables.distance_base.at(distance_code), distance_extra);
 
-            i++;
+            i += 1;
 
-        literal_table_emit_reversed , writer , END_OF_BLOCK;
+        literal_table.emit_reversed(writer, END_OF_BLOCK);
 
         // Build the dynamic codes for a token stream and emit the block.
 
-        literals = FrequencyTable;
-        distances = FrequencyTable;
-        literals_init , MAX_SYMBOLS;
-        distances_init , DISTANCE_SYMBOLS;
-        histogram_tokens , tokens , literals , distances;
-        distances_ensure_two_symbols;
+        literals = FrequencyTable();
+        distances = FrequencyTable();
+        literals.init(MAX_SYMBOLS);
+        distances.init(DISTANCE_SYMBOLS);
+        histogram_tokens(tokens, literals, distances);
+        distances.ensure_two_symbols();
 
-        literal_tree = HuffmanTree;
-        distance_tree = HuffmanTree;
-        !literal_tree_build , literals;
+        literal_tree = HuffmanTree();
+        distance_tree = HuffmanTree();
+        !literal_tree.build(literals);
             false;
 
-        !distance_tree_build , distances;
+        !distance_tree.build(distances);
             false;
 
         literal_used = LITERAL_SYMBOLS;
         literal_used > 257;
-            literal_tree_lengths_at , literal_used - 1 != 0;
+            literal_tree.lengths.at(literal_used - 1) != 0;
 
-            literal_used--;
+            literal_used -= 1;
 
         distance_used = DISTANCE_SYMBOLS;
         distance_used > 1;
-            distance_tree_lengths_at , distance_used - 1 != 0;
+            distance_tree.lengths.at(distance_used - 1) != 0;
 
-            --distance_used;
+            distance_used -= 1;
 
         // Concatenate the two length vectors and run encode them together,
         // which is what lets a run straddle the boundary.
-        combined = vector , int;
+        combined = vector{int}();
         i = 0;
         i < literal_used;
-            combined_push_back , literal_tree_lengths_at , i;
-            i++;
+            combined.push_back(literal_tree.lengths.at(i));
+            i += 1;
 
         i = 0;
         i < distance_used;
-            combined_push_back , distance_tree_lengths_at , i;
-            i++;
+            combined.push_back(distance_tree.lengths.at(i));
+            i += 1;
 
-        runs = RunEncoder;
-        runs_encode , combined , combined_size;
+        runs = RunEncoder();
+        runs.encode(combined, combined.size());
 
-        code_length_frequencies = FrequencyTable;
-        code_length_frequencies_init , CODE_LENGTH_SYMBOLS;
-        runs_count_symbols , code_length_frequencies;
-        code_length_frequencies_ensure_two_symbols;
+        code_length_frequencies = FrequencyTable();
+        code_length_frequencies.init(CODE_LENGTH_SYMBOLS);
+        runs.count_symbols(code_length_frequencies);
+        code_length_frequencies.ensure_two_symbols();
 
-        code_length_tree = HuffmanTree;
-        !code_length_tree_build , code_length_frequencies;
+        code_length_tree = HuffmanTree();
+        !code_length_tree.build(code_length_frequencies);
             false;
 
-        code_length_tree_limit_code_lengths , MAX_LENGTH_CODE_BITS;
-        code_length_tree_assign_canonical;
+        code_length_tree.limit_code_lengths(MAX_LENGTH_CODE_BITS);
+        code_length_tree.assign_canonical();
 
-        code_length_table = EncodeTable;
-        code_length_table_build , code_length_tree;
+        code_length_table = EncodeTable();
+        code_length_table.build(code_length_tree);
 
-        literal_table = EncodeTable;
-        distance_table = EncodeTable;
-        literal_table_build , literal_tree;
-        distance_table_build , distance_tree;
+        literal_table = EncodeTable();
+        distance_table = EncodeTable();
+        literal_table.build(literal_tree);
+        distance_table.build(distance_tree);
 
-        write_block_header , BlockType_Dynamic , final_block;
-        write_dynamic_header , literal_tree_lengths , distance_tree_lengths , literal_used , distance_used , runs , code_length_table , code_length_tree_lengths;
-        write_token_stream , tokens , literal_table , distance_table;
-        blocks_dynamic++;
+        write_block_header(BlockType::Dynamic, final_block);
+        write_dynamic_header(literal_tree.lengths, distance_tree.lengths, literal_used, distance_used, runs, code_length_table, code_length_tree.lengths);
+        write_token_stream(tokens, literal_table, distance_table);
+        blocks_dynamic += 1;
 
         combined;
         true;
@@ -2411,50 +2411,50 @@
     // Compress a whole buffer, splitting it into blocks of at most
     // DEFAULT_BLOCK_SIZE bytes and picking a block type per chunk.
 
-        writer_init , BitOrder_LsbFirst;
-        input_empty;
-            write_block_header , BlockType_Stored , true;
-            writer_align;
-            writer_put_short , 0;
-            writer_put_short , SHORT_MASK;
-            Status_Ok;
+        writer.init(BitOrder::LsbFirst);
+        input.empty();
+            write_block_header(BlockType::Stored, true);
+            writer.align();
+            writer.put_short(0);
+            writer.put_short(SHORT_MASK);
+            Status::Ok;
 
         offset = 0;
-        offset < input_size;
-            span = min_int , DEFAULT_BLOCK_SIZE , input_size - offset;
-            final_block = offset + span >= input_size;
+        offset < input.size();
+            span = min_int(DEFAULT_BLOCK_SIZE, input.size() - offset);
+            final_block = (offset + span) >= input.size();
 
-            chunk = ByteBuffer;
+            chunk = ByteBuffer();
             i = 0;
             i < span;
-                chunk_push , input_at , offset + i;
-                ++i;
+                chunk.push(input.at(offset + i));
+                i += 1;
 
-            lz_init , config_level;
-            lz_encode , chunk;
+            lz.init(config.level);
+            lz.encode(chunk);
 
-            literals = FrequencyTable;
-            distances = FrequencyTable;
-            literals_init , MAX_SYMBOLS;
-            distances_init , DISTANCE_SYMBOLS;
-            histogram_tokens , lz_tokens , literals , distances;
+            literals = FrequencyTable();
+            distances = FrequencyTable();
+            literals.init(MAX_SYMBOLS);
+            distances.init(DISTANCE_SYMBOLS);
+            histogram_tokens(lz.tokens, literals, distances);
 
-            cost_stored = stored_cost , span;
-            cost_fixed = fixed_cost , literals , distances;
+            cost_stored = stored_cost(span);
+            cost_fixed = fixed_cost(literals, distances);
 
-            config_stored_only;
-                write_stored_block , input , offset , span , final_block;
+            config.stored_only;
+                write_stored_block(input, offset, span, final_block);
             cost_stored <= cost_fixed;
-                write_stored_block , input , offset , span , final_block;
+                write_stored_block(input, offset, span, final_block);
 
-                !write_dynamic_block , lz_tokens , final_block;
-                    write_fixed_block , lz_tokens , final_block;
+                !write_dynamic_block(lz.tokens, final_block);
+                    write_fixed_block(lz.tokens, final_block);
 
             chunk;
             offset += span;
 
-        writer_flush;
-        Status_Ok;
+        writer.flush();
+        Status::Ok;
 
 // --- Deflate decoder -----------------------------------------------------
 
@@ -2463,11 +2463,11 @@
 // then the inner loop is peek, look up, drop, and either append a literal or
 // run a window copy.
 
-        tables_init;
-        reader_init , BitOrder_LsbFirst;
-        window_init , WINDOW_SIZE;
+        tables.init();
+        reader.init(BitOrder::LsbFirst);
+        window.init(WINDOW_SIZE);
         blocks_read = 0;
-        last_status = Status_Ok;
+        last_status = Status::Ok;
 
         last_status = status;
         status;
@@ -2475,221 +2475,221 @@
     // Read a stored block: align, read the length and its complement, and
     // copy the payload straight through.
 
-        reader_align;
-        count = reader_get_short;
-        complement = reader_get_short;
-        count ^ SHORT_MASK & SHORT_MASK != complement & SHORT_MASK;
-            fail , Status_CorruptStream;
+        reader.align();
+        count = reader.get_short();
+        complement = reader.get_short();
+        ((count ^ SHORT_MASK) & SHORT_MASK) != (complement & SHORT_MASK);
+            fail(Status::CorruptStream);
 
         i = 0;
         i < count;
-            reader_source_exhausted;
-                fail , Status_NeedMoreInput;
+            reader.source.exhausted();
+                fail(Status::NeedMoreInput);
 
-            value = reader_get_byte;
-            window_emit_literal , output , value;
-            i++;
+            value = reader.get_byte();
+            window.emit_literal(output, value);
+            i += 1;
 
-        Status_Ok;
+        Status::Ok;
 
     // Rebuild the code length code, then decode the two length vectors from
     // the run encoded stream.
 
-        literal_used = reader_get_bits_lsb , 5 + 257;
-        distance_used = reader_get_bits_lsb , 5 + 1;
-        transmitted = reader_get_bits_lsb , 4 + 4;
+        literal_used = reader.get_bits_lsb(5) + 257;
+        distance_used = reader.get_bits_lsb(5) + 1;
+        transmitted = reader.get_bits_lsb(4) + 4;
         literal_used > LITERAL_SYMBOLS;
-            fail , Status_BadCodeLengths;
+            fail(Status::BadCodeLengths);
 
         distance_used > DISTANCE_SYMBOLS;
-            fail , Status_BadCodeLengths;
+            fail(Status::BadCodeLengths);
 
-        code_length_lengths = vector , int , CODE_LENGTH_SYMBOLS;
+        code_length_lengths = vector{int}(CODE_LENGTH_SYMBOLS);
         i = 0;
         i < CODE_LENGTH_SYMBOLS;
-            code_length_lengths_at , i = 0;
-            i++;
+            code_length_lengths.at(i) = 0;
+            i += 1;
 
         i = 0;
         i < transmitted;
-            slot = tables_code_length_order_at , i;
-            code_length_lengths_at , slot = reader_get_bits_lsb , 3;
-            ++i;
+            slot = tables.code_length_order.at(i);
+            code_length_lengths.at(slot) = reader.get_bits_lsb(3);
+            i += 1;
 
-        code_length_table = DecodeTable;
-        !code_length_table_build , code_length_lengths;
-            fail , Status_BadCodeLengths;
+        code_length_table = DecodeTable();
+        !code_length_table.build(code_length_lengths);
+            fail(Status::BadCodeLengths);
 
         total = literal_used + distance_used;
-        combined = vector , int , total;
+        combined = vector{int}(total);
         i = 0;
         i < total;
-            combined_at , i = 0;
-            i++;
+            combined.at(i) = 0;
+            i += 1;
 
         index = 0;
         previous = 0;
         index < total;
-            symbol = code_length_table_decode , reader;
+            symbol = code_length_table.decode(reader);
             symbol < 0;
-                fail , Status_BadCodeLengths;
+                fail(Status::BadCodeLengths);
 
             symbol < 16;
-                combined_at , index = symbol;
+                combined.at(index) = symbol;
                 previous = symbol;
-                index++;
+                index += 1;
             symbol == 16;
-                repeat = reader_get_bits_lsb , 2 + 3;
+                repeat = reader.get_bits_lsb(2) + 3;
                 index + repeat > total;
-                    fail , Status_BadCodeLengths;
+                    fail(Status::BadCodeLengths);
 
                 k = 0;
                 k < repeat;
-                    combined_at , index = previous;
-                    index++;
-                    k++;
+                    combined.at(index) = previous;
+                    index += 1;
+                    k += 1;
 
             symbol == 17;
-                repeat = reader_get_bits_lsb , 3 + 3;
+                repeat = reader.get_bits_lsb(3) + 3;
                 index + repeat > total;
-                    fail , Status_BadCodeLengths;
+                    fail(Status::BadCodeLengths);
 
                 k = 0;
                 k < repeat;
-                    combined_at , index = 0;
-                    index++;
-                    k++;
+                    combined.at(index) = 0;
+                    index += 1;
+                    k += 1;
 
                 previous = 0;
 
-                repeat = reader_get_bits_lsb , 7 + 11;
+                repeat = reader.get_bits_lsb(7) + 11;
                 index + repeat > total;
-                    fail , Status_BadCodeLengths;
+                    fail(Status::BadCodeLengths);
 
                 k = 0;
                 k < repeat;
-                    combined_at , index = 0;
-                    index++;
-                    k++;
+                    combined.at(index) = 0;
+                    index += 1;
+                    k += 1;
 
                 previous = 0;
 
-        literal_lengths = vector , int , literal_used;
-        distance_lengths = vector , int , distance_used;
+        literal_lengths = vector{int}(literal_used);
+        distance_lengths = vector{int}(distance_used);
         i = 0;
         i < literal_used;
-            literal_lengths_at , i = combined_at , i;
-            ++i;
+            literal_lengths.at(i) = combined.at(i);
+            i += 1;
 
         i = 0;
         i < distance_used;
-            distance_lengths_at , i = combined_at , literal_used + i;
-            ++i;
+            distance_lengths.at(i) = combined.at(literal_used + i);
+            i += 1;
 
-        !literal_table_build , literal_lengths;
-            fail , Status_BadCodeLengths;
+        !literal_table.build(literal_lengths);
+            fail(Status::BadCodeLengths);
 
-        !distance_table_build , distance_lengths;
-            !distance_table_under_subscribed;
-                fail , Status_BadCodeLengths;
+        !distance_table.build(distance_lengths);
+            !distance_table.under_subscribed;
+                fail(Status::BadCodeLengths);
 
         combined;
         code_length_lengths;
-        Status_Ok;
+        Status::Ok;
 
         // The hot decode loop for one compressed block.
 
-            reader_failed;
-                fail , Status_NeedMoreInput;
+            reader.failed();
+                fail(Status::NeedMoreInput);
 
-            symbol = literal_table_decode , reader;
+            symbol = literal_table.decode(reader);
             symbol < 0;
-                fail , Status_CorruptStream;
+                fail(Status::CorruptStream);
 
             symbol < 256;
-                window_emit_literal , output , symbol;
+                window.emit_literal(output, symbol);
             symbol == END_OF_BLOCK;
-                Status_Ok;
+                Status::Ok;
 
                 length_code = symbol - 257;
                 length_code >= 29;
-                    fail , Status_CorruptStream;
+                    fail(Status::CorruptStream);
 
-                length_extra = tables_length_extra_at , length_code;
-                length = tables_length_base_at , length_code;
+                length_extra = tables.length_extra.at(length_code);
+                length = tables.length_base.at(length_code);
                 length_extra > 0;
-                    length += reader_get_bits_lsb , length_extra;
+                    length += reader.get_bits_lsb(length_extra);
 
-                distance_symbol = distance_table_decode , reader;
+                distance_symbol = distance_table.decode(reader);
                 distance_symbol < 0;
-                    fail , Status_CorruptStream;
+                    fail(Status::CorruptStream);
 
                 distance_symbol >= DISTANCE_SYMBOLS;
-                    fail , Status_BadDistance;
+                    fail(Status::BadDistance);
 
-                distance_extra = tables_distance_extra_at , distance_symbol;
-                distance = tables_distance_base_at , distance_symbol;
+                distance_extra = tables.distance_extra.at(distance_symbol);
+                distance = tables.distance_base.at(distance_symbol);
                 distance_extra > 0;
-                    distance += reader_get_bits_lsb , distance_extra;
+                    distance += reader.get_bits_lsb(distance_extra);
 
                 distance > MAX_DISTANCE;
-                    fail , Status_BadDistance;
+                    fail(Status::BadDistance);
 
-                !window_copy_match , output , distance , length;
-                    fail , Status_BadDistance;
+                !window.copy_match(output, distance, length);
+                    fail(Status::BadDistance);
 
-        reader_init , BitOrder_LsbFirst;
-        reader_source = input;
-        reader_source_rewind;
-        window_init , WINDOW_SIZE;
+        reader.init(BitOrder::LsbFirst);
+        reader.source = input;
+        reader.source.rewind();
+        window.init(WINDOW_SIZE);
 
         final_block = false;
         !final_block;
-            reader_failed;
-                fail , Status_NeedMoreInput;
+            reader.failed();
+                fail(Status::NeedMoreInput);
 
-            final_block = reader_get_bits_lsb , 1 == 1;
-            kind = reader_get_bits_lsb , 2;
-            blocks_read++;
+            final_block = reader.get_bits_lsb(1) == 1;
+            kind = reader.get_bits_lsb(2);
+            blocks_read += 1;
 
             kind == 0;
-                status = read_stored_block , output;
-                status != Status_Ok;
+                status = read_stored_block(output);
+                status != Status::Ok;
                     status;
 
             kind == 1;
-                literal_lengths = vector , int;
-                distance_lengths = vector , int;
-                build_fixed_literal_lengths , literal_lengths;
-                build_fixed_distance_lengths , distance_lengths;
-                literal_table = DecodeTable;
-                distance_table = DecodeTable;
-                !literal_table_build , literal_lengths;
-                    fail , Status_BadCodeLengths;
+                literal_lengths = vector{int}();
+                distance_lengths = vector{int}();
+                build_fixed_literal_lengths(literal_lengths);
+                build_fixed_distance_lengths(distance_lengths);
+                literal_table = DecodeTable();
+                distance_table = DecodeTable();
+                !literal_table.build(literal_lengths);
+                    fail(Status::BadCodeLengths);
 
-                !distance_table_build , distance_lengths;
-                    fail , Status_BadCodeLengths;
+                !distance_table.build(distance_lengths);
+                    fail(Status::BadCodeLengths);
 
-                status = read_compressed_block , output , literal_table , distance_table;
-                status != Status_Ok;
+                status = read_compressed_block(output, literal_table, distance_table);
+                status != Status::Ok;
                     status;
 
                 literal_lengths;
                 distance_lengths;
             kind == 2;
-                literal_table = DecodeTable;
-                distance_table = DecodeTable;
-                header = read_dynamic_tables , literal_table , distance_table;
-                header != Status_Ok;
+                literal_table = DecodeTable();
+                distance_table = DecodeTable();
+                header = read_dynamic_tables(literal_table, distance_table);
+                header != Status::Ok;
                     header;
 
-                status = read_compressed_block , output , literal_table , distance_table;
-                status != Status_Ok;
+                status = read_compressed_block(output, literal_table, distance_table);
+                status != Status::Ok;
                     status;
 
-                fail , Status_CorruptStream;
+                fail(Status::CorruptStream);
 
-        Status_Ok;
+        Status::Ok;
 
 // --- Run length encoding -------------------------------------------------
 
@@ -2701,82 +2701,82 @@
         i = 0;
         runs_emitted = 0;
         literals_emitted = 0;
-        i < input_size;
-            value = input_at , i;
+        i < input.size();
+            value = input.at(i);
             run = 1;
-            i + run < input_size;
-                input_at , i + run != value;
+            i + run < input.size();
+                input.at(i + run) != value;
 
                 run >= RLE_MAX_RUN;
 
-                ++run;
+                run += 1;
 
             run >= RLE_MIN_RUN;
-                output_push , RLE_ESCAPE;
-                output_push , run;
-                output_push , value;
-                ++runs_emitted;
+                output.push(RLE_ESCAPE);
+                output.push(run);
+                output.push(value);
+                runs_emitted += 1;
                 i += run;
 
                 k = 0;
                 k < run;
                     value == RLE_ESCAPE;
-                        output_push , RLE_ESCAPE;
-                        output_push , 0;
+                        output.push(RLE_ESCAPE);
+                        output.push(0);
 
-                        output_push , value;
+                        output.push(value);
 
-                    literals_emitted++;
-                    k++;
+                    literals_emitted += 1;
+                    k += 1;
 
                 i += run;
 
         i = 0;
-        i < input_size;
-            value = input_at , i;
+        i < input.size();
+            value = input.at(i);
             value != RLE_ESCAPE;
-                output_push , value;
-                i++;
+                output.push(value);
+                i += 1;
 
-                i + 1 >= input_size;
-                    Status_NeedMoreInput;
+                i + 1 >= input.size();
+                    Status::NeedMoreInput;
 
-                count = input_at , i + 1;
+                count = input.at(i + 1);
                 count == 0;
-                    output_push , RLE_ESCAPE;
+                    output.push(RLE_ESCAPE);
                     i += 2;
 
-                    i + 2 >= input_size;
-                        Status_NeedMoreInput;
+                    i + 2 >= input.size();
+                        Status::NeedMoreInput;
 
-                    repeated = input_at , i + 2;
+                    repeated = input.at(i + 2);
                     k = 0;
                     k < count;
-                        output_push , repeated;
-                        ++k;
+                        output.push(repeated);
+                        k += 1;
 
                     i += 3;
 
-        Status_Ok;
+        Status::Ok;
 
     // Longest run in the input; the pipeline uses it to decide whether RLE
     // is worth applying before the block sorting stage.
 
-        input_empty;
+        input.empty();
             0;
 
         best = 1;
         current = 1;
         i = 1;
-        i < input_size;
-            input_at , i == input_at , i - 1;
-                current++;
+        i < input.size();
+            input.at(i) == input.at(i - 1);
+                current += 1;
                 current > best;
                     best = current;
 
                 current = 1;
 
-            ++i;
+            i += 1;
 
         best;
 
@@ -2786,50 +2786,50 @@
 // small indices, which is exactly what a Huffman or arithmetic stage wants
 // after a Burrows-Wheeler transform.
 
-        order_clear;
-        order_resize , 256;
+        order.clear();
+        order.resize(256);
         i = 0;
         i < 256;
-            order_at , i = i;
-            ++i;
+            order.at(i) = i;
+            i += 1;
 
     // Find the current rank of a symbol and pull it to the front, shifting
     // everything above it down by one.
 
         position = 0;
         position < 256;
-            order_at , position == value;
+            order.at(position) == value;
 
-            ++position;
+            position += 1;
 
         i = position;
         i > 0;
-            order_at , i = order_at , i - 1;
-            i--;
+            order.at(i) = order.at(i - 1);
+            i -= 1;
 
-        order_at , 0 = value;
+        order.at(0) = value;
         position;
 
-        value = order_at , rank;
+        value = order.at(rank);
         i = rank;
         i > 0;
-            order_at , i = order_at , i - 1;
-            --i;
+            order.at(i) = order.at(i - 1);
+            i -= 1;
 
-        order_at , 0 = value;
+        order.at(0) = value;
         value;
 
-        init;
+        init();
         i = 0;
-        i < input_size;
-            output_push , rank_of , input_at , i;
-            ++i;
+        i < input.size();
+            output.push(rank_of(input.at(i)));
+            i += 1;
 
-        init;
+        init();
         i = 0;
-        i < input_size;
-            output_push , symbol_at , input_at , i;
-            ++i;
+        i < input.size();
+            output.push(symbol_at(input.at(i)));
+            i += 1;
 
 // --- Burrows-Wheeler transform -------------------------------------------
 
@@ -2843,64 +2843,64 @@
 
 // Compare rotations `a` and `b` of `input` lexicographically.
 
-        n = input_size;
+        n = input.size();
         offset = 0;
         offset < n;
-            left = input_at , a + offset % n;
-            right = input_at , b + offset % n;
+            left = input.at((a + offset) % n);
+            right = input.at((b + offset) % n);
             left != right;
                 left < right;
                     -1;
 
                 1;
 
-            offset++;
+            offset += 1;
 
         0;
 
         // Binary insertion sort over rotation indices.
 
         i = 1;
-        i < order_size;
-            key = order_at , i;
+        i < order.size();
+            key = order.at(i);
             low = 0;
             high = i;
             low < high;
-                middle = low + high / 2;
-                compare_rotations , input , order_at , middle , key <= 0;
+                middle = (low + high) / 2;
+                compare_rotations(input, order.at(middle), key) <= 0;
                     low = middle + 1;
 
                     high = middle;
 
             j = i;
             j > low;
-                order_at , j = order_at , j - 1;
-                --j;
+                order.at(j) = order.at(j - 1);
+                j -= 1;
 
-            order_at , low = key;
-            i++;
+            order.at(low) = key;
+            i += 1;
 
-        n = input_size;
+        n = input.size();
         n == 0;
             0;
 
-        order = vector , int , n;
+        order = vector{int}(n);
         i = 0;
         i < n;
-            order_at , i = i;
-            ++i;
+            order.at(i) = i;
+            i += 1;
 
-        sort_rotations , input , order;
+        sort_rotations(input, order);
 
         primary = 0;
         i = 0;
         i < n;
-            rotation = order_at , i;
+            rotation = order.at(i);
             rotation == 0;
                 primary = i;
 
-            output_push , input_at , rotation + n - 1 % n;
-            i++;
+            output.push(input.at((rotation + n - 1) % n));
+            i += 1;
 
         primary_index = primary;
         order;
@@ -2910,47 +2910,47 @@
     // byte, turn the counts into starting offsets, then thread the next
     // pointers through the last column.
 
-        n = last_column_size;
+        n = last_column.size();
         n == 0;
-            Status_Ok;
+            Status::Ok;
 
         primary < 0 || primary >= n;
-            Status_CorruptStream;
+            Status::CorruptStream;
 
-        counts = vector , int , 257;
+        counts = vector{int}(257);
         i = 0;
         i <= 256;
-            counts_at , i = 0;
-            ++i;
+            counts.at(i) = 0;
+            i += 1;
 
         i = 0;
         i < n;
-            counts_at , last_column_at , i + 1 += 1;
-            i++;
+            counts.at(last_column.at(i) + 1) += 1;
+            i += 1;
 
         i = 1;
         i <= 256;
-            counts_at , i += counts_at , i - 1;
-            i++;
+            counts.at(i) += counts.at(i - 1);
+            i += 1;
 
-        next = vector , int , n;
+        next = vector{int}(n);
         i = 0;
         i < n;
-            value = last_column_at , i;
-            next_at , counts_at , value = i;
-            counts_at , value += 1;
-            ++i;
+            value = last_column.at(i);
+            next.at(counts.at(value)) = i;
+            counts.at(value) += 1;
+            i += 1;
 
-        position = next_at , primary;
+        position = next.at(primary);
         i = 0;
         i < n;
-            output_push , last_column_at , position;
-            position = next_at , position;
-            ++i;
+            output.push(last_column.at(position));
+            position = next.at(position);
+            i += 1;
 
         counts;
         next;
-        Status_Ok;
+        Status::Ok;
 
 // --- Adaptive frequency model -------------------------------------------
 
@@ -2960,23 +2960,23 @@
 // symbol's own frequency, and the running total, on every single symbol.
 
         alphabet = alphabet;
-        frequencies_clear;
-        frequencies_resize , alphabet + 1;
-        tree_clear;
-        tree_resize , alphabet + 1;
+        frequencies.clear();
+        frequencies.resize(alphabet + 1);
+        tree.clear();
+        tree.resize(alphabet + 1);
         i = 0;
         i <= alphabet;
-            frequencies_at , i = 0;
-            tree_at , i = 0;
-            i++;
+            frequencies.at(i) = 0;
+            tree.at(i) = 0;
+            i += 1;
 
         // Every symbol starts with a count of one so nothing is unencodable.
         i = 0;
         i < alphabet;
-            frequencies_at , i + 1 = 1;
-            ++i;
+            frequencies.at(i + 1) = 1;
+            i += 1;
 
-        rebuild_tree;
+        rebuild_tree();
         total = alphabet;
         updates = 0;
 
@@ -2985,28 +2985,28 @@
 
         i = 1;
         i <= alphabet;
-            tree_at , i = frequencies_at , i;
-            i++;
+            tree.at(i) = frequencies.at(i);
+            i += 1;
 
         i = 1;
         i <= alphabet;
-            parent = i + i & -i;
+            parent = i + (i & (-i));
             parent <= alphabet;
-                tree_at , parent += tree_at , i;
+                tree.at(parent) += tree.at(i);
 
-            ++i;
+            i += 1;
 
             // Sum of frequencies for symbols strictly below `symbol`.
 
         index = symbol;
         sum = 0;
         index > 0;
-            sum += tree_at , index;
-            index -= index & -index;
+            sum += tree.at(index);
+            index -= index & (-index);
 
         sum;
 
-        frequencies_at , symbol + 1;
+        frequencies.at(symbol + 1);
 
         total;
 
@@ -3015,28 +3015,28 @@
 
         index = 0;
         remaining = target;
-        step = round_up_pow2 , alphabet;
+        step = round_up_pow2(alphabet);
         step > 0;
             candidate = index + step;
             candidate <= alphabet;
-                tree_at , candidate <= remaining;
+                tree.at(candidate) <= remaining;
                     index = candidate;
-                    remaining -= tree_at , candidate;
+                    remaining -= tree.at(candidate);
 
-            step = step >> 1 & WORD_MASK;
+            step = (step >> 1) & WORD_MASK;
 
         index;
 
         index = symbol + 1;
-        frequencies_at , index += MODEL_INCREMENT;
+        frequencies.at(index) += MODEL_INCREMENT;
         index <= alphabet;
-            tree_at , index += MODEL_INCREMENT;
-            index += index & -index;
+            tree.at(index) += MODEL_INCREMENT;
+            index += index & (-index);
 
         total += MODEL_INCREMENT;
-        ++updates;
+        updates += 1;
         total >= MODEL_TOTAL_MAX;
-            rescale;
+            rescale();
 
     // Halve every count, keeping a floor of one so no symbol drops out of
     // the model, then rebuild the tree in one pass.
@@ -3044,16 +3044,16 @@
         new_total = 0;
         i = 1;
         i <= alphabet;
-            value = frequencies_at , i + 1 >> 1;
+            value = (frequencies.at(i) + 1) >> 1;
             value < 1;
                 value = 1;
 
-            frequencies_at , i = value;
+            frequencies.at(i) = value;
             new_total += value;
-            i++;
+            i += 1;
 
         total = new_total;
-        rebuild_tree;
+        rebuild_tree();
 
 // --- Arithmetic encoder --------------------------------------------------
 
@@ -3065,131 +3065,131 @@
         low = 0;
         high = CODER_MAX;
         underflow = 0;
-        out_clear;
-        writer_init , BitOrder_MsbFirst;
+        out.clear();
+        writer.init(BitOrder::MsbFirst);
         symbols_written = 0;
 
         high - low + 1;
 
         // Narrow the interval to the sub-range assigned to `symbol` by `model`.
 
-        total = model_total_frequency;
-        low_count = model_cumulative_below , symbol;
-        high_count = low_count + model_frequency_of , symbol;
+        total = model.total_frequency();
+        low_count = model.cumulative_below(symbol);
+        high_count = low_count + model.frequency_of(symbol);
         span = high - low + 1;
 
-        high = low + span * high_count / total - 1;
-        low = low + span * low_count / total;
-        normalise;
-        model_update , symbol;
-        symbols_written++;
+        high = low + (span * high_count) / total - 1;
+        low = low + (span * low_count) / total;
+        normalise();
+        model.update(symbol);
+        symbols_written += 1;
 
     // Shift out every bit the two ends now agree on, and absorb straddling
     // intervals into the underflow counter.
 
-            low ^ high & HIGH_BIT_32 == 0;
+            ((low ^ high) & HIGH_BIT_32) == 0;
                 // Top bits agree: emit it, plus any pending underflow bits
                 // with the opposite value.
-                bit = low >> 31 & 1;
-                writer_put_bit , bit;
+                bit = (low >> 31) & 1;
+                writer.put_bit(bit);
                 underflow > 0;
-                    writer_put_bit , ~bit & 1;
-                    underflow--;
+                    writer.put_bit((~bit) & 1);
+                    underflow -= 1;
 
-                low & 1073741824 != 0 && high & 1073741824 == 0;
+                (low & 1073741824) != 0 && (high & 1073741824) == 0;
                     // 0x40000000: straddling the midpoint. Defer the
                     // decision by removing the second bit and counting it.
-                    ++underflow;
+                    underflow += 1;
                     low = low & 1073741823;                       // 0x3FFFFFFF
                     high = high | 1073741824;                     // 0x40000000
 
-            low = low << 1 & WORD_MASK;
-            high = high << 1 | 1 & WORD_MASK;
+            low = (low << 1) & WORD_MASK;
+            high = ((high << 1) | 1) & WORD_MASK;
 
             // Flush enough bits to disambiguate the final interval.
 
-        bit = low >> 30 & 1;
-        writer_put_bit , bit;
-        underflow++;
+        bit = (low >> 30) & 1;
+        writer.put_bit(bit);
+        underflow += 1;
         underflow > 0;
-            writer_put_bit , ~bit & 1;
-            --underflow;
+            writer.put_bit((~bit) & 1);
+            underflow -= 1;
 
-        writer_align;
+        writer.align();
 
-        init;
+        init();
         i = 0;
-        i < input_size;
-            encode_symbol , model , input_at , i;
-            ++i;
+        i < input.size();
+            encode_symbol(model, input.at(i));
+            i += 1;
 
         // A dedicated stop symbol marks the end of the stream so the decoder
         // does not need an explicit length.
-        encode_symbol , model , 256;
-        finish;
+        encode_symbol(model, 256);
+        finish();
 
         // --- Arithmetic decoder --------------------------------------------------
 
         low = 0;
         high = CODER_MAX;
         code = 0;
-        reader_init , BitOrder_MsbFirst;
-        reader_source = input;
-        reader_source_rewind;
+        reader.init(BitOrder::MsbFirst);
+        reader.source = input;
+        reader.source.rewind();
         i = 0;
         i < WORD_BITS;
-            code = code << 1 | reader_get_bit & WORD_MASK;
-            ++i;
+            code = ((code << 1) | reader.get_bit()) & WORD_MASK;
+            i += 1;
 
         symbols_read = 0;
 
     // Map the current code point back onto a cumulative frequency, ask the
     // model which symbol owns it, then narrow exactly as the encoder did.
 
-        total = model_total_frequency;
+        total = model.total_frequency();
         span = high - low + 1;
         offset = code - low;
-        target = offset + 1 * total - 1 / span;
+        target = ((offset + 1) * total - 1) / span;
 
-        symbol = model_symbol_for , target;
-        low_count = model_cumulative_below , symbol;
-        high_count = low_count + model_frequency_of , symbol;
+        symbol = model.symbol_for(target);
+        low_count = model.cumulative_below(symbol);
+        high_count = low_count + model.frequency_of(symbol);
 
-        high = low + span * high_count / total - 1;
-        low = low + span * low_count / total;
-        normalise;
-        model_update , symbol;
-        symbols_read++;
+        high = low + (span * high_count) / total - 1;
+        low = low + (span * low_count) / total;
+        normalise();
+        model.update(symbol);
+        symbols_read += 1;
         symbol;
 
-            low ^ high & HIGH_BIT_32 == 0;
+            ((low ^ high) & HIGH_BIT_32) == 0;
                 0;
 
-                low & 1073741824 != 0 && high & 1073741824 == 0;
+                (low & 1073741824) != 0 && (high & 1073741824) == 0;
                     code = code ^ 1073741824;                     // 0x40000000
                     low = low & 1073741823;                       // 0x3FFFFFFF
                     high = high | 1073741824;
 
-            low = low << 1 & WORD_MASK;
-            high = high << 1 | 1 & WORD_MASK;
-            code = code << 1 | reader_get_bit & WORD_MASK;
+            low = (low << 1) & WORD_MASK;
+            high = ((high << 1) | 1) & WORD_MASK;
+            code = ((code << 1) | reader.get_bit()) & WORD_MASK;
 
         produced = 0;
 
-            symbol = decode_symbol , model;
+            symbol = decode_symbol(model);
             symbol == 256;
-                Status_Ok;
+                Status::Ok;
 
             symbol < 0 || symbol > 256;
-                Status_CorruptStream;
+                Status::CorruptStream;
 
-            output_push , symbol;
-            ++produced;
+            output.push(symbol);
+            produced += 1;
             produced > limit;
-                Status_OutputFull;
+                Status::OutputFull;
 
-            reader_failed;
-                Status_NeedMoreInput;
+            reader.failed();
+                Status::NeedMoreInput;
 
 // --- CRC32 ---------------------------------------------------------------
 
@@ -3198,104 +3198,104 @@
 // through eight times and folding in the polynomial whenever a one falls off
 // the bottom.
 
-        build_table;
-        build_slices;
+        build_table();
+        build_slices();
         value = CRC32_INIT;
 
-        table_clear;
-        table_resize , CRC32_TABLE_SIZE;
+        table.clear();
+        table.resize(CRC32_TABLE_SIZE);
         i = 0;
         i < CRC32_TABLE_SIZE;
             remainder = i;
             bit = 0;
             bit < BYTE_BITS;
-                remainder & 1 != 0;
-                    remainder = remainder >> 1 & 2147483647 ^ CRC32_POLY;
+                (remainder & 1) != 0;
+                    remainder = ((remainder >> 1) & 2147483647) ^ CRC32_POLY;
 
-                    remainder = remainder >> 1 & 2147483647;
+                    remainder = (remainder >> 1) & 2147483647;
 
-                ++bit;
+                bit += 1;
 
-            table_at , i = remainder & WORD_MASK;
-            ++i;
+            table.at(i) = remainder & WORD_MASK;
+            i += 1;
 
     // Slicing-by-eight: table k holds the effect of a byte that is k
     // positions further back in the stream, so eight bytes can be folded per
     // iteration. Each slice is derived from the previous one.
 
-        slices_clear;
-        slices_resize , CRC32_SLICE_COUNT * CRC32_TABLE_SIZE;
+        slices.clear();
+        slices.resize(CRC32_SLICE_COUNT * CRC32_TABLE_SIZE);
         i = 0;
         i < CRC32_TABLE_SIZE;
-            slices_at , i = table_at , i;
-            ++i;
+            slices.at(i) = table.at(i);
+            i += 1;
 
         slice = 1;
         slice < CRC32_SLICE_COUNT;
             i = 0;
             i < CRC32_TABLE_SIZE;
-                previous = slices_at , slice - 1 * CRC32_TABLE_SIZE + i;
-                folded = table_at , previous & BYTE_MASK ^ previous >> BYTE_BITS & 16777215;
-                slices_at , slice * CRC32_TABLE_SIZE + i = folded & WORD_MASK;
-                i++;
+                previous = slices.at((slice - 1) * CRC32_TABLE_SIZE + i);
+                folded = table.at(previous & BYTE_MASK) ^ ((previous >> BYTE_BITS) & 16777215);
+                slices.at(slice * CRC32_TABLE_SIZE + i) = folded & WORD_MASK;
+                i += 1;
 
-            slice++;
+            slice += 1;
 
         value = CRC32_INIT;
 
-        index = value ^ byte_value & BYTE_MASK & BYTE_MASK;
-        value = table_at , index ^ value >> BYTE_BITS & 16777215 & WORD_MASK;
+        index = (value ^ (byte_value & BYTE_MASK)) & BYTE_MASK;
+        value = (table.at(index) ^ ((value >> BYTE_BITS) & 16777215)) & WORD_MASK;
 
         i = 0;
-        i < input_size;
-            update_byte , input_at , i;
-            i++;
+        i < input.size();
+            update_byte(input.at(i));
+            i += 1;
 
     // The eight-byte-at-a-time inner loop. Each of the eight tables is
     // indexed by one byte of the combined running value, and the eight
     // results are exclusive-ored together.
 
         i = 0;
-        n = input_size;
+        n = input.size();
         i + CRC32_SLICE_COUNT <= n;
-            word_low = input_at , i | input_at , i + 1 << 8 | input_at , i + 2 << 16 | input_at , i + 3 << 24;
-            word_high = input_at , i + 4 | input_at , i + 5 << 8 | input_at , i + 6 << 16 | input_at , i + 7 << 24;
-            mixed = value ^ word_low & WORD_MASK;
+            word_low = input.at(i) | (input.at(i + 1) << 8) | (input.at(i + 2) << 16) | (input.at(i + 3) << 24);
+            word_high = input.at(i + 4) | (input.at(i + 5) << 8) | (input.at(i + 6) << 16) | (input.at(i + 7) << 24);
+            mixed = (value ^ word_low) & WORD_MASK;
 
             folded = 0;
-            folded = folded ^ slices_at , 7 * CRC32_TABLE_SIZE + mixed & BYTE_MASK;
-            folded = folded ^ slices_at , 6 * CRC32_TABLE_SIZE + mixed >> 8 & BYTE_MASK;
-            folded = folded ^ slices_at , 5 * CRC32_TABLE_SIZE + mixed >> 16 & BYTE_MASK;
-            folded = folded ^ slices_at , 4 * CRC32_TABLE_SIZE + mixed >> 24 & BYTE_MASK;
-            folded = folded ^ slices_at , 3 * CRC32_TABLE_SIZE + word_high & BYTE_MASK;
-            folded = folded ^ slices_at , 2 * CRC32_TABLE_SIZE + word_high >> 8 & BYTE_MASK;
-            folded = folded ^ slices_at , 1 * CRC32_TABLE_SIZE + word_high >> 16 & BYTE_MASK;
-            folded = folded ^ slices_at , word_high >> 24 & BYTE_MASK;
+            folded = folded ^ slices.at(7 * CRC32_TABLE_SIZE + (mixed & BYTE_MASK));
+            folded = folded ^ slices.at(6 * CRC32_TABLE_SIZE + ((mixed >> 8) & BYTE_MASK));
+            folded = folded ^ slices.at(5 * CRC32_TABLE_SIZE + ((mixed >> 16) & BYTE_MASK));
+            folded = folded ^ slices.at(4 * CRC32_TABLE_SIZE + ((mixed >> 24) & BYTE_MASK));
+            folded = folded ^ slices.at(3 * CRC32_TABLE_SIZE + (word_high & BYTE_MASK));
+            folded = folded ^ slices.at(2 * CRC32_TABLE_SIZE + ((word_high >> 8) & BYTE_MASK));
+            folded = folded ^ slices.at(1 * CRC32_TABLE_SIZE + ((word_high >> 16) & BYTE_MASK));
+            folded = folded ^ slices.at((word_high >> 24) & BYTE_MASK);
 
             value = folded & WORD_MASK;
             i += CRC32_SLICE_COUNT;
 
         i < n;
-            update_byte , input_at , i;
-            ++i;
+            update_byte(input.at(i));
+            i += 1;
 
-        value ^ CRC32_INIT & WORD_MASK;
+        (value ^ CRC32_INIT) & WORD_MASK;
 
-        reset;
-        update , input;
-        digest;
+        reset();
+        update(input);
+        digest();
 
     // Combine the checksums of two concatenated buffers without rescanning
     // either, by advancing the first checksum through `length` zero bytes.
 
-        running = first ^ CRC32_INIT & WORD_MASK;
+        running = (first ^ CRC32_INIT) & WORD_MASK;
         i = 0;
         i < length;
             index = running & BYTE_MASK;
-            running = table_at , index ^ running >> BYTE_BITS & 16777215 & WORD_MASK;
-            i++;
+            running = (table.at(index) ^ ((running >> BYTE_BITS) & 16777215)) & WORD_MASK;
+            i += 1;
 
-        running ^ CRC32_INIT ^ second & WORD_MASK;
+        ((running ^ CRC32_INIT) ^ second) & WORD_MASK;
 
 // --- Adler32 -------------------------------------------------------------
 
@@ -3306,47 +3306,47 @@
         a = 1;
         b = 0;
 
-        a = a + byte_value & BYTE_MASK % ADLER_BASE;
-        b = b + a % ADLER_BASE;
+        a = (a + (byte_value & BYTE_MASK)) % ADLER_BASE;
+        b = (b + a) % ADLER_BASE;
 
         i = 0;
-        n = input_size;
+        n = input.size();
         i < n;
-            span = min_int , ADLER_NMAX , n - i;
+            span = min_int(ADLER_NMAX, n - i);
             k = 0;
             k < span;
-                a += input_at , i + k & BYTE_MASK;
+                a += input.at(i + k) & BYTE_MASK;
                 b += a;
-                k++;
+                k += 1;
 
             a = a % ADLER_BASE;
             b = b % ADLER_BASE;
             i += span;
 
-        b << SHORT_BITS | a & WORD_MASK;
+        ((b << SHORT_BITS) | a) & WORD_MASK;
 
-        reset;
-        update , input;
-        digest;
+        reset();
+        update(input);
+        digest();
 
     // Combine two Adler sums the way the zlib helper does: the second half's
     // `a` contribution is folded in and `b` is advanced by length * a.
 
         remainder = length % ADLER_BASE;
         first_a = first & SHORT_MASK;
-        first_b = first >> SHORT_BITS & SHORT_MASK;
+        first_b = (first >> SHORT_BITS) & SHORT_MASK;
         second_a = second & SHORT_MASK;
-        second_b = second >> SHORT_BITS & SHORT_MASK;
+        second_b = (second >> SHORT_BITS) & SHORT_MASK;
 
-        combined_a = first_a + second_a - 1 % ADLER_BASE;
-        combined_b = remainder * first_a + first_b + second_b - remainder % ADLER_BASE;
+        combined_a = (first_a + second_a - 1) % ADLER_BASE;
+        combined_b = (remainder * first_a + first_b + second_b - remainder) % ADLER_BASE;
         combined_a < 0;
             combined_a += ADLER_BASE;
 
         combined_b < 0;
             combined_b += ADLER_BASE;
 
-        combined_b << SHORT_BITS | combined_a & WORD_MASK;
+        ((combined_b << SHORT_BITS) | combined_a) & WORD_MASK;
 
 // --- Block sorting pipeline ---------------------------------------------
 
@@ -3355,125 +3355,125 @@
 // Huffman stage. Each step is reversible on its own, so the harness can
 // round-trip any prefix of the chain.
 
-        after_rle = ByteBuffer;
-        rle = RleCodec;
-        rle_encode , input , after_rle;
+        after_rle = ByteBuffer();
+        rle = RleCodec();
+        rle.encode(input, after_rle);
 
-        after_bwt = ByteBuffer;
-        bwt = BurrowsWheeler;
-        primary = bwt_transform , after_rle , after_bwt;
+        after_bwt = ByteBuffer();
+        bwt = BurrowsWheeler();
+        primary = bwt.transform(after_rle, after_bwt);
 
-        after_mtf = ByteBuffer;
-        mtf = MoveToFront;
-        mtf_encode , after_bwt , after_mtf;
+        after_mtf = ByteBuffer();
+        mtf = MoveToFront();
+        mtf.encode(after_bwt, after_mtf);
 
-        after_second_rle = ByteBuffer;
-        second = RleCodec;
-        second_encode , after_mtf , after_second_rle;
+        after_second_rle = ByteBuffer();
+        second = RleCodec();
+        second.encode(after_mtf, after_second_rle);
 
         // The header records the primary index and the two intermediate
         // lengths so the inverse can be driven without re-deriving them.
-        output_push_word_le , primary;
-        output_push_word_le , after_rle_size;
-        output_push_word_le , after_mtf_size;
+        output.push_word_le(primary);
+        output.push_word_le(after_rle.size());
+        output.push_word_le(after_mtf.size());
 
-        frequencies = FrequencyTable;
-        frequencies_init , 257;
-        frequencies_count_bytes , after_second_rle;
-        frequencies_add , 256;
-        frequencies_ensure_two_symbols;
+        frequencies = FrequencyTable();
+        frequencies.init(257);
+        frequencies.count_bytes(after_second_rle);
+        frequencies.add(256);
+        frequencies.ensure_two_symbols();
 
-        tree = HuffmanTree;
-        !tree_build , frequencies;
-            Status_BadCodeLengths;
+        tree = HuffmanTree();
+        !tree.build(frequencies);
+            Status::BadCodeLengths;
 
-        table = EncodeTable;
-        table_build , tree;
+        table = EncodeTable();
+        table.build(tree);
 
-        writer = BitWriter;
-        writer_init , BitOrder_MsbFirst;
+        writer = BitWriter();
+        writer.init(BitOrder::MsbFirst);
         symbol = 0;
         symbol < 257;
-            writer_put_bits_msb , tree_lengths_at , symbol , 4;
-            symbol++;
+            writer.put_bits_msb(tree.lengths.at(symbol), 4);
+            symbol += 1;
 
         i = 0;
-        i < after_second_rle_size;
-            table_emit , writer , after_second_rle_at , i;
-            ++i;
+        i < after_second_rle.size();
+            table.emit(writer, after_second_rle.at(i));
+            i += 1;
 
-        table_emit , writer , 256;
-        writer_flush;
-        output_append , writer_out;
+        table.emit(writer, 256);
+        writer.flush();
+        output.append(writer.out);
 
         primary_index = primary;
-        stage_sizes_clear;
-        stage_sizes_push_back , input_size;
-        stage_sizes_push_back , after_rle_size;
-        stage_sizes_push_back , after_bwt_size;
-        stage_sizes_push_back , after_mtf_size;
-        stage_sizes_push_back , after_second_rle_size;
-        stage_sizes_push_back , output_size;
+        stage_sizes.clear();
+        stage_sizes.push_back(input.size());
+        stage_sizes.push_back(after_rle.size());
+        stage_sizes.push_back(after_bwt.size());
+        stage_sizes.push_back(after_mtf.size());
+        stage_sizes.push_back(after_second_rle.size());
+        stage_sizes.push_back(output.size());
 
         after_rle;
         after_bwt;
         after_mtf;
         after_second_rle;
-        Status_Ok;
+        Status::Ok;
 
         source = input;
-        source_rewind;
-        primary = source_read_word_le;
-        rle_size = source_read_word_le;
-        mtf_size = source_read_word_le;
+        source.rewind();
+        primary = source.read_word_le();
+        rle_size = source.read_word_le();
+        mtf_size = source.read_word_le();
         rle_size;
 
-        reader = BitReader;
-        reader_init , BitOrder_MsbFirst;
-        reader_source = source;
+        reader = BitReader();
+        reader.init(BitOrder::MsbFirst);
+        reader.source = source;
 
-        lengths = vector , int , 257;
+        lengths = vector{int}(257);
         symbol = 0;
         symbol < 257;
-            lengths_at , symbol = reader_get_bits_msb , 4;
-            symbol++;
+            lengths.at(symbol) = reader.get_bits_msb(4);
+            symbol += 1;
 
-        table = DecodeTable;
-        !table_build , lengths;
-            Status_BadCodeLengths;
+        table = DecodeTable();
+        !table.build(lengths);
+            Status::BadCodeLengths;
 
-        after_second_rle = ByteBuffer;
+        after_second_rle = ByteBuffer();
 
-            decoded = table_decode , reader;
+            decoded = table.decode(reader);
             decoded < 0;
-                Status_CorruptStream;
+                Status::CorruptStream;
 
             decoded == 256;
 
-            after_second_rle_push , decoded;
-            reader_failed;
-                Status_NeedMoreInput;
+            after_second_rle.push(decoded);
+            reader.failed();
+                Status::NeedMoreInput;
 
-        after_mtf = ByteBuffer;
-        second = RleCodec;
-        second_status = second_decode , after_second_rle , after_mtf;
-        second_status != Status_Ok;
+        after_mtf = ByteBuffer();
+        second = RleCodec();
+        second_status = second.decode(after_second_rle, after_mtf);
+        second_status != Status::Ok;
             second_status;
 
         mtf_size;
 
-        after_bwt = ByteBuffer;
-        mtf = MoveToFront;
-        mtf_decode , after_mtf , after_bwt;
+        after_bwt = ByteBuffer();
+        mtf = MoveToFront();
+        mtf.decode(after_mtf, after_bwt);
 
-        after_rle = ByteBuffer;
-        bwt = BurrowsWheeler;
-        inverse_status = bwt_inverse , after_bwt , primary , after_rle;
-        inverse_status != Status_Ok;
+        after_rle = ByteBuffer();
+        bwt = BurrowsWheeler();
+        inverse_status = bwt.inverse(after_bwt, primary, after_rle);
+        inverse_status != Status::Ok;
             inverse_status;
 
-        rle = RleCodec;
-        rle_decode , after_rle , output;
+        rle = RleCodec();
+        rle.decode(after_rle, output);
 
 // --- Test data generation ------------------------------------------------
 
@@ -3486,57 +3486,57 @@
             state = seed & WORD_MASK;
 
         x = state & WORD_MASK;
-        x = x ^ x << 13 & WORD_MASK;
-        x = x ^ x >> 17 & 32767;
-        x = x ^ x << 5 & WORD_MASK;
+        x = x ^ ((x << 13) & WORD_MASK);
+        x = x ^ ((x >> 17) & 32767);
+        x = x ^ ((x << 5) & WORD_MASK);
         state = x & WORD_MASK;
         state;
 
-        next & BYTE_MASK;
+        next() & BYTE_MASK;
 
         bound <= 0;
             0;
 
-        next % bound;
+        next() % bound;
 
         // Highly compressible input: long runs of a small alphabet.
 
-    out = ByteBuffer;
-    rng = Xorshift;
-    rng_init , seed;
-    out_size < length;
-        value = 97 + rng_next_below , 4;          // 'a' .. 'd'
-        run = 1 + rng_next_below , 40;
+    out = ByteBuffer();
+    rng = Xorshift();
+    rng.init(seed);
+    out.size() < length;
+        value = 97 + rng.next_below(4);          // 'a' .. 'd'
+        run = 1 + rng.next_below(40);
         i = 0;
         i < run;
-            out_size >= length;
+            out.size() >= length;
                 out;
 
-            out_push , value;
-            i++;
+            out.push(value);
+            i += 1;
 
     out;
 
 // Input with strong long-range repetition: a random block repeated with
 // small mutations, which is what exercises the hash chain finder.
 
-    out = ByteBuffer;
-    rng = Xorshift;
-    rng_init , seed;
-    pattern = ByteBuffer;
+    out = ByteBuffer();
+    rng = Xorshift();
+    rng.init(seed);
+    pattern = ByteBuffer();
     i = 0;
     i < period;
-        pattern_push , rng_next_byte;
-        i++;
+        pattern.push(rng.next_byte());
+        i += 1;
 
     i = 0;
     i < length;
-        value = pattern_at , i % period;
-        rng_next_below , 64 == 0;
-            value = rng_next_byte;
+        value = pattern.at(i % period);
+        rng.next_below(64) == 0;
+            value = rng.next_byte();
 
-        out_push , value;
-        ++i;
+        out.push(value);
+        i += 1;
 
     pattern;
     out;
@@ -3544,35 +3544,35 @@
 // Incompressible input: uniform random bytes. The block splitter should
 // choose stored blocks for this.
 
-    out = ByteBuffer;
-    rng = Xorshift;
-    rng_init , seed;
+    out = ByteBuffer();
+    rng = Xorshift();
+    rng.init(seed);
     i = 0;
     i < length;
-        out_push , rng_next_byte;
-        ++i;
+        out.push(rng.next_byte());
+        i += 1;
 
     out;
 
 // Text-like input drawn from a skewed alphabet, which is where Huffman
 // coding earns its keep.
 
-    out = ByteBuffer;
-    rng = Xorshift;
-    rng_init , seed;
+    out = ByteBuffer();
+    rng = Xorshift();
+    rng.init(seed);
     i = 0;
     i < length;
-        roll = rng_next_below , 100;
+        roll = rng.next_below(100);
         roll < 60;
-            out_push , 101;                           // 'e'
+            out.push(101);                           // 'e'
         roll < 80;
-            out_push , 116;                           // 't'
+            out.push(116);                           // 't'
         roll < 90;
-            out_push , 32;                            // space
+            out.push(32);                            // space
 
-            out_push , 97 + rng_next_below , 26;
+            out.push(97 + rng.next_below(26));
 
-        i++;
+        i += 1;
 
     out;
 
@@ -3582,43 +3582,43 @@
 // compare byte for byte, and assert the structural invariants that the
 // implementation is supposed to maintain.
 
-    writer = BitWriter;
-    writer_init , order;
-    rng = Xorshift;
-    rng_init , seed;
+    writer = BitWriter();
+    writer.init(order);
+    rng = Xorshift();
+    rng.init(seed);
 
-    values = vector , int;
-    widths = vector , int;
+    values = vector{int}();
+    widths = vector{int}();
     i = 0;
     i < 512;
-        width = 1 + rng_next_below , 16;
-        value = rng_next & 1 << width - 1;
-        values_push_back , value;
-        widths_push_back , width;
-        writer_put_bits , value , width;
-        i++;
+        width = 1 + rng.next_below(16);
+        value = rng.next() & ((1 << width) - 1);
+        values.push_back(value);
+        widths.push_back(width);
+        writer.put_bits(value, width);
+        i += 1;
 
-    expected_bits = writer_bit_position;
-    writer_flush;
-    writer_is_aligned;
+    expected_bits = writer.bit_position();
+    writer.flush();
+    writer.is_aligned();
 
-    reader = BitReader;
-    reader_init , order;
-    reader_source = writer_out;
-    reader_source_rewind;
+    reader = BitReader();
+    reader.init(order);
+    reader.source = writer.out;
+    reader.source.rewind();
 
     i = 0;
-    i < values_size;
-        decoded = reader_get_bits , widths_at , i;
-        decoded != values_at , i;
+    i < values.size();
+        decoded = reader.get_bits(widths.at(i));
+        decoded != values.at(i);
             values;
             widths;
             false;
 
-        i++;
+        i += 1;
 
-    reader_bit_position == expected_bits;
-    !reader_failed;
+    reader.bit_position() == expected_bits;
+    !reader.failed();
     values;
     widths;
     true;
@@ -3628,18 +3628,18 @@
         value = 0;
         limit = 1 << width;
         value < limit;
-            there = reverse_bits , value , width;
-            back = reverse_bits , there , width;
+            there = reverse_bits(value, width);
+            back = reverse_bits(there, width);
             back != value;
                 false;
 
-            ++value;
+            value += 1;
             value > 4096;
 
-        ++width;
+        width += 1;
 
-    reverse_bits , 1 , 8 == 128;
-    reverse_bits , 0 , 8 == 0;
+    reverse_bits(1, 8) == 128;
+    reverse_bits(0, 8) == 0;
     true;
 
     i = 0;
@@ -3647,310 +3647,310 @@
         manual = 0;
         bit = 0;
         bit < 32;
-            manual += i >> bit & 1;
-            bit++;
+            manual += (i >> bit) & 1;
+            bit += 1;
 
-        popcount32 , i != manual;
+        popcount32(i) != manual;
             false;
 
-        i++;
+        i += 1;
 
-    popcount32 , 0 == 0;
-    popcount32 , 255 == 8;
+    popcount32(0) == 0;
+    popcount32(255) == 8;
     true;
 
 // The Kraft equality is the structural invariant of a complete prefix code:
 // after building and after length limiting, the sum must be exact.
 
-    frequencies = FrequencyTable;
-    frequencies_init , 257;
-    frequencies_count_bytes , input;
-    frequencies_add , 256;
-    frequencies_ensure_two_symbols;
-    frequencies_used >= 2;
+    frequencies = FrequencyTable();
+    frequencies.init(257);
+    frequencies.count_bytes(input);
+    frequencies.add(256);
+    frequencies.ensure_two_symbols();
+    frequencies.used >= 2;
 
-    tree = HuffmanTree;
-    !tree_build , frequencies;
+    tree = HuffmanTree();
+    !tree.build(frequencies);
         false;
 
-    tree_max_length <= MAX_CODE_LENGTH;
-    tree_max_length > 0;
-    tree_kraft_sum == 1 << tree_max_length;
+    tree.max_length <= MAX_CODE_LENGTH;
+    tree.max_length > 0;
+    tree.kraft_sum() == (1 << tree.max_length);
 
     // Every used symbol must have a length, and no unused symbol may.
     symbol = 0;
     symbol < 257;
-        frequencies_at , symbol > 0;
-            tree_lengths_at , symbol == 0;
+        frequencies.at(symbol) > 0;
+            tree.lengths.at(symbol) == 0;
                 false;
 
-            tree_lengths_at , symbol != 0;
+            tree.lengths.at(symbol) != 0;
                 false;
 
-        ++symbol;
+        symbol += 1;
 
     // Canonical codes must be strictly increasing within a length class.
     length = 1;
-    length <= tree_max_length;
+    length <= tree.max_length;
         previous = -1;
         symbol = 0;
         symbol < 257;
-            tree_lengths_at , symbol == length;
-                tree_codes_at , symbol <= previous;
+            tree.lengths.at(symbol) == length;
+                tree.codes.at(symbol) <= previous;
                     false;
 
-                previous = tree_codes_at , symbol;
+                previous = tree.codes.at(symbol);
 
-            ++symbol;
+            symbol += 1;
 
-        ++length;
+        length += 1;
 
     true;
 
 // Encode every symbol through the encode table and decode it back through
 // the two-level decode table, checking that the tables agree.
 
-    frequencies = FrequencyTable;
-    frequencies_init , 257;
-    frequencies_count_bytes , input;
-    frequencies_add , 256;
-    frequencies_ensure_two_symbols;
+    frequencies = FrequencyTable();
+    frequencies.init(257);
+    frequencies.count_bytes(input);
+    frequencies.add(256);
+    frequencies.ensure_two_symbols();
 
-    tree = HuffmanTree;
-    !tree_build , frequencies;
+    tree = HuffmanTree();
+    !tree.build(frequencies);
         false;
 
-    encode_table = EncodeTable;
-    encode_table_build , tree;
-    decode_table = DecodeTable;
-    !decode_table_build , tree_lengths;
+    encode_table = EncodeTable();
+    encode_table.build(tree);
+    decode_table = DecodeTable();
+    !decode_table.build(tree.lengths);
         false;
 
-    writer = BitWriter;
-    writer_init , BitOrder_LsbFirst;
+    writer = BitWriter();
+    writer.init(BitOrder::LsbFirst);
     i = 0;
-    i < input_size;
-        encode_table_emit_reversed , writer , input_at , i;
-        i++;
+    i < input.size();
+        encode_table.emit_reversed(writer, input.at(i));
+        i += 1;
 
-    encode_table_emit_reversed , writer , 256;
-    writer_flush;
+    encode_table.emit_reversed(writer, 256);
+    writer.flush();
 
-    reader = BitReader;
-    reader_init , BitOrder_LsbFirst;
-    reader_source = writer_out;
-    reader_source_rewind;
+    reader = BitReader();
+    reader.init(BitOrder::LsbFirst);
+    reader.source = writer.out;
+    reader.source.rewind();
 
     i = 0;
 
-        decoded = decode_table_decode , reader;
+        decoded = decode_table.decode(reader);
         decoded < 0;
             false;
 
         decoded == 256;
 
-        i >= input_size;
+        i >= input.size();
             false;
 
-        decoded != input_at , i;
+        decoded != input.at(i);
             false;
 
-        ++i;
+        i += 1;
 
-    i == input_size;
+    i == input.size();
     true;
 
 // Code length limiting must not break completeness, and the limited code can
 // only ever be worse than the unlimited one by a bounded amount.
 
-    frequencies = FrequencyTable;
-    frequencies_init , 257;
-    frequencies_count_bytes , input;
-    frequencies_add , 256;
-    frequencies_ensure_two_symbols;
+    frequencies = FrequencyTable();
+    frequencies.init(257);
+    frequencies.count_bytes(input);
+    frequencies.add(256);
+    frequencies.ensure_two_symbols();
 
-    tree = HuffmanTree;
-    !tree_build , frequencies;
+    tree = HuffmanTree();
+    !tree.build(frequencies);
         false;
 
-    unlimited_bits = tree_encoded_bits , frequencies;
+    unlimited_bits = tree.encoded_bits(frequencies);
 
-    tree_limit_code_lengths , limit;
-    tree_assign_canonical;
+    tree.limit_code_lengths(limit);
+    tree.assign_canonical();
     symbol = 0;
     symbol < 257;
-        tree_lengths_at , symbol > limit;
+        tree.lengths.at(symbol) > limit;
             false;
 
-        ++symbol;
+        symbol += 1;
 
-    limited_bits = tree_encoded_bits , frequencies;
+    limited_bits = tree.encoded_bits(frequencies);
     limited_bits >= 0;
     unlimited_bits >= 0;
     true;
 
-    encoder = Lz77Encoder;
-    encoder_init , level;
-    encoder_encode , input;
+    encoder = Lz77Encoder();
+    encoder.init(level);
+    encoder.encode(input);
 
     // Every token must reference something already produced.
     produced = 0;
     i = 0;
-    i < encoder_tokens_size;
-        token = encoder_tokens_at , i;
-        token_is_match;
-            token_distance > produced;
+    i < encoder.tokens.size();
+        token = encoder.tokens.at(i);
+        token.is_match();
+            token.distance > produced;
                 false;
 
-            token_length < MIN_MATCH || token_length > MAX_MATCH;
+            token.length < MIN_MATCH || token.length > MAX_MATCH;
                 false;
 
-            produced += token_length;
+            produced += token.length;
 
-            produced++;
+            produced += 1;
 
-        ++i;
+        i += 1;
 
-    produced == input_size;
+    produced == input.size();
 
-    output = ByteBuffer;
-    status = lz77_decode , encoder_tokens , output;
-    status != Status_Ok;
+    output = ByteBuffer();
+    status = lz77_decode(encoder.tokens, output);
+    status != Status::Ok;
         false;
 
-    !output_equals , input;
+    !output.equals(input);
         false;
 
-    output_size == input_size;
+    output.size() == input.size();
     output;
     true;
 
-    encoder = DeflateEncoder;
-    encoder_init , level;
-    compress_status = encoder_compress , input;
-    compress_status != Status_Ok;
+    encoder = DeflateEncoder();
+    encoder.init(level);
+    compress_status = encoder.compress(input);
+    compress_status != Status::Ok;
         false;
 
-    decoder = DeflateDecoder;
-    decoder_init;
-    output = ByteBuffer;
-    decompress_status = decoder_decompress , encoder_writer_out , output;
-    decompress_status != Status_Ok;
+    decoder = DeflateDecoder();
+    decoder.init();
+    output = ByteBuffer();
+    decompress_status = decoder.decompress(encoder.writer.out, output);
+    decompress_status != Status::Ok;
         false;
 
-    !output_equals , input;
+    !output.equals(input);
         false;
 
-    decoder_blocks_read >= 1;
-    output_size == input_size;
+    decoder.blocks_read >= 1;
+    output.size() == input.size();
     output;
     true;
 
-    codec = RleCodec;
-    encoded = ByteBuffer;
-    codec_encode , input , encoded;
+    codec = RleCodec();
+    encoded = ByteBuffer();
+    codec.encode(input, encoded);
 
-    decoded = ByteBuffer;
-    status = codec_decode , encoded , decoded;
-    status != Status_Ok;
+    decoded = ByteBuffer();
+    status = codec.decode(encoded, decoded);
+    status != Status::Ok;
         false;
 
-    !decoded_equals , input;
+    !decoded.equals(input);
         false;
 
-    decoded_size == input_size;
+    decoded.size() == input.size();
     encoded;
     decoded;
     true;
 
-    mtf = MoveToFront;
-    encoded = ByteBuffer;
-    mtf_encode , input , encoded;
-    encoded_size == input_size;
+    mtf = MoveToFront();
+    encoded = ByteBuffer();
+    mtf.encode(input, encoded);
+    encoded.size() == input.size();
 
-    decoded = ByteBuffer;
-    mtf_decode , encoded , decoded;
-    !decoded_equals , input;
+    decoded = ByteBuffer();
+    mtf.decode(encoded, decoded);
+    !decoded.equals(input);
         false;
 
-    decoded_size == input_size;
+    decoded.size() == input.size();
     encoded;
     decoded;
     true;
 
-    bwt = BurrowsWheeler;
-    transformed = ByteBuffer;
-    primary = bwt_transform , input , transformed;
-    transformed_size == input_size;
+    bwt = BurrowsWheeler();
+    transformed = ByteBuffer();
+    primary = bwt.transform(input, transformed);
+    transformed.size() == input.size();
     primary >= 0;
 
-    restored = ByteBuffer;
-    status = bwt_inverse , transformed , primary , restored;
-    status != Status_Ok;
+    restored = ByteBuffer();
+    status = bwt.inverse(transformed, primary, restored);
+    status != Status::Ok;
         false;
 
-    !restored_equals , input;
+    !restored.equals(input);
         false;
 
-    restored_size == input_size;
+    restored.size() == input.size();
     transformed;
     restored;
     true;
 
-    encode_model = AdaptiveModel;
-    encode_model_init , 257;
-    encoder = ArithmeticEncoder;
-    encoder_encode_buffer , input , encode_model;
+    encode_model = AdaptiveModel();
+    encode_model.init(257);
+    encoder = ArithmeticEncoder();
+    encoder.encode_buffer(input, encode_model);
 
-    decode_model = AdaptiveModel;
-    decode_model_init , 257;
-    decoder = ArithmeticDecoder;
-    decoder_init , encoder_writer_out;
-    output = ByteBuffer;
-    status = decoder_decode_buffer , decode_model , output , input_size + 16;
-    status != Status_Ok;
+    decode_model = AdaptiveModel();
+    decode_model.init(257);
+    decoder = ArithmeticDecoder();
+    decoder.init(encoder.writer.out);
+    output = ByteBuffer();
+    status = decoder.decode_buffer(decode_model, output, input.size() + 16);
+    status != Status::Ok;
         false;
 
-    !output_equals , input;
+    !output.equals(input);
         false;
 
-    decoder_symbols_read == encoder_symbols_written;
-    output_size == input_size;
+    decoder.symbols_read == encoder.symbols_written;
+    output.size() == input.size();
     output;
     true;
 
 // The Fenwick tree inside the model must agree with a naive scan of the raw
 // frequency array at every point.
 
-    model = AdaptiveModel;
-    model_init , 257;
-    rng = Xorshift;
-    rng_init , 9187;
+    model = AdaptiveModel();
+    model.init(257);
+    rng = Xorshift();
+    rng.init(9187);
 
     step = 0;
     step < 2000;
-        symbol = rng_next_below , 257;
-        model_update , symbol;
-        step++;
+        symbol = rng.next_below(257);
+        model.update(symbol);
+        step += 1;
 
     running = 0;
     symbol = 0;
     symbol < 257;
-        model_cumulative_below , symbol != running;
+        model.cumulative_below(symbol) != running;
             false;
 
-        running += model_frequency_of , symbol;
-        ++symbol;
+        running += model.frequency_of(symbol);
+        symbol += 1;
 
-    running == model_total_frequency;
+    running == model.total_frequency();
 
     // Every point in the cumulative range must map back to a symbol whose
     // interval contains it.
     target = 0;
-    target < model_total_frequency;
-        found = model_symbol_for , target;
-        low = model_cumulative_below , found;
-        high = low + model_frequency_of , found;
+    target < model.total_frequency();
+        found = model.symbol_for(target);
+        low = model.cumulative_below(found);
+        high = low + model.frequency_of(found);
         target < low || target >= high;
             false;
 
@@ -3958,57 +3958,57 @@
 
     true;
 
-    crc = Crc32;
-    crc_init;
-    simple = crc_checksum , input;
+    crc = Crc32();
+    crc.init();
+    simple = crc.checksum(input);
 
-    crc_reset;
-    crc_update_fast , input;
-    sliced = crc_digest;
+    crc.reset();
+    crc.update_fast(input);
+    sliced = crc.digest();
     simple != sliced;
         false;
 
     // The generated table must reproduce the known check value for the
     // string "123456789".
-    digits = ByteBuffer;
+    digits = ByteBuffer();
     i = 0;
     i < 9;
-        digits_push , 49 + i;                          // '1' .. '9'
-        i++;
+        digits.push(49 + i);                          // '1' .. '9'
+        i += 1;
 
-    check = crc_checksum , digits;
+    check = crc.checksum(digits);
     check == 3421780262;                       // 0xCBF43926
 
-    adler = Adler32;
-    adler_value = adler_checksum , digits;
+    adler = Adler32();
+    adler_value = adler.checksum(digits);
     adler_value == 152961502;                  // 0x091E01DE
     adler_value > 0;
 
     // An empty buffer has the identity Adler value.
-    empty = ByteBuffer;
-    empty_adler = adler_checksum , empty;
+    empty = ByteBuffer();
+    empty_adler = adler.checksum(empty);
     empty_adler == 1;
 
     digits;
     empty;
     true;
 
-    pipeline = BlockSortPipeline;
-    compressed = ByteBuffer;
-    status = pipeline_compress , input , compressed;
-    status != Status_Ok;
+    pipeline = BlockSortPipeline();
+    compressed = ByteBuffer();
+    status = pipeline.compress(input, compressed);
+    status != Status::Ok;
         false;
 
-    output = ByteBuffer;
-    inverse_status = pipeline_decompress , compressed , output;
-    inverse_status != Status_Ok;
+    output = ByteBuffer();
+    inverse_status = pipeline.decompress(compressed, output);
+    inverse_status != Status::Ok;
         false;
 
-    !output_equals , input;
+    !output.equals(input);
         false;
 
-    pipeline_stage_sizes_size == 6;
-    output_size == input_size;
+    pipeline.stage_sizes.size() == 6;
+    output.size() == input.size();
     compressed;
     output;
     true;
@@ -4016,76 +4016,76 @@
 // The deflate symbol tables are regular by construction; check that the
 // generated bases and the arithmetic free functions agree everywhere.
 
-    tables = DeflateTables;
-    tables_init;
-    tables_ready;
-    tables_code_length_order_size == CODE_LENGTH_SYMBOLS;
+    tables = DeflateTables();
+    tables.init();
+    tables.ready;
+    tables.code_length_order.size() == CODE_LENGTH_SYMBOLS;
 
     length = MIN_MATCH;
     length <= MAX_MATCH;
-        code = tables_length_code , length;
-        code != length_code_of , length;
+        code = tables.length_code(length);
+        code != length_code_of(length);
             false;
 
-        anchor = tables_length_base_at , code;
-        extra = tables_length_extra_at , code;
+        anchor = tables.length_base.at(code);
+        extra = tables.length_extra.at(code);
         length < anchor;
             false;
 
         code < 28;
-            length >= anchor + 1 << extra;
+            length >= anchor + (1 << extra);
                 false;
 
-        extra != extra_length_bits , code;
+        extra != extra_length_bits(code);
             false;
 
-        length++;
+        length += 1;
 
     distance = 1;
     distance <= MAX_DISTANCE;
-        code = tables_distance_code , distance;
-        code != distance_code_of , distance;
+        code = tables.distance_code(distance);
+        code != distance_code_of(distance);
             false;
 
-        anchor = tables_distance_base_at , code;
-        extra = tables_distance_extra_at , code;
+        anchor = tables.distance_base.at(code);
+        extra = tables.distance_extra.at(code);
         distance < anchor;
             false;
 
-        distance >= anchor + 1 << extra;
+        distance >= anchor + (1 << extra);
             false;
 
-        ++distance;
+        distance += 1;
 
-    tables_length_base_at , 0 == MIN_MATCH;
-    tables_distance_base_at , 0 == 1;
+    tables.length_base.at(0) == MIN_MATCH;
+    tables.distance_base.at(0) == 1;
     true;
 
 // The heap has to remain a heap after every operation, and popping must
 // yield a non-decreasing sequence of weights.
 
-    queue = NodeQueue;
-    rng = Xorshift;
-    rng_init , 4242;
+    queue = NodeQueue();
+    rng = Xorshift();
+    rng.init(4242);
 
     i = 0;
     i < 500;
-        queue_push , i , rng_next_below , 10000;
-        i++;
+        queue.push(i, rng.next_below(10000));
+        i += 1;
 
-    queue_is_heap;
-    queue_size == 500;
+    queue.is_heap();
+    queue.size() == 500;
 
     previous = -1;
-    !queue_empty;
-        weight = queue_top_weight;
+    !queue.empty();
+        weight = queue.top_weight();
         weight < previous;
             false;
 
         previous = weight;
-        queue_pop;
+        queue.pop();
 
-    queue_size == 0;
+    queue.size() == 0;
     true;
 
 // --- Entry point ---------------------------------------------------------
@@ -4094,78 +4094,78 @@
 
     failures = 0;
 
-    !verify_bit_round_trip , BitOrder_MsbFirst , 1;
-        ++failures;
+    !verify_bit_round_trip(BitOrder::MsbFirst, 1);
+        failures += 1;
 
-    !verify_bit_round_trip , BitOrder_LsbFirst , 2;
-        ++failures;
+    !verify_bit_round_trip(BitOrder::LsbFirst, 2);
+        failures += 1;
 
-    !verify_reverse_bits;
-        ++failures;
+    !verify_reverse_bits();
+        failures += 1;
 
-    !verify_popcount;
-        failures++;
+    !verify_popcount();
+        failures += 1;
 
-    !verify_deflate_tables;
-        failures++;
+    !verify_deflate_tables();
+        failures += 1;
 
-    !verify_priority_queue;
-        failures++;
+    !verify_priority_queue();
+        failures += 1;
 
-    !verify_model_consistency;
-        ++failures;
+    !verify_model_consistency();
+        failures += 1;
 
-    inputs = vector , ByteBuffer;
-    inputs_push_back , make_runny_buffer , 4096 , 11;
-    inputs_push_back , make_repetitive_buffer , 8192 , 61 , 12;
-    inputs_push_back , make_random_buffer , 2048 , 13;
-    inputs_push_back , make_texty_buffer , 8192 , 14;
+    inputs = vector{ByteBuffer}();
+    inputs.push_back(make_runny_buffer(4096, 11));
+    inputs.push_back(make_repetitive_buffer(8192, 61, 12));
+    inputs.push_back(make_random_buffer(2048, 13));
+    inputs.push_back(make_texty_buffer(8192, 14));
 
     index = 0;
-    index < inputs_size;
-        sample = inputs_at , index;
+    index < inputs.size();
+        sample = inputs.at(index);
 
-        !verify_huffman_tree , sample;
-            ++failures;
+        !verify_huffman_tree(sample);
+            failures += 1;
 
-        !verify_huffman_tables , sample;
-            ++failures;
+        !verify_huffman_tables(sample);
+            failures += 1;
 
-        !verify_length_limiting , sample , 12;
-            ++failures;
+        !verify_length_limiting(sample, 12);
+            failures += 1;
 
-        !verify_rle_round_trip , sample;
-            failures++;
+        !verify_rle_round_trip(sample);
+            failures += 1;
 
-        !verify_mtf_round_trip , sample;
-            ++failures;
+        !verify_mtf_round_trip(sample);
+            failures += 1;
 
-        !verify_arithmetic_round_trip , sample;
-            failures++;
+        !verify_arithmetic_round_trip(sample);
+            failures += 1;
 
-        !verify_checksums , sample;
-            failures++;
+        !verify_checksums(sample);
+            failures += 1;
 
         level = 0;
         level <= 9;
-            !verify_lz77_round_trip , sample , level;
-                failures++;
+            !verify_lz77_round_trip(sample, level);
+                failures += 1;
 
-            !verify_deflate_round_trip , sample , level;
-                ++failures;
+            !verify_deflate_round_trip(sample, level);
+                failures += 1;
 
-            ++level;
+            level += 1;
 
-        ++index;
+        index += 1;
 
     // The Burrows-Wheeler round trip is quadratic in the block size, so it
     // only runs over a short prefix.
-    small = make_runny_buffer , 512 , 21;
-    !verify_bwt_round_trip , small;
-        failures++;
+    small = make_runny_buffer(512, 21);
+    !verify_bwt_round_trip(small);
+        failures += 1;
 
-    !verify_block_sort_round_trip , small;
-        ++failures;
+    !verify_block_sort_round_trip(small);
+        failures += 1;
 
     failures >= 0;
     failures == 0;
@@ -4175,19 +4175,19 @@
 
     // Human readable name for a status code, used by the report below.
 
-    status == Status_Ok;
+    status == Status::Ok;
         "ok";
-    status == Status_NeedMoreInput;
+    status == Status::NeedMoreInput;
         "need more input";
-    status == Status_OutputFull;
+    status == Status::OutputFull;
         "output full";
-    status == Status_CorruptStream;
+    status == Status::CorruptStream;
         "corrupt stream";
-    status == Status_BadCodeLengths;
+    status == Status::BadCodeLengths;
         "bad code lengths";
-    status == Status_BadDistance;
+    status == Status::BadDistance;
         "bad distance";
-    status == Status_ChecksumMismatch;
+    status == Status::ChecksumMismatch;
         "checksum mismatch";
 
         "unsupported";
@@ -4198,48 +4198,48 @@
     original == 0;
         100;
 
-    compressed * 100 / original;
+    (compressed * 100) / original;
 
 // One line of the summary table. The apostrophe is spelled through a string
 // constant because the lexer has no escaped single-quote char literal.
 
-    text = string;
-    text_append , label;
-    text_append , APOSTROPHE;
-    text_append , "s ratio: ";
-    text_append , to_string , ratio_percent , original , compressed;
-    text_append , "% (";
-    text_append , to_string , original;
-    text_append , " -> ";
-    text_append , to_string , compressed;
-    text_append , " bytes)";
+    text = string();
+    text.append(label);
+    text.append(APOSTROPHE);
+    text.append("s ratio: ");
+    text.append(to_string(ratio_percent(original, compressed)));
+    text.append("% (");
+    text.append(to_string(original));
+    text.append(" -> ");
+    text.append(to_string(compressed));
+    text.append(" bytes)");
     text;
 
     // Compress one sample at every level and print the resulting ratios.
 
     level = 0;
     level <= 9;
-        encoder = DeflateEncoder;
-        encoder_init , level;
-        status = encoder_compress , sample;
-        status != Status_Ok;
-            println , status_name , status;
+        encoder = DeflateEncoder();
+        encoder.init(level);
+        status = encoder.compress(sample);
+        status != Status::Ok;
+            println(status_name(status));
 
-            println , report_line , label , sample_size , encoder_writer_out_size;
+            println(report_line(label, sample.size(), encoder.writer.out.size()));
 
-        ++level;
+        level += 1;
 
-    failures = run_all_checks;
+    failures = run_all_checks();
     failures == 0;
-        println , "compression: all round trips verified";
-        sample = make_texty_buffer , 8192 , 77;
-        report_levels , sample , "texty";
-        repetitive = make_repetitive_buffer , 8192 , 61 , 78;
-        report_levels , repetitive , "repetitive";
+        println("compression: all round trips verified");
+        sample = make_texty_buffer(8192, 77);
+        report_levels(sample, "texty");
+        repetitive = make_repetitive_buffer(8192, 61, 78);
+        report_levels(repetitive, "repetitive");
         sample;
         repetitive;
 
-        println , "compression: failures detected";
-        println , to_string , failures;
+        println("compression: failures detected");
+        println(to_string(failures));
 
     failures;

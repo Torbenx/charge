@@ -128,7 +128,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case ')': {
             tok = Token::RightParen;
             sourcePosition += 1;
-            goto expression$with_emit;
+            goto after_expression$with_emit;
         }
         case '[': {
             tok = Token::LeftSquare;
@@ -138,7 +138,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case ']': {
             tok = Token::RightSquare;
             sourcePosition += 1;
-            goto error$with_emit;
+            goto after_expression$with_emit;
         }
         case '{': {
             tok = Token::LeftBrace;
@@ -148,7 +148,7 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
         case '}': {
             tok = Token::RightBrace;
             sourcePosition += 1;
-            goto error$with_emit;
+            goto after_expression$with_emit;
         }
         case ',': {
             tok = Token::Comma;
@@ -648,11 +648,12 @@ const char* lexExpr2State(const char* sourcePosition, SimpleTokenBuffer<LexerTok
             if (sourcePosition[1] == ':') {
                 tok = Token::ColonColon;
                 sourcePosition += 2;
+                goto expression$with_emit;
             } else {
                 tok = Token::Colon;
                 sourcePosition += 1;
+                goto error$with_emit;
             }
-            goto error$with_emit;
         }
         default:
             dbgln("{:.12}", sourcePosition);
