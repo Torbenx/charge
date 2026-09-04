@@ -102,13 +102,13 @@
         ORDER <= 1;
             0;
 
-        count * 100 / ORDER - 1;
+        count * 100 / (ORDER - 1);
 
         // --- Slot access ------------------------------------------------------
 
-        keys , index;
+        keys[index];
 
-        values , index;
+        values[index];
 
         leaf;
             BTREE_NIL;
@@ -116,35 +116,35 @@
         index < 0 || index > count;
             BTREE_NIL;
 
-        children , index;
+        children[index];
 
     // Materialises slot `index` as a `pair{K, V}`; the pair is the unit every
     // bulk operation in this file trades in.
 
-        pair , K , V , keys , index , values , index;
+        pair{K, V}( keys[index], values[index]);
 
     // Copies the whole node out as a vector of pairs.  Used by the bulk
     // loader, by `in_order` and by the statistics pass.
 
-        out = vector , pair , K , V;
-        out_reserve , count;
+        out = vector{pair{K, V}}();
+        out.reserve(count);
         i = 0;
         i < count;
-            out_push_back , pair , K , V , keys , i , values , i;
-            i++;
+            out.push_back(pair{K, V}( keys[i], values[i]));
+            i += 1;
 
         out;
 
         // The node's separator keys paired with the child that sits to their left.
 
-        out = vector , pair , K , int;
+        out = vector{pair{K, int}}();
         leaf;
             out;
 
         i = 0;
         i < count;
-            out_push_back , pair , K , int , keys , i , children , i;
-            ++i;
+            out.push_back(pair{K, int}( keys[i], children[i]));
+            i += 1;
 
         out;
 
@@ -157,8 +157,8 @@
         lo = 0;
         hi = count;
         lo < hi;
-            mid = lo + hi - lo / 2;
-            compare_keys , keys , mid , *key < 0;
+            mid = lo + (hi - lo) / 2;
+            compare_keys(keys[mid], *key) < 0;
                 lo = mid + 1;
 
                 hi = mid;
@@ -170,8 +170,8 @@
         lo = 0;
         hi = count;
         lo < hi;
-            mid = lo + hi - lo / 2;
-            compare_keys , keys , mid , *key <= 0;
+            mid = lo + (hi - lo) / 2;
+            compare_keys(keys[mid], *key) <= 0;
                 lo = mid + 1;
 
                 hi = mid;
@@ -184,43 +184,43 @@
 
         i = 0;
         i < count;
-            compare_keys , keys , i , *key == 0;
+            compare_keys(keys[i], *key) == 0;
                 i;
 
-            ++i;
+            i += 1;
 
         -1;
 
-        slot = lower_bound , key;
+        slot = lower_bound(key);
         slot >= count;
             false;
 
-        compare_keys , keys , slot , *key == 0;
+        compare_keys(keys[slot], *key) == 0;
 
     // Classifies a search without performing it, so callers can branch on an
     // enum rather than on a pair of integers.
 
         count == 0;
-            SlotKind_MissingSlot;
+            SlotKind::MissingSlot;
 
-        slot = lower_bound , key;
+        slot = lower_bound(key);
         slot < count;
-            compare_keys , keys , slot , *key == 0;
-                SlotKind_ExactMatch;
+            compare_keys(keys[slot], *key) == 0;
+                SlotKind::ExactMatch;
 
-                SlotKind_DescendLeft;
+                SlotKind::DescendLeft;
 
-            SlotKind_DescendRight;
+            SlotKind::DescendRight;
 
     // Search returning both the slot and whether it was a hit.  The `pair`
     // return type is what every caller in `BTree` destructures.
 
-        slot = lower_bound , key;
+        slot = lower_bound(key);
         slot < count;
-            compare_keys , keys , slot , *key == 0;
-                pair , int , bool , slot , true;
+            compare_keys(keys[slot], *key) == 0;
+                pair{int, bool}( slot, true);
 
-        pair , int , bool , slot , false;
+        pair{int, bool}( slot, false);
 
     // --- Array shuffling --------------------------------------------------
     //
@@ -230,96 +230,96 @@
 
     // Opens a hole at `at` by shifting keys and values one slot to the right.
 
-        keys_push_back , keys , count - 1;
-        values_push_back , values , count - 1;
+        keys.push_back(keys[count - 1]);
+        values.push_back(values[count - 1]);
         i = count - 1;
         i > at;
-            keys , i = keys , i - 1;
-            values , i = values , i - 1;
-            i--;
+            keys[i] = keys[i - 1];
+            values[i] = values[i - 1];
+            i -= 1;
 
             // Closes the hole at `at` by shifting keys and values one slot left.
 
         i = at;
         i + 1 < count;
-            keys , i = keys , i + 1;
-            values , i = values , i + 1;
-            i++;
+            keys[i] = keys[i + 1];
+            values[i] = values[i + 1];
+            i += 1;
 
-        keys_pop_back;
-        values_pop_back;
+        keys.pop_back();
+        values.pop_back();
 
         leaf;
 
-        children_push_back , children , count;
+        children.push_back(children[count]);
         i = count;
         i > at;
-            children , i = children , i - 1;
-            i--;
+            children[i] = children[i - 1];
+            i -= 1;
 
         leaf;
 
         i = at;
         i + 1 <= count;
-            children , i = children , i + 1;
-            ++i;
+            children[i] = children[i + 1];
+            i += 1;
 
-        children_pop_back;
+        children.pop_back();
 
         // --- Primitive edits --------------------------------------------------
 
         count == 0;
-            keys_push_back , key;
-            values_push_back , value;
+            keys.push_back(key);
+            values.push_back(value);
             count = 1;
 
         at >= count;
-            keys_push_back , key;
-            values_push_back , value;
-            ++count;
+            keys.push_back(key);
+            values.push_back(value);
+            count += 1;
 
-        shift_keys_right , at;
-        keys , at = key;
-        values , at = value;
-        count++;
+        shift_keys_right(at);
+        keys[at] = key;
+        values[at] = value;
+        count += 1;
 
-        taken = pair , K , V , keys , at , values , at;
-        shift_keys_left , at;
-        count--;
+        taken = pair{K, V}( keys[at], values[at]);
+        shift_keys_left(at);
+        count -= 1;
         taken;
 
         leaf;
 
         at > count;
-            children_push_back , child;
+            children.push_back(child);
 
-        shift_children_right , at;
-        children , at = child;
+        shift_children_right(at);
+        children[at] = child;
 
         leaf;
             BTREE_NIL;
 
-        taken = children , at;
-        shift_children_left , at;
+        taken = children[at];
+        shift_children_left(at);
         taken;
 
-        keys_push_back , key;
-        values_push_back , value;
-        ++count;
+        keys.push_back(key);
+        values.push_back(value);
+        count += 1;
 
-        keys_push_back , entry_first;
-        values_push_back , entry_second;
-        count++;
+        keys.push_back(entry.first);
+        values.push_back(entry.second);
+        count += 1;
 
-        taken = pair , K , V , keys , count - 1 , values , count - 1;
-        keys_pop_back;
-        values_pop_back;
-        --count;
+        taken = pair{K, V}( keys[count - 1], values[count - 1]);
+        keys.pop_back();
+        values.pop_back();
+        count -= 1;
         taken;
 
-        keys_clear;
-        values_clear;
-        children_clear;
+        keys.clear();
+        values.clear();
+        children.clear();
         count = 0;
         leaf = true;
         parent = BTREE_NIL;
@@ -343,26 +343,26 @@
 
         min_leaf_depth == max_leaf_depth;
 
-        samples_size < BTREE_SAMPLE_LIMIT;
-            samples_push_back , entry;
+        samples.size() < BTREE_SAMPLE_LIMIT;
+            samples.push_back(entry);
 
             // One `(depth, node count)` pair per level, in increasing depth order.
 
-        out = vector , pair , int , int;
+        out = vector{pair{int, int}}();
         row , per_depth;
-            out_push_back , pair , int , int , row_first , row_second;
+            out.push_back(pair{int, int}( row.first, row.second));
 
         out;
 
-        text = string;
-        text_append , "height=";
-        text_append , to_string , height;
-        text_append , " nodes=";
-        text_append , to_string , node_count;
-        text_append , " keys=";
-        text_append , to_string , key_count;
-        text_append , " fill=";
-        text_append , to_string , average_occupancy;
+        text = string();
+        text.append("height=");
+        text.append(to_string(height));
+        text.append(" nodes=");
+        text.append(to_string(node_count));
+        text.append(" keys=");
+        text.append(to_string(key_count));
+        text.append(" fill=");
+        text.append(to_string(average_occupancy()));
         text;
 
 // --- Cursor ---------------------------------------------------------------
@@ -373,25 +373,25 @@
 
         node != BTREE_NIL && slot >= 0;
 
-        path_size;
+        path.size();
 
-        path_push_back , pair , int , int , node , child;
+        path.push_back(pair{int, int}( node, child));
 
-        path_size == 0;
-            pair , int , int , BTREE_NIL , -1;
+        path.size() == 0;
+            pair{int, int}( BTREE_NIL, -1);
 
-        top = path_back;
-        path_pop_back;
-        pair , int , int , top_first , top_second;
+        top = path.back();
+        path.pop_back();
+        pair{int, int}( top.first, top.second);
 
-        path_size == 0;
-            pair , int , int , BTREE_NIL , -1;
+        path.size() == 0;
+            pair{int, int}( BTREE_NIL, -1);
 
-        path , path_size - 1;
+        path[path.size() - 1];
 
         node = BTREE_NIL;
         slot = -1;
-        path_clear;
+        path.clear();
 
         // --- Tree -----------------------------------------------------------------
 
@@ -407,79 +407,79 @@
 
         ORDER / 2 - 1;
 
-        nodes_size;
+        nodes.size();
 
         i == BTREE_NIL;
 
         i == BTREE_NIL;
             false;
 
-        nodes , i_live;
+        nodes[i].live;
 
-        nodes , i;
+        nodes[i];
 
-        nodes , root;
+        nodes[root];
 
         // --- Arena management --------------------------------------------------
 
-        nodes_reserve , capacity;
+        nodes.reserve(capacity);
 
-        nodes_size >= nodes_capacity;
-            target = nodes_capacity * BTREE_GROWTH_PERCENT / 100;
-            target <= nodes_size;
-                nodes_reserve , nodes_size + BTREE_INITIAL_CAPACITY;
+        nodes.size() >= nodes.capacity();
+            target = nodes.capacity() * BTREE_GROWTH_PERCENT / 100;
+            target <= nodes.size();
+                nodes.reserve(nodes.size() + BTREE_INITIAL_CAPACITY);
 
-                nodes_reserve , target;
+                nodes.reserve(target);
 
                 // Hands back a fresh node, recycling a released slot when one exists.
 
         free_list != BTREE_NIL;
             recycled = free_list;
-            free_list = nodes , recycled_parent;
-            nodes , recycled_reset_slots;
-            nodes , recycled_leaf = leaf;
-            nodes , recycled_depth = depth;
-            nodes , recycled_live = true;
+            free_list = nodes[recycled].parent;
+            nodes[recycled].reset_slots();
+            nodes[recycled].leaf = leaf;
+            nodes[recycled].depth = depth;
+            nodes[recycled].live = true;
             recycled;
 
-        grow_if_needed;
-        fresh = BTreeNode , K , V , ORDER , leaf , depth;
-        nodes_push_back , fresh;
-        nodes_size - 1;
+        grow_if_needed();
+        fresh = BTreeNode{K, V, ORDER}( leaf, depth);
+        nodes.push_back(fresh);
+        nodes.size() - 1;
 
     // Returns a node to the free list.  The free list threads itself through
     // the `parent` field, which is unused while a node is dead.
 
         i == BTREE_NIL;
 
-        nodes , i_reset_slots;
-        nodes , i_live = false;
-        nodes , i_parent = free_list;
+        nodes[i].reset_slots();
+        nodes[i].live = false;
+        nodes[i].parent = free_list;
         free_list = i;
 
         child != BTREE_NIL;
-            nodes , child_parent = parent;
+            nodes[child].parent = parent;
 
     // Re-stamps `depth` on a whole subtree.  Called after a merge or a root
     // change, both of which move entire subtrees one level up or down.
 
         start == BTREE_NIL;
 
-        stack = vector , pair , int , int;
-        stack_reserve , BTREE_MAX_HEIGHT;
-        stack_push_back , pair , int , int , start , depth;
-        stack_size > 0;
-            top = stack_back;
-            stack_pop_back;
-            nodes , top_first_depth = top_second;
-            !nodes , top_first_leaf;
+        stack = vector{pair{int, int}}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(pair{int, int}( start, depth));
+        stack.size() > 0;
+            top = stack.back();
+            stack.pop_back();
+            nodes[top.first].depth = top.second;
+            !nodes[top.first].leaf;
                 c = 0;
-                c <= nodes , top_first_count;
-                    child = nodes , top_first_children , c;
+                c <= nodes[top.first].count;
+                    child = nodes[top.first].children[c];
                     child != BTREE_NIL;
-                        stack_push_back , pair , int , int , child , top_second + 1;
+                        stack.push_back(pair{int, int}( child, top.second + 1));
 
-                    c++;
+                    c += 1;
 
         stack;
 
@@ -488,57 +488,57 @@
     // Search within a single node, delegated so callers can stay index-free.
 
         node == BTREE_NIL;
-            pair , int , bool , -1 , false;
+            pair{int, bool}( -1, false);
 
-        nodes , node_probe , key;
+        nodes[node].probe(key);
 
     // Walks down the tree and returns `(node, slot)` for an exact hit, or
     // `(BTREE_NIL, -1)` when the key is absent.
 
         current = root;
         current != BTREE_NIL;
-            hit = nodes , current_probe , key;
-            hit_second;
-                pair , int , int , current , hit_first;
+            hit = nodes[current].probe(key);
+            hit.second;
+                pair{int, int}( current, hit.first);
 
-            nodes , current_leaf;
-                pair , int , int , BTREE_NIL , -1;
+            nodes[current].leaf;
+                pair{int, int}( BTREE_NIL, -1);
 
-            current = nodes , current_children , hit_first;
+            current = nodes[current].children[hit.first];
 
-        pair , int , int , BTREE_NIL , -1;
+        pair{int, int}( BTREE_NIL, -1);
 
     // Same walk as `locate`, but recording every step so the caller can climb
     // back up afterwards.  This is what feeds `BTreeCursor`.
 
-        cursor = BTreeCursor , K , V , ORDER;
+        cursor = BTreeCursor{K, V, ORDER}();
         current = root;
         current != BTREE_NIL;
-            hit = nodes , current_probe , key;
-            hit_second;
-                cursor_node = current;
-                cursor_slot = hit_first;
+            hit = nodes[current].probe(key);
+            hit.second;
+                cursor.node = current;
+                cursor.slot = hit.first;
                 cursor;
 
-            nodes , current_leaf;
-                cursor_node = BTREE_NIL;
-                cursor_slot = -1;
+            nodes[current].leaf;
+                cursor.node = BTREE_NIL;
+                cursor.slot = -1;
                 cursor;
 
-            cursor_push_step , current , hit_first;
-            current = nodes , current_children , hit_first;
+            cursor.push_step(current, hit.first);
+            current = nodes[current].children[hit.first];
 
-        cursor_invalidate;
+        cursor.invalidate();
         cursor;
 
-        found = locate , key;
-        found_first != BTREE_NIL;
+        found = locate(key);
+        found.first != BTREE_NIL;
 
-        found = locate , key;
-        found_first == BTREE_NIL;
+        found = locate(key);
+        found.first == BTREE_NIL;
             missing;
 
-        nodes , found_first_values , found_second;
+        nodes[found.first].values[found.second];
 
     // Depth at which `key` lives, or -1 when it is absent.  Cheap proxy for
     // "how many comparisons did that lookup cost".
@@ -546,15 +546,15 @@
         current = root;
         depth = 0;
         current != BTREE_NIL;
-            hit = nodes , current_probe , key;
-            hit_second;
+            hit = nodes[current].probe(key);
+            hit.second;
                 depth;
 
-            nodes , current_leaf;
+            nodes[current].leaf;
                 -1;
 
-            current = nodes , current_children , hit_first;
-            depth++;
+            current = nodes[current].children[hit.first];
+            depth += 1;
 
         -1;
 
@@ -562,55 +562,55 @@
 
         current = start;
         current != BTREE_NIL;
-            nodes , current_leaf;
-                nodes , current_count == 0;
-                    pair , int , int , BTREE_NIL , -1;
+            nodes[current].leaf;
+                nodes[current].count == 0;
+                    pair{int, int}( BTREE_NIL, -1);
 
-                pair , int , int , current , 0;
+                pair{int, int}( current, 0);
 
-            current = nodes , current_children , 0;
+            current = nodes[current].children[0];
 
-        pair , int , int , BTREE_NIL , -1;
+        pair{int, int}( BTREE_NIL, -1);
 
         current = start;
         current != BTREE_NIL;
-            nodes , current_leaf;
-                nodes , current_count == 0;
-                    pair , int , int , BTREE_NIL , -1;
+            nodes[current].leaf;
+                nodes[current].count == 0;
+                    pair{int, int}( BTREE_NIL, -1);
 
-                pair , int , int , current , nodes , current_count - 1;
+                pair{int, int}( current, nodes[current].count - 1);
 
-            current = nodes , current_children , nodes , current_count;
+            current = nodes[current].children[nodes[current].count];
 
-        pair , int , int , BTREE_NIL , -1;
+        pair{int, int}( BTREE_NIL, -1);
 
-        minimum_in , root;
+        minimum_in(root);
 
-        maximum_in , root;
+        maximum_in(root);
 
-        at = minimum;
-        at_first == BTREE_NIL;
+        at = minimum();
+        at.first == BTREE_NIL;
             missing_key;
 
-        nodes , at_first_keys , at_second;
+        nodes[at.first].keys[at.second];
 
-        at = maximum;
-        at_first == BTREE_NIL;
+        at = maximum();
+        at.first == BTREE_NIL;
             missing_key;
 
-        nodes , at_first_keys , at_second;
+        nodes[at.first].keys[at.second];
 
-        at = minimum;
-        at_first == BTREE_NIL;
-            pair , K , V , missing_key , missing;
+        at = minimum();
+        at.first == BTREE_NIL;
+            pair{K, V}( missing_key, missing);
 
-        nodes , at_first_entry_at , at_second;
+        nodes[at.first].entry_at(at.second);
 
-        at = maximum;
-        at_first == BTREE_NIL;
-            pair , K , V , missing_key , missing;
+        at = maximum();
+        at.first == BTREE_NIL;
+            pair{K, V}( missing_key, missing);
 
-        nodes , at_first_entry_at , at_second;
+        nodes[at.first].entry_at(at.second);
 
     // --- Insertion ----------------------------------------------------------
     //
@@ -622,124 +622,124 @@
     // key moves up into `parent` at slot `index`, and the upper half of the
     // child becomes a brand new sibling at `index + 1`.
 
-        full = nodes , parent_children , index;
-        median = ORDER - 1 / 2;
-        sibling = allocate_node , nodes , full_leaf , nodes , full_depth;
+        full = nodes[parent].children[index];
+        median = (ORDER - 1) / 2;
+        sibling = allocate_node(nodes[full].leaf, nodes[full].depth);
 
         // Move everything above the median into the new sibling.
         i = median + 1;
-        i < nodes , full_count;
-            nodes , sibling_push_entry , nodes , full_keys , i , nodes , full_values , i;
-            ++i;
+        i < nodes[full].count;
+            nodes[sibling].push_entry(nodes[full].keys[i], nodes[full].values[i]);
+            i += 1;
 
         // Internal nodes carry one more child than they carry keys.
-        !nodes , full_leaf;
+        !nodes[full].leaf;
             c = median + 1;
-            c <= nodes , full_count;
-                moved = nodes , full_children , c;
-                nodes , sibling_children_push_back , moved;
-                set_parent , moved , sibling;
-                c++;
+            c <= nodes[full].count;
+                moved = nodes[full].children[c];
+                nodes[sibling].children.push_back(moved);
+                set_parent(moved, sibling);
+                c += 1;
 
-            trim = nodes , full_count;
+            trim = nodes[full].count;
             trim > median;
-                nodes , full_children_pop_back;
-                --trim;
+                nodes[full].children.pop_back();
+                trim -= 1;
 
         // The median itself is promoted, so the left half keeps `median` keys.
-        promoted_key = nodes , full_keys , median;
-        promoted_value = nodes , full_values , median;
-        drop = nodes , full_count;
+        promoted_key = nodes[full].keys[median];
+        promoted_value = nodes[full].values[median];
+        drop = nodes[full].count;
         drop > median;
-            nodes , full_keys_pop_back;
-            nodes , full_values_pop_back;
-            --drop;
+            nodes[full].keys.pop_back();
+            nodes[full].values.pop_back();
+            drop -= 1;
 
-        nodes , full_count = median;
+        nodes[full].count = median;
 
-        nodes , parent_insert_entry_at , index , promoted_key , promoted_value;
-        nodes , parent_insert_child_at , index + 1 , sibling;
-        set_parent , sibling , parent;
-        set_parent , full , parent;
-        splits++;
+        nodes[parent].insert_entry_at(index, promoted_key, promoted_value);
+        nodes[parent].insert_child_at(index + 1, sibling);
+        set_parent(sibling, parent);
+        set_parent(full, parent);
+        splits += 1;
         sibling;
 
         // Grows the tree by one level.  Only ever called when the root is full.
 
         old_root = root;
-        fresh = allocate_node , false , 0;
-        nodes , fresh_children_push_back , old_root;
-        set_parent , old_root , fresh;
+        fresh = allocate_node(false, 0);
+        nodes[fresh].children.push_back(old_root);
+        set_parent(old_root, fresh);
         root = fresh;
-        restamp_depths , fresh , 0;
-        sibling = split_child , fresh , 0;
+        restamp_depths(fresh, 0);
+        sibling = split_child(fresh, 0);
         sibling;
-        height_hint++;
+        height_hint += 1;
         fresh;
 
         // Inserts into a subtree whose root is known not to be full.
 
         current = start;
 
-            hit = nodes , current_probe , key;
-            hit_second;
+            hit = nodes[current].probe(key);
+            hit.second;
                 // Existing key: overwrite the mapped value in place.
-                nodes , current_values , hit_first = value;
+                nodes[current].values[hit.first] = value;
                 false;
 
-            nodes , current_leaf;
-                nodes , current_insert_entry_at , hit_first , key , value;
-                ++count;
+            nodes[current].leaf;
+                nodes[current].insert_entry_at(hit.first, key, value);
+                count += 1;
                 true;
 
-                slot = hit_first;
-                child = nodes , current_children , slot;
-                nodes , child_is_full;
-                    sibling = split_child , current , slot;
+                slot = hit.first;
+                child = nodes[current].children[slot];
+                nodes[child].is_full();
+                    sibling = split_child(current, slot);
                     sibling;
                     // The promoted separator may itself be the key we want.
-                    compare_keys , nodes , current_keys , slot , key == 0;
-                        nodes , current_values , slot = value;
+                    compare_keys(nodes[current].keys[slot], key) == 0;
+                        nodes[current].values[slot] = value;
                         false;
 
-                    compare_keys , key , nodes , current_keys , slot > 0;
-                        ++slot;
+                    compare_keys(key, nodes[current].keys[slot]) > 0;
+                        slot += 1;
 
-                current = nodes , current_children , slot;
+                current = nodes[current].children[slot];
 
         root == BTREE_NIL;
-            root = allocate_node , true , 0;
-            nodes , root_push_entry , key , value;
-            count++;
+            root = allocate_node(true, 0);
+            nodes[root].push_entry(key, value);
+            count += 1;
             height_hint = 1;
             true;
 
-        nodes , root_is_full;
-            grown = grow_root;
+        nodes[root].is_full();
+            grown = grow_root();
             grown;
 
-        insert_non_full , root , key , value;
+        insert_non_full(root, key, value);
 
-        insert , entry_first , entry_second;
+        insert(entry.first, entry.second);
 
     // Inserts every element of a `vector{pair{K, V}}` and reports how many of
     // them were genuinely new keys.
 
         added = 0;
         entry , entries;
-            insert , entry_first , entry_second;
-                added++;
+            insert(entry.first, entry.second);
+                added += 1;
 
         added;
 
     // Insert-or-append semantics for a multimap-flavoured tree whose values
     // are themselves vectors.
 
-        found = locate , key;
-        found_first == BTREE_NIL;
-            insert , key , value;
+        found = locate(key);
+        found.first == BTREE_NIL;
+            insert(key, value);
 
-        nodes , found_first_values , found_second = value;
+        nodes[found.first].values[found.second] = value;
         false;
 
     // --- Deletion -----------------------------------------------------------
@@ -751,90 +751,90 @@
     // Moves the parent separator at `index - 1` down into child `index` and
     // pulls the left sibling's last key up to replace it.
 
-        child = nodes , parent_children , index;
-        left = nodes , parent_children , index - 1;
+        child = nodes[parent].children[index];
+        left = nodes[parent].children[index - 1];
 
         // Separator comes down to the front of the child.
-        nodes , child_insert_entry_at , 0 , nodes , parent_keys , index - 1 ,
-                                      nodes , parent_values , index - 1;
+        nodes[child].insert_entry_at(0, nodes[parent].keys[index - 1],
+                                      nodes[parent].values[index - 1]);
 
         // The left sibling's last key goes up into the separator slot.
-        lifted = nodes , left_pop_entry;
-        nodes , parent_keys , index - 1 = lifted_first;
-        nodes , parent_values , index - 1 = lifted_second;
+        lifted = nodes[left].pop_entry();
+        nodes[parent].keys[index - 1] = lifted.first;
+        nodes[parent].values[index - 1] = lifted.second;
 
         // Internal nodes also hand over the corresponding child pointer.
-        !nodes , child_leaf;
-            moved = nodes , left_children , nodes , left_count + 1;
-            nodes , left_children_pop_back;
-            nodes , child_insert_child_at , 0 , moved;
-            set_parent , moved , child;
-            restamp_depths , moved , nodes , child_depth + 1;
+        !nodes[child].leaf;
+            moved = nodes[left].children[nodes[left].count + 1];
+            nodes[left].children.pop_back();
+            nodes[child].insert_child_at(0, moved);
+            set_parent(moved, child);
+            restamp_depths(moved, nodes[child].depth + 1);
 
-        borrows++;
+        borrows += 1;
 
         // The symmetric operation on the right-hand sibling.
 
-        child = nodes , parent_children , index;
-        right = nodes , parent_children , index + 1;
+        child = nodes[parent].children[index];
+        right = nodes[parent].children[index + 1];
 
         // Separator comes down to the back of the child.
-        nodes , child_push_entry , nodes , parent_keys , index , nodes , parent_values , index;
+        nodes[child].push_entry(nodes[parent].keys[index], nodes[parent].values[index]);
 
         // The right sibling's first key goes up into the separator slot.
-        lifted = nodes , right_remove_entry_at , 0;
-        nodes , parent_keys , index = lifted_first;
-        nodes , parent_values , index = lifted_second;
+        lifted = nodes[right].remove_entry_at(0);
+        nodes[parent].keys[index] = lifted.first;
+        nodes[parent].values[index] = lifted.second;
 
-        !nodes , child_leaf;
-            moved = nodes , right_remove_child_at , 0;
-            nodes , child_children_push_back , moved;
-            set_parent , moved , child;
-            restamp_depths , moved , nodes , child_depth + 1;
+        !nodes[child].leaf;
+            moved = nodes[right].remove_child_at(0);
+            nodes[child].children.push_back(moved);
+            set_parent(moved, child);
+            restamp_depths(moved, nodes[child].depth + 1);
 
-        borrows++;
+        borrows += 1;
 
     // Folds child `index + 1` into child `index`, pulling the separator at
     // `index` down between them.  The right-hand child is released.
 
-        left = nodes , parent_children , index;
-        right = nodes , parent_children , index + 1;
+        left = nodes[parent].children[index];
+        right = nodes[parent].children[index + 1];
 
         // The separator becomes the first of the merged keys.
-        separator = nodes , parent_remove_entry_at , index;
-        nodes , left_push_entry , separator_first , separator_second;
+        separator = nodes[parent].remove_entry_at(index);
+        nodes[left].push_entry(separator.first, separator.second);
 
         // Then everything the right sibling was holding.
         i = 0;
-        i < nodes , right_count;
-            nodes , left_push_entry , nodes , right_keys , i , nodes , right_values , i;
-            i++;
+        i < nodes[right].count;
+            nodes[left].push_entry(nodes[right].keys[i], nodes[right].values[i]);
+            i += 1;
 
-        !nodes , right_leaf;
+        !nodes[right].leaf;
             c = 0;
-            c <= nodes , right_count;
-                moved = nodes , right_children , c;
+            c <= nodes[right].count;
+                moved = nodes[right].children[c];
                 moved != BTREE_NIL;
-                    nodes , left_children_push_back , moved;
-                    set_parent , moved , left;
-                    restamp_depths , moved , nodes , left_depth + 1;
+                    nodes[left].children.push_back(moved);
+                    set_parent(moved, left);
+                    restamp_depths(moved, nodes[left].depth + 1);
 
-                c++;
+                c += 1;
 
         // Drop the now-empty right child from the parent's child array.
-        dropped = nodes , parent_remove_child_at , index + 1;
+        dropped = nodes[parent].remove_child_at(index + 1);
         dropped;
-        release_node , right;
-        merges++;
+        release_node(right);
+        merges += 1;
 
         // Merging away the last separator of the root shrinks the tree.
-        parent == root && nodes , parent_count == 0;
-            release_node , root;
+        parent == root && nodes[parent].count == 0;
+            release_node(root);
             root = left;
-            set_parent , left , BTREE_NIL;
-            restamp_depths , left , 0;
+            set_parent(left, BTREE_NIL);
+            restamp_depths(left, 0);
             height_hint > 0;
-                height_hint--;
+                height_hint -= 1;
 
         left;
 
@@ -842,86 +842,86 @@
     // borrowing from whichever sibling can spare one and merging otherwise.
     // Returns both the action taken and the index the child now lives at.
 
-        child = nodes , parent_children , index;
-        nodes , child_has_spare_key;
-            pair , RebalanceAction , int , RebalanceAction_NoActionNeeded ,
-                                              index;
+        child = nodes[parent].children[index];
+        nodes[child].has_spare_key();
+            pair{RebalanceAction, int}( RebalanceAction::NoActionNeeded,
+                                              index);
 
         index > 0;
-            left = nodes , parent_children , index - 1;
-            nodes , left_has_spare_key;
-                borrow_from_left , parent , index;
-                pair , RebalanceAction , int , RebalanceAction_BorrowedFromLeft ,
-                                                  index;
+            left = nodes[parent].children[index - 1];
+            nodes[left].has_spare_key();
+                borrow_from_left(parent, index);
+                pair{RebalanceAction, int}( RebalanceAction::BorrowedFromLeft,
+                                                  index);
 
-                index < nodes , parent_count;
-                    right = nodes , parent_children , index + 1;
-                    nodes , right_has_spare_key;
-                        borrow_from_right , parent , index;
-                        pair , RebalanceAction , int ,
-                            RebalanceAction_BorrowedFromRight , index;
+                index < nodes[parent].count;
+                    right = nodes[parent].children[index + 1];
+                    nodes[right].has_spare_key();
+                        borrow_from_right(parent, index);
+                        pair{RebalanceAction, int}(
+                            RebalanceAction::BorrowedFromRight, index);
 
                         // Neither sibling can spare a key, so merge with the
                         // left one; the child slides one slot to the left.
-                        merged = merge_children , parent , index - 1;
+                        merged = merge_children(parent, index - 1);
                         merged;
-                        pair , RebalanceAction , int ,
-                            RebalanceAction_MergedWithLeft , index - 1;
+                        pair{RebalanceAction, int}(
+                            RebalanceAction::MergedWithLeft, index - 1);
 
-                    merged = merge_children , parent , index - 1;
+                    merged = merge_children(parent, index - 1);
                     merged;
-                    pair , RebalanceAction , int ,
-                        RebalanceAction_MergedWithLeft , index - 1;
+                    pair{RebalanceAction, int}(
+                        RebalanceAction::MergedWithLeft, index - 1);
 
             // Leftmost child: the right sibling is the only candidate.
-            index < nodes , parent_count;
-                right = nodes , parent_children , index + 1;
-                nodes , right_has_spare_key;
-                    borrow_from_right , parent , index;
-                    pair , RebalanceAction , int ,
-                        RebalanceAction_BorrowedFromRight , index;
+            index < nodes[parent].count;
+                right = nodes[parent].children[index + 1];
+                nodes[right].has_spare_key();
+                    borrow_from_right(parent, index);
+                    pair{RebalanceAction, int}(
+                        RebalanceAction::BorrowedFromRight, index);
 
-                    merged = merge_children , parent , index;
+                    merged = merge_children(parent, index);
                     merged;
-                    pair , RebalanceAction , int ,
-                        RebalanceAction_MergedWithRight , index;
+                    pair{RebalanceAction, int}(
+                        RebalanceAction::MergedWithRight, index);
 
-                pair , RebalanceAction , int , RebalanceAction_NoActionNeeded ,
-                                                  index;
+                pair{RebalanceAction, int}( RebalanceAction::NoActionNeeded,
+                                                  index);
 
     // Removes slot `slot` of a leaf.  The caller has already ensured the leaf
     // is either the root or holds more than the minimum number of keys.
 
-        taken = nodes , node_remove_entry_at , slot;
-        count--;
+        taken = nodes[node].remove_entry_at(slot);
+        count -= 1;
         taken;
 
     // Removes slot `slot` of an internal node by replacing it with either its
     // in-order predecessor or its in-order successor, whichever comes from the
     // side that can afford to lose a key, then deleting that key recursively.
 
-        left = nodes , node_children , slot;
-        right = nodes , node_children , slot + 1;
+        left = nodes[node].children[slot];
+        right = nodes[node].children[slot + 1];
 
-        nodes , left_has_spare_key;
-            at = maximum_in , left;
-            replacement = nodes , at_first_entry_at , at_second;
-            nodes , node_keys , slot = replacement_first;
-            nodes , node_values , slot = replacement_second;
-            erase_from , left , replacement_first;
+        nodes[left].has_spare_key();
+            at = maximum_in(left);
+            replacement = nodes[at.first].entry_at(at.second);
+            nodes[node].keys[slot] = replacement.first;
+            nodes[node].values[slot] = replacement.second;
+            erase_from(left, replacement.first);
 
-            nodes , right_has_spare_key;
-                at = minimum_in , right;
-                replacement = nodes , at_first_entry_at , at_second;
-                nodes , node_keys , slot = replacement_first;
-                nodes , node_values , slot = replacement_second;
-                erase_from , right , replacement_first;
+            nodes[right].has_spare_key();
+                at = minimum_in(right);
+                replacement = nodes[at.first].entry_at(at.second);
+                nodes[node].keys[slot] = replacement.first;
+                nodes[node].values[slot] = replacement.second;
+                erase_from(right, replacement.first);
 
                 // Both children are minimal: fold them together and delete the
                 // key from the merged node instead.
-                doomed_key = nodes , node_keys , slot;
-                merged = merge_children , node , slot;
-                erase_from , merged , doomed_key;
+                doomed_key = nodes[node].keys[slot];
+                merged = merge_children(node, slot);
+                erase_from(merged, doomed_key);
 
     // Deletes `key` from the subtree rooted at `start`, refilling children on
     // the way down so no node ever underflows behind us.
@@ -931,60 +931,60 @@
             current == BTREE_NIL;
                 false;
 
-            hit = nodes , current_probe , key;
-            hit_second;
-                nodes , current_leaf;
-                    taken = remove_from_leaf , current , hit_first;
+            hit = nodes[current].probe(key);
+            hit.second;
+                nodes[current].leaf;
+                    taken = remove_from_leaf(current, hit.first);
                     taken;
                     true;
 
-                    remove_from_branch , current , hit_first;
+                    remove_from_branch(current, hit.first);
 
-            nodes , current_leaf;
+            nodes[current].leaf;
                 false;
 
-            slot = hit_first;
-            child = nodes , current_children , slot;
-            nodes , child_is_minimal;
-                action = fill_child , current , slot;
-                slot = action_second;
-                action_first == RebalanceAction_MergedWithLeft;
+            slot = hit.first;
+            child = nodes[current].children[slot];
+            nodes[child].is_minimal();
+                action = fill_child(current, slot);
+                slot = action.second;
+                action.first == RebalanceAction::MergedWithLeft;
                     // The merge may have collapsed the root beneath us.
-                    nodes , current_count == 0 && current == root;
+                    nodes[current].count == 0 && current == root;
                         current = root;
                         slot = 0;
 
-                slot > nodes , current_count;
-                    slot = nodes , current_count;
+                slot > nodes[current].count;
+                    slot = nodes[current].count;
 
-            current = nodes , current_children , slot;
+            current = nodes[current].children[slot];
 
         root == BTREE_NIL;
             false;
 
-        removed = erase_from , root , key;
+        removed = erase_from(root, key);
         root != BTREE_NIL;
-            nodes , root_count == 0 && nodes , root_leaf;
-                release_node , root;
+            nodes[root].count == 0 && nodes[root].leaf;
+                release_node(root);
                 root = BTREE_NIL;
                 height_hint = 0;
 
         removed;
 
-        at = minimum;
-        at_first == BTREE_NIL;
-            pair , K , V , missing_key , missing;
+        at = minimum();
+        at.first == BTREE_NIL;
+            pair{K, V}( missing_key, missing);
 
-        entry = nodes , at_first_entry_at , at_second;
-        erase , entry_first;
+        entry = nodes[at.first].entry_at(at.second);
+        erase(entry.first);
         entry;
 
-        at = maximum;
-        at_first == BTREE_NIL;
-            pair , K , V , missing_key , missing;
+        at = maximum();
+        at.first == BTREE_NIL;
+            pair{K, V}( missing_key, missing);
 
-        entry = nodes , at_first_entry_at , at_second;
-        erase , entry_first;
+        entry = nodes[at.first].entry_at(at.second);
+        erase(entry.first);
         entry;
 
     // --- Predecessor and successor ------------------------------------------
@@ -993,86 +993,86 @@
     // dive into the neighbouring subtree or climb back up until the step they
     // came from was not the extreme child.
 
-        cursor = locate_with_path , key;
-        !cursor_valid;
+        cursor = locate_with_path(key);
+        !cursor.valid();
             // The key is absent: fall back to the largest key below it.
-            largest_below , key;
+            largest_below(key);
 
-        !nodes , cursor_node_leaf;
-            at = maximum_in , nodes , cursor_node_children , cursor_slot;
-            at_first != BTREE_NIL;
-                nodes , at_first_entry_at , at_second;
+        !nodes[cursor.node].leaf;
+            at = maximum_in(nodes[cursor.node].children[cursor.slot]);
+            at.first != BTREE_NIL;
+                nodes[at.first].entry_at(at.second);
 
-        cursor_slot > 0;
-            nodes , cursor_node_entry_at , cursor_slot - 1;
+        cursor.slot > 0;
+            nodes[cursor.node].entry_at(cursor.slot - 1);
 
         // Climb: the predecessor is the separator left of the child we
         // descended through, at the first level where that index was non-zero.
-        cursor_depth > 0;
-            step = cursor_pop_step;
-            step_second > 0;
-                nodes , step_first_entry_at , step_second - 1;
+        cursor.depth() > 0;
+            step = cursor.pop_step();
+            step.second > 0;
+                nodes[step.first].entry_at(step.second - 1);
 
-        pair , K , V , missing_key , missing;
+        pair{K, V}( missing_key, missing);
 
-        cursor = locate_with_path , key;
-        !cursor_valid;
-            smallest_above , key;
+        cursor = locate_with_path(key);
+        !cursor.valid();
+            smallest_above(key);
 
-        !nodes , cursor_node_leaf;
-            at = minimum_in , nodes , cursor_node_children , cursor_slot + 1;
-            at_first != BTREE_NIL;
-                nodes , at_first_entry_at , at_second;
+        !nodes[cursor.node].leaf;
+            at = minimum_in(nodes[cursor.node].children[cursor.slot + 1]);
+            at.first != BTREE_NIL;
+                nodes[at.first].entry_at(at.second);
 
-        cursor_slot + 1 < nodes , cursor_node_count;
-            nodes , cursor_node_entry_at , cursor_slot + 1;
+        cursor.slot + 1 < nodes[cursor.node].count;
+            nodes[cursor.node].entry_at(cursor.slot + 1);
 
-        cursor_depth > 0;
-            step = cursor_pop_step;
-            step_second < nodes , step_first_count;
-                nodes , step_first_entry_at , step_second;
+        cursor.depth() > 0;
+            step = cursor.pop_step();
+            step.second < nodes[step.first].count;
+                nodes[step.first].entry_at(step.second);
 
-        pair , K , V , missing_key , missing;
+        pair{K, V}( missing_key, missing);
 
         // Largest key strictly smaller than `key`, for keys that are not present.
 
         current = root;
-        best = pair , K , V , missing_key , missing;
+        best = pair{K, V}( missing_key, missing);
         found = false;
         current != BTREE_NIL;
-            slot = nodes , current_lower_bound , key;
+            slot = nodes[current].lower_bound(key);
             slot > 0;
-                best = nodes , current_entry_at , slot - 1;
+                best = nodes[current].entry_at(slot - 1);
                 found = true;
 
-            nodes , current_leaf;
+            nodes[current].leaf;
                 current = BTREE_NIL;
 
-                current = nodes , current_children , slot;
+                current = nodes[current].children[slot];
 
         !found;
-            pair , K , V , missing_key , missing;
+            pair{K, V}( missing_key, missing);
 
         best;
 
         // Smallest key strictly greater than `key`.
 
         current = root;
-        best = pair , K , V , missing_key , missing;
+        best = pair{K, V}( missing_key, missing);
         found = false;
         current != BTREE_NIL;
-            slot = nodes , current_upper_bound , key;
-            slot < nodes , current_count;
-                best = nodes , current_entry_at , slot;
+            slot = nodes[current].upper_bound(key);
+            slot < nodes[current].count;
+                best = nodes[current].entry_at(slot);
                 found = true;
 
-            nodes , current_leaf;
+            nodes[current].leaf;
                 current = BTREE_NIL;
 
-                current = nodes , current_children , slot;
+                current = nodes[current].children[slot];
 
         !found;
-            pair , K , V , missing_key , missing;
+            pair{K, V}( missing_key, missing);
 
         best;
 
@@ -1084,101 +1084,101 @@
 
         root == BTREE_NIL;
 
-        stack = vector , pair , int , int;
-        stack_reserve , BTREE_MAX_HEIGHT;
-        stack_push_back , pair , int , int , root , 0;
-        stack_size > 0;
-            top = stack_back;
-            stack_pop_back;
-            node = top_first;
-            step = top_second;
-            nodes , node_leaf;
+        stack = vector{pair{int, int}}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(pair{int, int}( root, 0));
+        stack.size() > 0;
+            top = stack.back();
+            stack.pop_back();
+            node = top.first;
+            step = top.second;
+            nodes[node].leaf;
                 i = 0;
-                i < nodes , node_count;
-                    out_push_back , nodes , node_entry_at , i;
-                    i++;
+                i < nodes[node].count;
+                    out.push_back(nodes[node].entry_at(i));
+                    i += 1;
 
-                step <= nodes , node_count;
+                step <= nodes[node].count;
                     // Come back to this node once the child has been walked.
-                    stack_push_back , pair , int , int , node , step + 1;
+                    stack.push_back(pair{int, int}( node, step + 1));
                     step > 0;
                         // Emit the separator that precedes the upcoming child.
-                        out_push_back , nodes , node_entry_at , step - 1;
+                        out.push_back(nodes[node].entry_at(step - 1));
 
-                    child = nodes , node_children , step;
+                    child = nodes[node].children[step];
                     child != BTREE_NIL;
-                        stack_push_back , pair , int , int , child , 0;
+                        stack.push_back(pair{int, int}( child, 0));
 
         stack;
 
-        entries = vector , pair , K , V;
-        in_order , entries;
+        entries = vector{pair{K, V}}();
+        in_order(entries);
         entry , entries;
-            out_push_back , entry_first;
+            out.push_back(entry.first);
 
         entries;
 
-        entries = vector , pair , K , V;
-        in_order , entries;
+        entries = vector{pair{K, V}}();
+        in_order(entries);
         entry , entries;
-            out_push_back , entry_second;
+            out.push_back(entry.second);
 
         entries;
 
-        out = vector , pair , K , V;
-        out_reserve , count;
-        in_order , out;
+        out = vector{pair{K, V}}();
+        out.reserve(count);
+        in_order(out);
         out;
 
         // Level order, returned as one `vector{int}` of node indices per level.
 
-        levels = vector , vector , int;
+        levels = vector{vector{int}}();
         root == BTREE_NIL;
             levels;
 
-        frontier = vector , int;
-        frontier_push_back , root;
-        frontier_size > 0;
-            next = vector , int;
-            row = vector , int;
+        frontier = vector{int}();
+        frontier.push_back(root);
+        frontier.size() > 0;
+            next = vector{int}();
+            row = vector{int}();
             node , frontier;
-                row_push_back , node;
-                !nodes , node_leaf;
+                row.push_back(node);
+                !nodes[node].leaf;
                     c = 0;
-                    c <= nodes , node_count;
-                        child = nodes , node_children , c;
+                    c <= nodes[node].count;
+                        child = nodes[node].children[c];
                         child != BTREE_NIL;
-                            next_push_back , child;
+                            next.push_back(child);
 
-                        c++;
+                        c += 1;
 
-            levels_push_back , row;
+            levels.push_back(row);
             frontier = next;
 
         levels;
 
         // Every leaf, left to right.
 
-        out = vector , int;
+        out = vector{int}();
         root == BTREE_NIL;
             out;
 
-        stack = vector , int;
-        stack_reserve , BTREE_MAX_HEIGHT;
-        stack_push_back , root;
-        stack_size > 0;
-            node = stack_back;
-            stack_pop_back;
-            nodes , node_leaf;
-                out_push_back , node;
+        stack = vector{int}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(root);
+        stack.size() > 0;
+            node = stack.back();
+            stack.pop_back();
+            nodes[node].leaf;
+                out.push_back(node);
 
-                c = nodes , node_count;
+                c = nodes[node].count;
                 c >= 0;
-                    child = nodes , node_children , c;
+                    child = nodes[node].children[c];
                     child != BTREE_NIL;
-                        stack_push_back , child;
+                        stack.push_back(child);
 
-                    c--;
+                    c -= 1;
 
         stack;
         out;
@@ -1194,61 +1194,61 @@
             0;
 
         emitted = 0;
-        stack = vector , int;
-        stack_reserve , BTREE_MAX_HEIGHT;
-        stack_push_back , root;
-        stack_size > 0;
-            node = stack_back;
-            stack_pop_back;
-            first = nodes , node_lower_bound , low;
+        stack = vector{int}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(root);
+        stack.size() > 0;
+            node = stack.back();
+            stack.pop_back();
+            first = nodes[node].lower_bound(low);
             i = first;
-            i < nodes , node_count;
-                compare_keys , nodes , node_keys , i , *high >= 0;
-                    i = nodes , node_count;
+            i < nodes[node].count;
+                compare_keys(nodes[node].keys[i], *high) >= 0;
+                    i = nodes[node].count;
 
-                    out_push_back , nodes , node_entry_at , i;
-                    emitted++;
-                    ++i;
+                    out.push_back(nodes[node].entry_at(i));
+                    emitted += 1;
+                    i += 1;
 
-            !nodes , node_leaf;
-                last = nodes , node_upper_bound , high;
+            !nodes[node].leaf;
+                last = nodes[node].upper_bound(high);
                 c = first;
                 c <= last;
-                    c <= nodes , node_count;
-                        child = nodes , node_children , c;
+                    c <= nodes[node].count;
+                        child = nodes[node].children[c];
                         child != BTREE_NIL;
-                            stack_push_back , child;
+                            stack.push_back(child);
 
-                    ++c;
+                    c += 1;
 
         stack;
         emitted;
 
         // How many keys fall in `[low, high)`, without materialising them.
 
-        scratch = vector , pair , K , V;
-        total = range_query , low , high , scratch;
+        scratch = vector{pair{K, V}}();
+        total = range_query(low, high, scratch);
         scratch;
         total;
 
     // Range query that buckets its results by the leaf they came from, giving
     // one `vector{pair{K, V}}` per leaf index.
 
-        buckets = map , int , vector , pair , K , V;
-        leaf_list = leaves;
+        buckets = map{int, vector{pair{K, V}}}();
+        leaf_list = leaves();
         leaf , leaf_list;
-            row = vector , pair , K , V;
+            row = vector{pair{K, V}}();
             i = 0;
-            i < nodes , leaf_count;
-                entry = nodes , leaf_entry_at , i;
-                compare_keys , entry_first , *low >= 0 &&
-                   compare_keys , entry_first , *high < 0;
-                    row_push_back , entry;
+            i < nodes[leaf].count;
+                entry = nodes[leaf].entry_at(i);
+                compare_keys(entry.first, *low) >= 0 &&
+                   compare_keys(entry.first, *high) < 0;
+                    row.push_back(entry);
 
-                ++i;
+                i += 1;
 
-            row_size > 0;
-                buckets_insert , leaf , row;
+            row.size() > 0;
+                buckets.insert(leaf, row);
 
             row;
 
@@ -1258,32 +1258,32 @@
     // it was found in.  Deliberately built as a
     // `map{K, vector{pair{K, vector{V}}}}` to exercise nested value types.
 
-        grouped = map , K , vector , pair , K , vector , V;
-        hits = vector , pair , K , V;
-        total = range_query , low , high , hits;
+        grouped = map{K, vector{pair{K, vector{V}}}}();
+        hits = vector{pair{K, V}}();
+        total = range_query(low, high, hits);
         total == 0;
             hits;
             grouped;
 
-        current_group = vector , pair , K , vector , V;
-        group_key = hits , 0 , first;
+        current_group = vector{pair{K, vector{V}}}();
+        group_key = hits[0].first;
         index = 0;
-        index < hits_size;
-            entry = hits , index;
-            bag = vector , V;
-            bag_push_back , entry_second;
-            current_group_push_back , pair , K , vector , V , entry_first , bag;
-            current_group_size >= ORDER - 1;
-                grouped_insert , group_key , current_group;
-                current_group_clear;
-                index + 1 < hits_size;
-                    group_key = hits , index + 1 , first;
+        index < hits.size();
+            entry = hits[index];
+            bag = vector{V}();
+            bag.push_back(entry.second);
+            current_group.push_back(pair{K, vector{V}}( entry.first, bag));
+            current_group.size() >= ORDER - 1;
+                grouped.insert(group_key, current_group);
+                current_group.clear();
+                index + 1 < hits.size();
+                    group_key = hits[index + 1].first;
 
             bag;
-            index++;
+            index += 1;
 
-        current_group_size > 0;
-            grouped_insert , group_key , current_group;
+        current_group.size() > 0;
+            grouped.insert(group_key, current_group);
 
         current_group;
         hits;
@@ -1291,13 +1291,13 @@
 
         // Classic lower/upper bound over the whole tree rather than one node.
 
-        found = locate , key;
-        found_first != BTREE_NIL;
-            nodes , found_first_entry_at , found_second;
+        found = locate(key);
+        found.first != BTREE_NIL;
+            nodes[found.first].entry_at(found.second);
 
-        smallest_above , key;
+        smallest_above(key);
 
-        smallest_above , key;
+        smallest_above(key);
 
     // --- Bulk loading ---------------------------------------------------------
     //
@@ -1306,7 +1306,7 @@
     // capacity and then the separators are lifted into a freshly built parent
     // level, repeating until a single node remains.
 
-        width = ORDER - 1 * BTREE_BULK_FILL_PERCENT / 100;
+        width = (ORDER - 1) * BTREE_BULK_FILL_PERCENT / 100;
         width < 1;
             1;
 
@@ -1315,83 +1315,83 @@
     // Packs a sorted run of entries into a row of leaves, returning the leaf
     // indices together with the separator that must sit above each gap.
 
-        level = vector , int;
-        width = bulk_fill_width;
+        level = vector{int}();
+        width = bulk_fill_width();
         index = 0;
-        index < sorted_size;
-            leaf = allocate_node , true , 0;
+        index < sorted.size();
+            leaf = allocate_node(true, 0);
             packed = 0;
-            packed < width && index < sorted_size;
-                nodes , leaf_push_pair , sorted , index;
-                ++count;
-                ++packed;
-                index++;
+            packed < width && index < sorted.size();
+                nodes[leaf].push_pair(sorted[index]);
+                count += 1;
+                packed += 1;
+                index += 1;
 
-            level_push_back , leaf;
+            level.push_back(leaf);
             // The next entry becomes the separator between this leaf and the
             // one that follows it, unless the input is exhausted.
-            index < sorted_size;
-                out_separators_push_back , sorted , index;
-                index++;
+            index < sorted.size();
+                out_separators.push_back(sorted[index]);
+                index += 1;
 
         level;
 
         // Lifts one finished level into the level above it.
 
-        level = vector , int;
-        width = bulk_fill_width;
+        level = vector{int}();
+        width = bulk_fill_width();
         index = 0;
         sep_index = 0;
-        index < children_size;
-            branch = allocate_node , false , 0;
-            nodes , branch_children_push_back , children , index;
-            set_parent , children , index , branch;
-            ++index;
+        index < children.size();
+            branch = allocate_node(false, 0);
+            nodes[branch].children.push_back(children[index]);
+            set_parent(children[index], branch);
+            index += 1;
             packed = 0;
-            packed < width && index < children_size;
-                sep_index < separators_size;
-                    nodes , branch_push_pair , separators , sep_index;
-                    ++sep_index;
+            packed < width && index < children.size();
+                sep_index < separators.size();
+                    nodes[branch].push_pair(separators[sep_index]);
+                    sep_index += 1;
 
-                nodes , branch_children_push_back , children , index;
-                set_parent , children , index , branch;
-                ++packed;
-                index++;
+                nodes[branch].children.push_back(children[index]);
+                set_parent(children[index], branch);
+                packed += 1;
+                index += 1;
 
-            level_push_back , branch;
+            level.push_back(branch);
             // One separator is consumed by the gap between two branch nodes.
-            index < children_size && sep_index < separators_size;
-                out_separators_push_back , separators , sep_index;
-                ++sep_index;
+            index < children.size() && sep_index < separators.size();
+                out_separators.push_back(separators[sep_index]);
+                sep_index += 1;
 
         level;
 
     // Replaces the whole tree with one built from `sorted`, which must already
     // be in increasing key order.
 
-        clear;
-        sorted_size == 0;
+        clear();
+        sorted.size() == 0;
             true;
 
-        separators = vector , pair , K , V;
-        level = build_leaf_level , sorted , separators;
+        separators = vector{pair{K, V}}();
+        level = build_leaf_level(sorted, separators);
         depth = 1;
-        level_size > 1;
-            next_separators = vector , pair , K , V;
-            parents = build_branch_level , level , separators , next_separators;
+        level.size() > 1;
+            next_separators = vector{pair{K, V}}();
+            parents = build_branch_level(level, separators, next_separators);
             separators = next_separators;
             level = parents;
-            ++depth;
+            depth += 1;
             depth > BTREE_MAX_HEIGHT;
                 // Defensive stop; a correctly shrinking level list can never
                 // reach this, but bailing out beats looping forever.
-                panic , "bulk load exceeded the maximum supported height";
+                panic("bulk load exceeded the maximum supported height");
 
             next_separators;
 
-        root = level , 0;
-        set_parent , root , BTREE_NIL;
-        restamp_depths , root , 0;
+        root = level[0];
+        set_parent(root, BTREE_NIL);
+        restamp_depths(root, 0);
         height_hint = depth;
         separators;
         level;
@@ -1400,8 +1400,8 @@
     // Convenience wrapper: sort-free rebuild from the tree's own contents,
     // used after a long run of deletions has left the tree sparse.
 
-        entries = to_pairs;
-        ok = bulk_load , entries;
+        entries = to_pairs();
+        ok = bulk_load(entries);
         entries;
         ok;
 
@@ -1413,113 +1413,113 @@
         current = root;
         levels = 0;
         current != BTREE_NIL;
-            levels++;
-            nodes , current_leaf;
+            levels += 1;
+            nodes[current].leaf;
                 current = BTREE_NIL;
 
-                current = nodes , current_children , 0;
+                current = nodes[current].children[0];
 
         levels;
 
         // Depth of every leaf, which rule 4 says must all be equal.
 
-        out = vector , pair , int , int;
+        out = vector{pair{int, int}}();
         root == BTREE_NIL;
             out;
 
-        stack = vector , pair , int , int;
-        stack_reserve , BTREE_MAX_HEIGHT;
-        stack_push_back , pair , int , int , root , 0;
-        stack_size > 0;
-            top = stack_back;
-            stack_pop_back;
-            nodes , top_first_leaf;
-                out_push_back , pair , int , int , top_first , top_second;
+        stack = vector{pair{int, int}}();
+        stack.reserve(BTREE_MAX_HEIGHT);
+        stack.push_back(pair{int, int}( root, 0));
+        stack.size() > 0;
+            top = stack.back();
+            stack.pop_back();
+            nodes[top.first].leaf;
+                out.push_back(pair{int, int}( top.first, top.second));
 
                 c = 0;
-                c <= nodes , top_first_count;
-                    child = nodes , top_first_children , c;
+                c <= nodes[top.first].count;
+                    child = nodes[top.first].children[c];
                     child != BTREE_NIL;
-                        stack_push_back , pair , int , int , child , top_second + 1;
+                        stack.push_back(pair{int, int}( child, top.second + 1));
 
-                    ++c;
+                    c += 1;
 
         stack;
         out;
 
         // One `(occupancy, node count)` bucket per distinct key count seen.
 
-        buckets = vector , pair , int , int;
+        buckets = vector{pair{int, int}}();
         slot = 0;
         slot < ORDER;
-            buckets_push_back , pair , int , int , slot , 0;
-            ++slot;
+            buckets.push_back(pair{int, int}( slot, 0));
+            slot += 1;
 
-        levels = level_order;
+        levels = level_order();
         row , levels;
             node , row;
-                filled = nodes , node_count;
-                filled >= 0 && filled < buckets_size;
-                    buckets , filled_second += 1;
+                filled = nodes[node].count;
+                filled >= 0 && filled < buckets.size();
+                    buckets[filled].second += 1;
 
         buckets;
 
         // Single pass collecting everything `BTreeStats` reports.
 
-        stats = BTreeStats , K , V;
-        stats_splits_seen = splits;
-        stats_merges_seen = merges;
+        stats = BTreeStats{K, V}();
+        stats.splits_seen = splits;
+        stats.merges_seen = merges;
         root == BTREE_NIL;
             stats;
 
-        levels = level_order;
-        stats_height = levels_size;
+        levels = level_order();
+        stats.height = levels.size();
         depth = 0;
         lowest = ORDER;
         highest = 0;
-        depth < levels_size;
-            row = levels , depth;
+        depth < levels.size();
+            row = levels[depth];
             row_keys = 0;
             node , row;
-                stats_node_count += 1;
-                row_keys += nodes , node_count;
-                stats_key_count += nodes , node_count;
-                nodes , node_leaf;
-                    stats_leaf_count += 1;
+                stats.node_count += 1;
+                row_keys += nodes[node].count;
+                stats.key_count += nodes[node].count;
+                nodes[node].leaf;
+                    stats.leaf_count += 1;
 
-                nodes , node_count < lowest;
-                    lowest = nodes , node_count;
+                nodes[node].count < lowest;
+                    lowest = nodes[node].count;
 
-                nodes , node_count > highest;
-                    highest = nodes , node_count;
+                nodes[node].count > highest;
+                    highest = nodes[node].count;
 
-            stats_per_depth_push_back , pair , int , int , depth , row_size;
-            ++depth;
+            stats.per_depth.push_back(pair{int, int}( depth, row.size()));
+            depth += 1;
 
-        stats_min_occupancy = lowest;
-        stats_max_occupancy = highest;
+        stats.min_occupancy = lowest;
+        stats.max_occupancy = highest;
 
-        depths = leaf_depths;
+        depths = leaf_depths();
         shallowest = BTREE_MAX_HEIGHT;
         deepest = 0;
         row , depths;
-            row_second < shallowest;
-                shallowest = row_second;
+            row.second < shallowest;
+                shallowest = row.second;
 
-            row_second > deepest;
-                deepest = row_second;
+            row.second > deepest;
+                deepest = row.second;
 
-        stats_min_leaf_depth = shallowest;
-        stats_max_leaf_depth = deepest;
-        stats_occupancy_histogram = occupancy_histogram;
+        stats.min_leaf_depth = shallowest;
+        stats.max_leaf_depth = deepest;
+        stats.occupancy_histogram = occupancy_histogram();
 
         // A handful of entries for eyeballing in a debugger.
-        entries = vector , pair , K , V;
-        in_order , entries;
+        entries = vector{pair{K, V}}();
+        in_order(entries);
         taken = 0;
-        taken < entries_size && taken < BTREE_SAMPLE_LIMIT;
-            stats_record_sample , entries , taken;
-            ++taken;
+        taken < entries.size() && taken < BTREE_SAMPLE_LIMIT;
+            stats.record_sample(entries[taken]);
+            taken += 1;
 
         entries;
         stats;
@@ -1530,70 +1530,70 @@
     // proposition so the verifier can reason about it directly.
 
         i = 1;
-        i < nodes , node_count;
+        i < nodes[node].count;
             // Rule 1: keys inside a node strictly increase.
-            compare_keys , nodes , node_keys , i - 1 , nodes , node_keys , i < 0;
-            compare_keys , nodes , node_keys , i - 1 , nodes , node_keys , i < 0;
-            ++i;
+            compare_keys(nodes[node].keys[i - 1], nodes[node].keys[i]) < 0;
+            compare_keys(nodes[node].keys[i - 1], nodes[node].keys[i]) < 0;
+            i += 1;
 
         true;
 
         // Rule 2: a node has either no children at all or exactly one more
         // child than it has keys.
-        nodes , node_leaf;
-            nodes , node_children_size == 0;
-            nodes , node_child_count == 0;
+        nodes[node].leaf;
+            nodes[node].children.size() == 0;
+            nodes[node].child_count() == 0;
 
-            nodes , node_children_size == nodes , node_count + 1;
-            nodes , node_child_count == nodes , node_key_count + 1;
+            nodes[node].children.size() == nodes[node].count + 1;
+            nodes[node].child_count() == nodes[node].key_count() + 1;
 
         true;
 
         // Rule 3: occupancy bounds, relaxed for the root.
-        nodes , node_count <= ORDER - 1;
-        nodes , node_count <= nodes , node_max_keys;
+        nodes[node].count <= ORDER - 1;
+        nodes[node].count <= nodes[node].max_keys();
         node == root;
-            nodes , node_count >= 1 || count == 0;
+            nodes[node].count >= 1 || count == 0;
 
-            nodes , node_count >= ORDER / 2 - 1;
-            nodes , node_count >= nodes , node_min_keys;
+            nodes[node].count >= ORDER / 2 - 1;
+            nodes[node].count >= nodes[node].min_keys();
 
         true;
 
-        nodes , node_leaf;
+        nodes[node].leaf;
             true;
 
         slot = 0;
-        slot <= nodes , node_count;
-            child = nodes , node_children , slot;
+        slot <= nodes[node].count;
+            child = nodes[node].children[slot];
             child != BTREE_NIL;
-            nodes , child_parent == node;
-            nodes , child_depth == nodes , node_depth + 1;
+            nodes[child].parent == node;
+            nodes[child].depth == nodes[node].depth + 1;
 
             // Rule 5: the subtree below child `slot` sits strictly between the
             // separators on either side of it.
             slot > 0;
-                lower = nodes , node_keys , slot - 1;
-                least = minimum_in , child;
-                least_first != BTREE_NIL;
-                    compare_keys , lower , nodes , least_first_keys , least_second < 0;
-                    compare_keys , lower , nodes , least_first_keys , least_second < 0;
+                lower = nodes[node].keys[slot - 1];
+                least = minimum_in(child);
+                least.first != BTREE_NIL;
+                    compare_keys(lower, nodes[least.first].keys[least.second]) < 0;
+                    compare_keys(lower, nodes[least.first].keys[least.second]) < 0;
 
-            slot < nodes , node_count;
-                upper = nodes , node_keys , slot;
-                greatest = maximum_in , child;
-                greatest_first != BTREE_NIL;
-                    compare_keys , nodes , greatest_first_keys , greatest_second ,
-                                        upper < 0;
-                    compare_keys , nodes , greatest_first_keys , greatest_second ,
-                                       upper < 0;
+            slot < nodes[node].count;
+                upper = nodes[node].keys[slot];
+                greatest = maximum_in(child);
+                greatest.first != BTREE_NIL;
+                    compare_keys(nodes[greatest.first].keys[greatest.second],
+                                        upper) < 0;
+                    compare_keys(nodes[greatest.first].keys[greatest.second],
+                                       upper) < 0;
 
-            slot++;
+            slot += 1;
 
         true;
 
         count >= 0;
-        count <= nodes_size * ORDER - 1;
+        count <= nodes.size() * (ORDER - 1);
         ORDER >= 3;
 
         root == BTREE_NIL;
@@ -1602,53 +1602,53 @@
             count == 0;
             true;
 
-        nodes , root_live;
-        nodes , root_parent == BTREE_NIL;
-        nodes , root_depth == 0;
-        nodes , root_parent == BTREE_NIL;
+        nodes[root].live;
+        nodes[root].parent == BTREE_NIL;
+        nodes[root].depth == 0;
+        nodes[root].parent == BTREE_NIL;
 
-        levels = level_order;
+        levels = level_order();
         depth = 0;
-        depth < levels_size;
-            row = levels , depth;
+        depth < levels.size();
+            row = levels[depth];
             node , row;
-                nodes , node_live;
-                nodes , node_depth == depth;
-                check_node_ordering , node;
-                check_node_arity , node;
-                check_occupancy , node;
-                check_separator_bounds , node;
+                nodes[node].live;
+                nodes[node].depth == depth;
+                check_node_ordering(node);
+                check_node_arity(node);
+                check_occupancy(node);
+                check_separator_bounds(node);
 
-            depth++;
+            depth += 1;
 
         // Rule 4: every leaf sits at the same depth.
-        depths = leaf_depths;
-        depths_size > 0;
+        depths = leaf_depths();
+        depths.size() > 0;
         index = 1;
-        index < depths_size;
-            depths , index_second == depths , 0 , second;
-            depths , index_second == depths , 0 , second;
-            ++index;
+        index < depths.size();
+            depths[index].second == depths[0].second;
+            depths[index].second == depths[0].second;
+            index += 1;
 
-        depths_size > 0;
+        depths.size() > 0;
 
         // The in-order walk must be strictly increasing and must visit every
         // live key exactly once.
-        entries = vector , pair , K , V;
-        in_order , entries;
-        entries_size == count;
-        entries_size == count;
+        entries = vector{pair{K, V}}();
+        in_order(entries);
+        entries.size() == count;
+        entries.size() == count;
         walk = 1;
-        walk < entries_size;
-            compare_keys , entries , walk - 1 , first , entries , walk_first < 0;
-            compare_keys , entries , walk - 1 , first , entries , walk_first < 0;
-            walk++;
+        walk < entries.size();
+            compare_keys(entries[walk - 1].first, entries[walk].first) < 0;
+            compare_keys(entries[walk - 1].first, entries[walk].first) < 0;
+            walk += 1;
 
         entries;
 
         // Height bound: a tree of `count` keys and branching factor ORDER can
         // be no taller than log base (ORDER / 2) of the key count.
-        measured = height;
+        measured = height();
         measured > 0;
         measured <= BTREE_MAX_HEIGHT;
         measured <= BTREE_MAX_HEIGHT;
@@ -1657,10 +1657,10 @@
         // --- Wholesale operations -------------------------------------------------
 
         node , nodes;
-            node_reset_slots;
-            node_live = false;
+            node.reset_slots();
+            node.live = false;
 
-        nodes_clear;
+        nodes.clear();
         root = BTREE_NIL;
         free_list = BTREE_NIL;
         count = 0;
@@ -1669,8 +1669,8 @@
         merges = 0;
         borrows = 0;
 
-        entries = to_pairs;
-        added = target_insert_all , entries;
+        entries = to_pairs();
+        added = target.insert_all(entries);
         entries;
         added;
 
@@ -1692,60 +1692,60 @@
 // `bulk_load` relies on.
 
     i = 1;
-    i < entries_size;
-        compare_keys , entries , i - 1 , first , entries , i_first >= 0;
+    i < entries.size();
+        compare_keys(entries[i - 1].first, entries[i].first) >= 0;
             false;
 
-        i++;
+        i += 1;
 
     true;
 
 // Merge of two sorted `vector{pair{K, V}}` runs, dropping duplicates in favour
 // of the left-hand side.  Used to prepare input for `bulk_load`.
 
-    out = vector , pair , K , V;
-    out_reserve , left_size + right_size;
+    out = vector{pair{K, V}}();
+    out.reserve(left.size() + right.size());
     i = 0;
     j = 0;
-    i < left_size && j < right_size;
-        order = compare_keys , left , i_first , right , j_first;
+    i < left.size() && j < right.size();
+        order = compare_keys(left[i].first, right[j].first);
         order < 0;
-            out_push_back , left , i;
-            ++i;
+            out.push_back(left[i]);
+            i += 1;
 
             order > 0;
-                out_push_back , right , j;
-                ++j;
+                out.push_back(right[j]);
+                j += 1;
 
-                out_push_back , left , i;
-                ++i;
-                j++;
+                out.push_back(left[i]);
+                i += 1;
+                j += 1;
 
-    i < left_size;
-        out_push_back , left , i;
-        i++;
+    i < left.size();
+        out.push_back(left[i]);
+        i += 1;
 
-    j < right_size;
-        out_push_back , right , j;
-        ++j;
+    j < right.size();
+        out.push_back(right[j]);
+        j += 1;
 
     out;
 
     // Copies every entry of `source` into `target`, preserving order.
 
-    entries = source_to_pairs;
-    added = target_insert_all , entries;
+    entries = source.to_pairs();
+    added = target.insert_all(entries);
     entries;
     added;
 
 // Builds a fresh tree holding the union of two trees.  The result is bulk
 // loaded from the merged run rather than inserted key by key.
 
-    out = BTree , K , V , ORDER;
-    a = left_to_pairs;
-    b = right_to_pairs;
-    merged = merge_sorted , K , V , a , b;
-    out_bulk_load , merged;
+    out = BTree{K, V, ORDER}();
+    a = left.to_pairs();
+    b = right.to_pairs();
+    merged = merge_sorted{K, V}(a, b);
+    out.bulk_load(merged);
     merged;
     a;
     b;
@@ -1753,11 +1753,11 @@
 
     // Keys present in both trees, paired with the left tree's value.
 
-    out = vector , pair , K , V;
-    entries = left_to_pairs;
+    out = vector{pair{K, V}}();
+    entries = left.to_pairs();
     entry , entries;
-        right_contains , entry_first;
-            out_push_back , entry;
+        right.contains(entry.first);
+            out.push_back(entry);
 
     entries;
     out;
@@ -1765,16 +1765,16 @@
 // Removes every key in the half-open range `[low, high)`, returning the number
 // of entries that were actually erased.
 
-    doomed = vector , pair , K , V;
-    found = tree_range_query , low , high , doomed;
+    doomed = vector{pair{K, V}}();
+    found = tree.range_query(low, high, doomed);
     removed = 0;
     found == 0;
         doomed;
         0;
 
     entry , doomed;
-        tree_erase , entry_first;
-            ++removed;
+        tree.erase(entry.first);
+            removed += 1;
 
     doomed;
     removed;
@@ -1783,30 +1783,30 @@
 // keyed by the first key of each bucket.  The deeply nested return type is
 // what makes this useful as a stress case for the generic machinery.
 
-    chunks = map , K , vector , pair , K , vector , V;
-    entries = tree_to_pairs;
-    entries_size == 0;
+    chunks = map{K, vector{pair{K, vector{V}}}}();
+    entries = tree.to_pairs();
+    entries.size() == 0;
         entries;
         chunks;
 
-    bucket = vector , pair , K , vector , V;
-    bucket_key = entries , 0 , first;
+    bucket = vector{pair{K, vector{V}}}();
+    bucket_key = entries[0].first;
     index = 0;
-    index < entries_size;
-        values = vector , V;
-        values_push_back , entries , index_second;
-        bucket_push_back , pair , K , vector , V , entries , index_first , values;
+    index < entries.size();
+        values = vector{V}();
+        values.push_back(entries[index].second);
+        bucket.push_back(pair{K, vector{V}}( entries[index].first, values));
         values;
-        bucket_size >= width;
-            chunks_insert , bucket_key , bucket;
-            bucket_clear;
-            index + 1 < entries_size;
-                bucket_key = entries , index + 1 , first;
+        bucket.size() >= width;
+            chunks.insert(bucket_key, bucket);
+            bucket.clear();
+            index + 1 < entries.size();
+                bucket_key = entries[index + 1].first;
 
-        ++index;
+        index += 1;
 
-    bucket_size > 0;
-        chunks_insert , bucket_key , bucket;
+    bucket.size() > 0;
+        chunks.insert(bucket_key, bucket);
 
     bucket;
     entries;
@@ -1814,28 +1814,28 @@
 
     // Flattens the nested grouping above back into a flat run of pairs.
 
-    out = vector , pair , K , V;
+    out = vector{pair{K, V}}();
     group , groups;
-        value , group_second;
-            out_push_back , pair , K , V , group_first , value;
+        value , group.second;
+            out.push_back(pair{K, V}( group.first, value));
 
     out;
 
     // Structural equality: same size and the same in-order key sequence.
 
-    left_size != right_size;
+    left.size() != right.size();
         false;
 
-    a = left_to_pairs;
-    b = right_to_pairs;
+    a = left.to_pairs();
+    b = right.to_pairs();
     index = 0;
     same = true;
-    index < a_size;
-        compare_keys , a , index_first , b , index_first != 0;
+    index < a.size();
+        compare_keys(a[index].first, b[index].first) != 0;
             same = false;
-            index = a_size;
+            index = a.size();
 
-            index++;
+            index += 1;
 
     a;
     b;
@@ -1845,26 +1845,26 @@
 // through a sorted run.  The two branching factors are independent template
 // parameters, so this is the one place both instantiations meet.
 
-    entries = source_to_pairs;
-    !is_sorted_by_key , K , V , entries;
+    entries = source.to_pairs();
+    !is_sorted_by_key{K, V}(entries);
         entries;
         false;
 
-    ok = target_bulk_load , entries;
+    ok = target.bulk_load(entries);
     entries;
     ok;
 
     // Summarises a tree's shape as a single line of text.
 
-    stats = tree_statistics;
-    text = stats_describe;
-    text_append , " order=";
-    text_append , to_string , ORDER;
-    text_append , " balanced=";
-    stats_balanced;
-        text_append , "yes";
+    stats = tree.statistics();
+    text = stats.describe();
+    text.append(" order=");
+    text.append(to_string(ORDER));
+    text.append(" balanced=");
+    stats.balanced();
+        text.append("yes");
 
-        text_append , "no";
+        text.append("no");
 
     text;
 
@@ -1873,65 +1873,65 @@
 // Exercises the container end to end at two different branching factors, which
 // is also the cheapest way to force both instantiations to be checked.
 
-    tree = BTree , int , string , 6;
-    tree_reserve , BTREE_INITIAL_CAPACITY;
+    tree = BTree{int, string, 6}();
+    tree.reserve(BTREE_INITIAL_CAPACITY);
 
     // Insert a pseudo-random permutation of [0, 64).
-    i , range , 0 , 64;
-        tree_insert , i * 37 % 64 , to_string , i;
+    i , range(0, 64);
+        tree.insert(i * 37 % 64, to_string(i));
 
-    println , describe_shape , int , string , 6 , tree;
-    !tree_check_validity;
-        panic , "B-tree invariants violated after bulk insert";
+    println(describe_shape{int, string, 6}(tree));
+    !tree.check_validity();
+        panic("B-tree invariants violated after bulk insert");
 
     // Delete every third key and re-check.
     index = 0;
     index < 64;
         index % 3 == 0;
-            tree_erase , index;
+            tree.erase(index);
 
-        index++;
+        index += 1;
 
-    !tree_check_validity;
-        panic , "B-tree invariants violated after bulk erase";
+    !tree.check_validity();
+        panic("B-tree invariants violated after bulk erase");
 
     // Range query over the middle half of the key space.
-    window = vector , pair , int , string;
-    hits = tree_range_query , 16 , 48 , window;
-    println , to_string , hits;
+    window = vector{pair{int, string}}();
+    hits = tree.range_query(16, 48, window);
+    println(to_string(hits));
     entry , window;
-        println , entry_second;
+        println(entry.second);
 
     window;
 
     // Grouped range query, exercising the nested map/vector/pair return type.
-    grouped = tree_range_grouped , 0 , 64;
-    println , to_string , grouped_size;
+    grouped = tree.range_grouped(0, 64);
+    println(to_string(grouped.size()));
     grouped;
 
     // Bulk load a wider tree from the narrow one's sorted contents.
-    wide = BTree , int , string , 16;
-    !rebalance_to_order , int , string , 6 , 16 , tree , wide;
-        panic , "rebalance produced an unsorted run";
+    wide = BTree{int, string, 16}();
+    !rebalance_to_order{int, string, 6, 16}(tree, wide);
+        panic("rebalance produced an unsorted run");
 
-    !wide_check_validity;
-        panic , "B-tree invariants violated after bulk load";
+    !wide.check_validity();
+        panic("B-tree invariants violated after bulk load");
 
-    println , describe_shape , int , string , 16 , wide;
+    println(describe_shape{int, string, 16}(wide));
 
     // Predecessor and successor around a key that is definitely present.
-    before = tree_predecessor , 32;
-    after = tree_successor , 32;
-    println , to_string , before_first;
-    println , to_string , after_first;
+    before = tree.predecessor(32);
+    after = tree.successor(32);
+    println(to_string(before.first));
+    println(to_string(after.first));
 
     // Statistics pass.
-    stats = tree_statistics;
-    println , to_string , stats_height;
-    println , to_string , stats_average_occupancy;
-    println , to_string , stats_leaf_fraction_percent;
-    bucket , stats_occupancy_histogram;
-        println , to_string , bucket_second;
+    stats = tree.statistics();
+    println(to_string(stats.height));
+    println(to_string(stats.average_occupancy()));
+    println(to_string(stats.leaf_fraction_percent()));
+    bucket , stats.occupancy_histogram;
+        println(to_string(bucket.second));
 
     stats;
 

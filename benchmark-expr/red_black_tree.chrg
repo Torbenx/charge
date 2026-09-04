@@ -40,10 +40,10 @@
 
         n = 0;
         left != RB_NIL;
-            n++;
+            n += 1;
 
         right != RB_NIL;
-            ++n;
+            n += 1;
 
         n;
 
@@ -59,14 +59,14 @@
 
         count == 0;
 
-        nodes_size;
+        nodes.size();
 
         i == RB_NIL;
 
         i == RB_NIL;
             false;
 
-        nodes , i_live;
+        nodes[i].live;
 
     // --- Colour helpers ---------------------------------------------------
     //
@@ -74,87 +74,87 @@
     // through these helpers rather than touching `.colour` directly.
 
         i == RB_NIL;
-            Colour_Black;
+            Colour::Black;
 
-        nodes , i_colour;
+        nodes[i].colour;
 
         i == RB_NIL;
             false;
 
-        nodes , i_colour == Colour_Red;
+        nodes[i].colour == Colour::Red;
 
         i == RB_NIL;
             true;
 
-        nodes , i_colour == Colour_Black;
+        nodes[i].colour == Colour::Black;
 
         i != RB_NIL;
-            nodes , i_colour = c;
+            nodes[i].colour = c;
 
-        set_colour , i , Colour_Red;
+        set_colour(i, Colour::Red);
 
-        set_colour , i , Colour_Black;
+        set_colour(i, Colour::Black);
 
         a != RB_NIL && b != RB_NIL;
-            swap , nodes , a_colour , nodes , b_colour;
+            swap(nodes[a].colour, nodes[b].colour);
 
             // --- Link helpers -----------------------------------------------------
 
         i == RB_NIL;
             RB_NIL;
 
-        nodes , i_left;
+        nodes[i].left;
 
         i == RB_NIL;
             RB_NIL;
 
-        nodes , i_right;
+        nodes[i].right;
 
         i == RB_NIL;
             RB_NIL;
 
-        nodes , i_parent;
+        nodes[i].parent;
 
-        parent_of , parent_of , i;
+        parent_of(parent_of(i));
 
         // Which side of its parent a node hangs off, or NoChild for the root.
 
-        p = parent_of , i;
+        p = parent_of(i);
         p == RB_NIL;
-            ChildSide_NoChild;
+            ChildSide::NoChild;
 
-            nodes , p_left == i;
-                ChildSide_LeftChild;
+            nodes[p].left == i;
+                ChildSide::LeftChild;
 
-                ChildSide_RightChild;
+                ChildSide::RightChild;
 
-        p = parent_of , i;
+        p = parent_of(i);
         p == RB_NIL;
             RB_NIL;
 
-            nodes , p_left == i;
-                nodes , p_right;
+            nodes[p].left == i;
+                nodes[p].right;
 
-                nodes , p_left;
+                nodes[p].left;
 
-        sibling_of , parent_of , i;
+        sibling_of(parent_of(i));
 
-        side_of , i == ChildSide_LeftChild;
+        side_of(i) == ChildSide::LeftChild;
 
-        side_of , i == ChildSide_RightChild;
+        side_of(i) == ChildSide::RightChild;
 
         // Re-point whatever used to reference `old` at `fresh`.
 
         parent == RB_NIL;
             root = child;
 
-            side == ChildSide_LeftChild;
-                nodes , parent_left = child;
+            side == ChildSide::LeftChild;
+                nodes[parent].left = child;
 
-                nodes , parent_right = child;
+                nodes[parent].right = child;
 
         child != RB_NIL;
-            nodes , child_parent = parent;
+            nodes[child].parent = parent;
 
     // --- Rotations --------------------------------------------------------
     //
@@ -166,26 +166,26 @@
 
         x == RB_NIL;
 
-        y = nodes , x_right;
+        y = nodes[x].right;
         y == RB_NIL;
         // Nothing to pivot on; a well-formed caller never gets here.
 
-        nodes , x_right = nodes , y_left;
-        nodes , y_left != RB_NIL;
-            nodes , nodes , y_left_parent = x;
+        nodes[x].right = nodes[y].left;
+        nodes[y].left != RB_NIL;
+            nodes[nodes[y].left].parent = x;
 
-        nodes , y_parent = nodes , x_parent;
-        nodes , x_parent == RB_NIL;
+        nodes[y].parent = nodes[x].parent;
+        nodes[x].parent == RB_NIL;
             root = y;
 
-            x == nodes , nodes , x_parent_left;
-                nodes , nodes , x_parent_left = y;
+            x == nodes[nodes[x].parent].left;
+                nodes[nodes[x].parent].left = y;
 
-                nodes , nodes , x_parent_right = y;
+                nodes[nodes[x].parent].right = y;
 
-        nodes , y_left = x;
-        nodes , x_parent = y;
-        ++rotations;
+        nodes[y].left = x;
+        nodes[x].parent = y;
+        rotations += 1;
 
     //        y                x
     //       / \              / \
@@ -195,96 +195,96 @@
 
         y == RB_NIL;
 
-        x = nodes , y_left;
+        x = nodes[y].left;
         x == RB_NIL;
 
-        nodes , y_left = nodes , x_right;
-        nodes , x_right != RB_NIL;
-            nodes , nodes , x_right_parent = y;
+        nodes[y].left = nodes[x].right;
+        nodes[x].right != RB_NIL;
+            nodes[nodes[x].right].parent = y;
 
-        nodes , x_parent = nodes , y_parent;
-        nodes , y_parent == RB_NIL;
+        nodes[x].parent = nodes[y].parent;
+        nodes[y].parent == RB_NIL;
             root = x;
 
-            y == nodes , nodes , y_parent_right;
-                nodes , nodes , y_parent_right = x;
+            y == nodes[nodes[y].parent].right;
+                nodes[nodes[y].parent].right = x;
 
-                nodes , nodes , y_parent_left = x;
+                nodes[nodes[y].parent].left = x;
 
-        nodes , x_right = y;
-        nodes , y_parent = x;
-        rotations++;
+        nodes[x].right = y;
+        nodes[y].parent = x;
+        rotations += 1;
 
         // Rotate `i` in whichever direction brings its subtree back into balance.
 
-        side == ChildSide_LeftChild;
-            rotate_right , i;
+        side == ChildSide::LeftChild;
+            rotate_right(i);
 
-            side == ChildSide_RightChild;
-                rotate_left , i;
+            side == ChildSide::RightChild;
+                rotate_left(i);
 
                 i;
 
                 // --- Arena management -------------------------------------------------
 
-        capacity > nodes_size;
-            nodes_reserve , capacity;
+        capacity > nodes.size();
+            nodes.reserve(capacity);
 
         free_list != RB_NIL;
             // Recycle a slot released by a previous erase.
             slot = free_list;
-            free_list = nodes , slot_right;
-            nodes , slot_key = key;
-            nodes , slot_value = value;
-            nodes , slot_reset_links;
-            nodes , slot_colour = Colour_Red;
-            nodes , slot_live = true;
+            free_list = nodes[slot].right;
+            nodes[slot].key = key;
+            nodes[slot].value = value;
+            nodes[slot].reset_links();
+            nodes[slot].colour = Colour::Red;
+            nodes[slot].live = true;
             slot;
 
-        fresh = RbNode , K , V , key , value;
-        fresh_colour = Colour_Red;
-        nodes_push_back , fresh;
-        nodes_size - 1;
+        fresh = RbNode{K, V}( key, value);
+        fresh.colour = Colour::Red;
+        nodes.push_back(fresh);
+        nodes.size() - 1;
 
         i == RB_NIL;
 
-        nodes , i_live = false;
-        nodes , i_left = RB_NIL;
-        nodes , i_parent = RB_NIL;
-        nodes , i_right = free_list;
+        nodes[i].live = false;
+        nodes[i].left = RB_NIL;
+        nodes[i].parent = RB_NIL;
+        nodes[i].right = free_list;
         free_list = i;
 
         // --- Search -----------------------------------------------------------
 
         current = root;
         current != RB_NIL;
-            order = compare_keys , nodes , current_key , *key;
+            order = compare_keys(nodes[current].key, *key);
             order == 0;
                 current;
 
                 order > 0;
-                    current = nodes , current_left;
+                    current = nodes[current].left;
 
-                    current = nodes , current_right;
+                    current = nodes[current].right;
 
         RB_NIL;
 
-        find_index , key != RB_NIL;
+        find_index(key) != RB_NIL;
 
-        i = find_index , key;
+        i = find_index(key);
         i == RB_NIL;
             missing;
 
-        nodes , i_value;
+        nodes[i].value;
 
         // Smallest node whose key is >= `key`, or RB_NIL when none exists.
 
         current = root;
         best = RB_NIL;
         current != RB_NIL;
-            order = compare_keys , nodes , current_key , *key;
+            order = compare_keys(nodes[current].key, *key);
             order < 0;
-                current = nodes , current_right;
+                current = nodes[current].right;
 
                 best = current;
                 order == 0;
@@ -292,7 +292,7 @@
                     // satisfy the bound.
                     current;
 
-                    current = nodes , current_left;
+                    current = nodes[current].left;
 
         best;
 
@@ -301,12 +301,12 @@
         current = root;
         best = RB_NIL;
         current != RB_NIL;
-            order = compare_keys , nodes , current_key , *key;
+            order = compare_keys(nodes[current].key, *key);
             order > 0;
                 best = current;
-                current = nodes , current_left;
+                current = nodes[current].left;
 
-                current = nodes , current_right;
+                current = nodes[current].right;
 
         best;
 
@@ -316,8 +316,8 @@
         current == RB_NIL;
             RB_NIL;
 
-        nodes , current_left != RB_NIL;
-            current = nodes , current_left;
+        nodes[current].left != RB_NIL;
+            current = nodes[current].left;
 
         current;
 
@@ -325,40 +325,40 @@
         current == RB_NIL;
             RB_NIL;
 
-        nodes , current_right != RB_NIL;
-            current = nodes , current_right;
+        nodes[current].right != RB_NIL;
+            current = nodes[current].right;
 
         current;
 
-        subtree_minimum , root;
+        subtree_minimum(root);
 
-        subtree_maximum , root;
+        subtree_maximum(root);
 
         i == RB_NIL;
             RB_NIL;
 
-        nodes , i_right != RB_NIL;
-            subtree_minimum , nodes , i_right;
+        nodes[i].right != RB_NIL;
+            subtree_minimum(nodes[i].right);
 
         current = i;
-        up = nodes , i_parent;
-        up != RB_NIL && current == nodes , up_right;
+        up = nodes[i].parent;
+        up != RB_NIL && current == nodes[up].right;
             current = up;
-            up = nodes , up_parent;
+            up = nodes[up].parent;
 
         up;
 
         i == RB_NIL;
             RB_NIL;
 
-        nodes , i_left != RB_NIL;
-            subtree_maximum , nodes , i_left;
+        nodes[i].left != RB_NIL;
+            subtree_maximum(nodes[i].left);
 
         current = i;
-        up = nodes , i_parent;
-        up != RB_NIL && current == nodes , up_left;
+        up = nodes[i].parent;
+        up != RB_NIL && current == nodes[up].left;
             current = up;
-            up = nodes , up_parent;
+            up = nodes[up].parent;
 
         up;
 
@@ -367,41 +367,41 @@
     // Ordinary binary-search-tree descent, then `insert_fixup` restores the
     // colour invariants that the freshly painted red node may have broken.
 
-        nodes_size == 0;
-            reserve , RB_INITIAL_CAPACITY;
+        nodes.size() == 0;
+            reserve(RB_INITIAL_CAPACITY);
 
         parent = RB_NIL;
         current = root;
-        side = ChildSide_NoChild;
+        side = ChildSide::NoChild;
 
         current != RB_NIL;
             parent = current;
-            order = compare_keys , nodes , current_key , key;
+            order = compare_keys(nodes[current].key, key);
             order == 0;
                 // Key already present: overwrite in place, shape unchanged.
-                nodes , current_value = value;
+                nodes[current].value = value;
                 false;
 
                 order > 0;
-                    side = ChildSide_LeftChild;
-                    current = nodes , current_left;
+                    side = ChildSide::LeftChild;
+                    current = nodes[current].left;
 
-                    side = ChildSide_RightChild;
-                    current = nodes , current_right;
+                    side = ChildSide::RightChild;
+                    current = nodes[current].right;
 
-        fresh = allocate , key , value;
-        nodes , fresh_parent = parent;
+        fresh = allocate(key, value);
+        nodes[fresh].parent = parent;
         parent == RB_NIL;
             root = fresh;
 
-            side == ChildSide_LeftChild;
-                nodes , parent_left = fresh;
+            side == ChildSide::LeftChild;
+                nodes[parent].left = fresh;
 
-                nodes , parent_right = fresh;
+                nodes[parent].right = fresh;
 
-        count++;
-        insert_fixup , fresh;
-        paint_black , root;
+        count += 1;
+        insert_fixup(fresh);
+        paint_black(root);
         true;
 
     // Restore rules 2 and 3 after a red node was spliced in at `start`.
@@ -415,117 +415,117 @@
         guard = 0;
 
         z != RB_NIL && guard < RB_MAX_HEIGHT;
-            guard++;
-            parent = nodes , z_parent;
+            guard += 1;
+            parent = nodes[z].parent;
 
             parent == RB_NIL;
                 // z is the root; rule 2 is restored by the caller.
-                paint_black , z;
+                paint_black(z);
 
-                is_black , parent;
+                is_black(parent);
                     // No red-red violation left to repair.
 
-                    grand = nodes , parent_parent;
+                    grand = nodes[parent].parent;
                     grand == RB_NIL;
                         // A red root with a red child: blacken the root.
-                        paint_black , parent;
+                        paint_black(parent);
 
-                        parent == nodes , grand_left;
+                        parent == nodes[grand].left;
                             // --- Parent is the LEFT child of grandparent ---
-                            uncle = nodes , grand_right;
-                            uncle != RB_NIL && is_red , uncle;
+                            uncle = nodes[grand].right;
+                            uncle != RB_NIL && is_red(uncle);
                                 // Case 1: recolour and push the problem up.
-                                paint_black , parent;
-                                paint_black , uncle;
-                                paint_red , grand;
+                                paint_black(parent);
+                                paint_black(uncle);
+                                paint_red(grand);
                                 recolours += 3;
                                 z = grand;
 
                                 // Uncle is black (possibly NIL).
-                                z == nodes , parent_right;
+                                z == nodes[parent].right;
                                     // Case 2: inner triangle.  Rotate left at
                                     // the parent to turn it into case 3, then
                                     // fall straight through to that case.
                                     z = parent;
-                                    rotate_left , z;
-                                    np = nodes , z_parent;
+                                    rotate_left(z);
+                                    np = nodes[z].parent;
                                     np == RB_NIL;
-                                        paint_black , z;
+                                        paint_black(z);
 
-                                        ng = nodes , np_parent;
+                                        ng = nodes[np].parent;
                                         ng == RB_NIL;
-                                            paint_black , np;
+                                            paint_black(np);
 
                                             // Case 3 after the pre-rotation.
-                                            paint_black , np;
-                                            paint_red , ng;
+                                            paint_black(np);
+                                            paint_red(ng);
                                             recolours += 2;
-                                            rotate_right , ng;
+                                            rotate_right(ng);
 
                                     // Case 3: outer line, single rotation.
-                                    paint_black , parent;
-                                    paint_red , grand;
+                                    paint_black(parent);
+                                    paint_red(grand);
                                     recolours += 2;
-                                    rotate_right , grand;
+                                    rotate_right(grand);
 
                             // --- Parent is the RIGHT child (mirror image) --
-                            uncle = nodes , grand_left;
-                            uncle != RB_NIL && is_red , uncle;
+                            uncle = nodes[grand].left;
+                            uncle != RB_NIL && is_red(uncle);
                                 // Case 1 mirrored.
-                                paint_black , parent;
-                                paint_black , uncle;
-                                paint_red , grand;
+                                paint_black(parent);
+                                paint_black(uncle);
+                                paint_red(grand);
                                 recolours += 3;
                                 z = grand;
 
-                                z == nodes , parent_left;
+                                z == nodes[parent].left;
                                     // Case 2 mirrored: inner triangle.
                                     z = parent;
-                                    rotate_right , z;
-                                    np = nodes , z_parent;
+                                    rotate_right(z);
+                                    np = nodes[z].parent;
                                     np == RB_NIL;
-                                        paint_black , z;
+                                        paint_black(z);
 
-                                        ng = nodes , np_parent;
+                                        ng = nodes[np].parent;
                                         ng == RB_NIL;
-                                            paint_black , np;
+                                            paint_black(np);
 
                                             // Case 3 mirrored.
-                                            paint_black , np;
-                                            paint_red , ng;
+                                            paint_black(np);
+                                            paint_red(ng);
                                             recolours += 2;
-                                            rotate_left , ng;
+                                            rotate_left(ng);
 
                                     // Case 3 mirrored: outer line.
-                                    paint_black , parent;
-                                    paint_red , grand;
+                                    paint_black(parent);
+                                    paint_red(grand);
                                     recolours += 2;
-                                    rotate_left , grand;
+                                    rotate_left(grand);
 
-        paint_black , root;
+        paint_black(root);
 
     // --- Deletion ---------------------------------------------------------
 
     // Replace the subtree rooted at `target` with the subtree rooted at
     // `replacement`.  The replacement's own children are left untouched.
 
-        parent = parent_of , target;
+        parent = parent_of(target);
         parent == RB_NIL;
             root = replacement;
 
-            target == nodes , parent_left;
-                nodes , parent_left = replacement;
+            target == nodes[parent].left;
+                nodes[parent].left = replacement;
 
-                nodes , parent_right = replacement;
+                nodes[parent].right = replacement;
 
         replacement != RB_NIL;
-            nodes , replacement_parent = parent;
+            nodes[replacement].parent = parent;
 
-        victim = find_index , key;
+        victim = find_index(key);
         victim == RB_NIL;
             false;
 
-        erase_index , victim;
+        erase_index(victim);
         true;
 
         victim == RB_NIL;
@@ -534,51 +534,51 @@
         // for a two-child victim is the in-order successor rather than the
         // victim itself.
         removed = victim;
-        removed_colour = nodes , victim_colour;
+        removed_colour = nodes[victim].colour;
         fixup_at = RB_NIL;
         fixup_parent = RB_NIL;
 
-        nodes , victim_left == RB_NIL;
+        nodes[victim].left == RB_NIL;
             // At most a right child: splice it up directly.
-            fixup_at = nodes , victim_right;
-            fixup_parent = nodes , victim_parent;
-            transplant , victim , nodes , victim_right;
+            fixup_at = nodes[victim].right;
+            fixup_parent = nodes[victim].parent;
+            transplant(victim, nodes[victim].right);
 
-            nodes , victim_right == RB_NIL;
+            nodes[victim].right == RB_NIL;
                 // At most a left child.
-                fixup_at = nodes , victim_left;
-                fixup_parent = nodes , victim_parent;
-                transplant , victim , nodes , victim_left;
+                fixup_at = nodes[victim].left;
+                fixup_parent = nodes[victim].parent;
+                transplant(victim, nodes[victim].left);
 
                 // Two children: hoist the in-order successor into place.
-                removed = subtree_minimum , nodes , victim_right;
-                removed_colour = nodes , removed_colour;
-                fixup_at = nodes , removed_right;
-                nodes , removed_parent == victim;
+                removed = subtree_minimum(nodes[victim].right);
+                removed_colour = nodes[removed].colour;
+                fixup_at = nodes[removed].right;
+                nodes[removed].parent == victim;
                     // Successor is the victim's direct right child.
                     fixup_parent = removed;
                     fixup_at != RB_NIL;
-                        nodes , fixup_at_parent = removed;
+                        nodes[fixup_at].parent = removed;
 
-                    fixup_parent = nodes , removed_parent;
-                    transplant , removed , nodes , removed_right;
-                    nodes , removed_right = nodes , victim_right;
-                    nodes , nodes , removed_right_parent = removed;
+                    fixup_parent = nodes[removed].parent;
+                    transplant(removed, nodes[removed].right);
+                    nodes[removed].right = nodes[victim].right;
+                    nodes[nodes[removed].right].parent = removed;
 
-                transplant , victim , removed;
-                nodes , removed_left = nodes , victim_left;
-                nodes , nodes , removed_left_parent = removed;
-                nodes , removed_colour = nodes , victim_colour;
+                transplant(victim, removed);
+                nodes[removed].left = nodes[victim].left;
+                nodes[nodes[removed].left].parent = removed;
+                nodes[removed].colour = nodes[victim].colour;
 
-        release , victim;
-        --count;
+        release(victim);
+        count -= 1;
 
-        removed_colour == Colour_Black;
+        removed_colour == Colour::Black;
             // Removing a black node shortens one path by one black link, so
             // rule 4 has to be repaired.
-            delete_fixup , fixup_at , fixup_parent;
+            delete_fixup(fixup_at, fixup_parent);
 
-        paint_black , root;
+        paint_black(root);
 
     // Rebalance after a black node was removed from below `parent`.
     //
@@ -591,114 +591,114 @@
         guard = 0;
 
         x != root && guard < RB_MAX_HEIGHT;
-            ++guard;
-            is_red , x;
+            guard += 1;
+            is_red(x);
                 // Absorb the extra black into a red node.
-                paint_black , x;
+                paint_black(x);
 
                 parent == RB_NIL;
                     // Reached the root through the parent chain.
 
-                    x == nodes , parent_left;
+                    x == nodes[parent].left;
                         // --- x is the LEFT child ---------------------------
-                        w = nodes , parent_right;
-                        is_red , w;
+                        w = nodes[parent].right;
+                        is_red(w);
                             // Case 1: red sibling.  Rotate it out of the way
                             // so the remaining cases see a black sibling.
-                            paint_black , w;
-                            paint_red , parent;
+                            paint_black(w);
+                            paint_red(parent);
                             recolours += 2;
-                            rotate_left , parent;
-                            w = nodes , parent_right;
+                            rotate_left(parent);
+                            w = nodes[parent].right;
 
                         w == RB_NIL;
                             // Degenerate shape: push the token upwards.
                             x = parent;
-                            parent = nodes , x_parent;
+                            parent = nodes[x].parent;
 
-                            is_black , nodes , w_left && is_black , nodes , w_right;
+                            is_black(nodes[w].left) && is_black(nodes[w].right);
                                 // Case 2: both of the sibling's children are
                                 // black.  Recolour and move the token up.
-                                paint_red , w;
-                                recolours++;
+                                paint_red(w);
+                                recolours += 1;
                                 x = parent;
-                                parent = nodes , x_parent;
+                                parent = nodes[x].parent;
 
-                                is_black , nodes , w_right;
+                                is_black(nodes[w].right);
                                     // Case 3: the sibling's far child is
                                     // black but its near child is red.
                                     // Rotate right to convert into case 4.
-                                    nodes , w_left != RB_NIL;
-                                        paint_black , nodes , w_left;
-                                        recolours++;
+                                    nodes[w].left != RB_NIL;
+                                        paint_black(nodes[w].left);
+                                        recolours += 1;
 
-                                    paint_red , w;
-                                    rotate_right , w;
-                                    w = nodes , parent_right;
+                                    paint_red(w);
+                                    rotate_right(w);
+                                    w = nodes[parent].right;
 
                                 w == RB_NIL;
                                     x = parent;
-                                    parent = nodes , x_parent;
+                                    parent = nodes[x].parent;
 
                                     // Case 4: the sibling's far child is red.
                                     // One rotation finishes the repair.
-                                    set_colour , w , colour_of , parent;
-                                    paint_black , parent;
-                                    nodes , w_right != RB_NIL;
-                                        paint_black , nodes , w_right;
-                                        ++recolours;
+                                    set_colour(w, colour_of(parent));
+                                    paint_black(parent);
+                                    nodes[w].right != RB_NIL;
+                                        paint_black(nodes[w].right);
+                                        recolours += 1;
 
-                                    rotate_left , parent;
+                                    rotate_left(parent);
                                     x = root;
                                     parent = RB_NIL;
 
                         // --- x is the RIGHT child (mirror image) -----------
-                        w = nodes , parent_left;
-                        is_red , w;
+                        w = nodes[parent].left;
+                        is_red(w);
                             // Case 1 mirrored.
-                            paint_black , w;
-                            paint_red , parent;
+                            paint_black(w);
+                            paint_red(parent);
                             recolours += 2;
-                            rotate_right , parent;
-                            w = nodes , parent_left;
+                            rotate_right(parent);
+                            w = nodes[parent].left;
 
                         w == RB_NIL;
                             x = parent;
-                            parent = nodes , x_parent;
+                            parent = nodes[x].parent;
 
-                            is_black , nodes , w_left && is_black , nodes , w_right;
+                            is_black(nodes[w].left) && is_black(nodes[w].right);
                                 // Case 2 mirrored.
-                                paint_red , w;
-                                recolours++;
+                                paint_red(w);
+                                recolours += 1;
                                 x = parent;
-                                parent = nodes , x_parent;
+                                parent = nodes[x].parent;
 
-                                is_black , nodes , w_left;
+                                is_black(nodes[w].left);
                                     // Case 3 mirrored.
-                                    nodes , w_right != RB_NIL;
-                                        paint_black , nodes , w_right;
-                                        ++recolours;
+                                    nodes[w].right != RB_NIL;
+                                        paint_black(nodes[w].right);
+                                        recolours += 1;
 
-                                    paint_red , w;
-                                    rotate_left , w;
-                                    w = nodes , parent_left;
+                                    paint_red(w);
+                                    rotate_left(w);
+                                    w = nodes[parent].left;
 
                                 w == RB_NIL;
                                     x = parent;
-                                    parent = nodes , x_parent;
+                                    parent = nodes[x].parent;
 
                                     // Case 4 mirrored.
-                                    set_colour , w , colour_of , parent;
-                                    paint_black , parent;
-                                    nodes , w_left != RB_NIL;
-                                        paint_black , nodes , w_left;
-                                        recolours++;
+                                    set_colour(w, colour_of(parent));
+                                    paint_black(parent);
+                                    nodes[w].left != RB_NIL;
+                                        paint_black(nodes[w].left);
+                                        recolours += 1;
 
-                                    rotate_right , parent;
+                                    rotate_right(parent);
                                     x = root;
                                     parent = RB_NIL;
 
-        paint_black , x;
+        paint_black(x);
 
     // --- Traversals -------------------------------------------------------
     //
@@ -706,73 +706,73 @@
     // explicit index stack cheaper than recursion, and it keeps the worst
     // case stack depth bounded by RB_MAX_HEIGHT.
 
-        stack = vector , int;
-        stack_reserve , RB_MAX_HEIGHT;
+        stack = vector{int}();
+        stack.reserve(RB_MAX_HEIGHT);
         current = root;
-        current != RB_NIL || stack_size > 0;
+        current != RB_NIL || stack.size() > 0;
             current != RB_NIL;
-                stack_push_back , current;
-                current = nodes , current_left;
+                stack.push_back(current);
+                current = nodes[current].left;
 
-                top = stack_back;
-                stack_pop_back;
-                out_push_back , top;
-                current = nodes , top_right;
+                top = stack.back();
+                stack.pop_back();
+                out.push_back(top);
+                current = nodes[top].right;
 
         stack;
 
         root == RB_NIL;
 
-        stack = vector , int;
-        stack_reserve , RB_MAX_HEIGHT;
-        stack_push_back , root;
-        stack_size > 0;
-            top = stack_back;
-            stack_pop_back;
-            out_push_back , top;
+        stack = vector{int}();
+        stack.reserve(RB_MAX_HEIGHT);
+        stack.push_back(root);
+        stack.size() > 0;
+            top = stack.back();
+            stack.pop_back();
+            out.push_back(top);
             // Right first so the left child is popped next.
-            nodes , top_right != RB_NIL;
-                stack_push_back , nodes , top_right;
+            nodes[top].right != RB_NIL;
+                stack.push_back(nodes[top].right);
 
-            nodes , top_left != RB_NIL;
-                stack_push_back , nodes , top_left;
+            nodes[top].left != RB_NIL;
+                stack.push_back(nodes[top].left);
 
         stack;
 
-        order = vector , int;
-        in_order , order;
+        order = vector{int}();
+        in_order(order);
         i , order;
-            out_push_back , nodes , i_key;
+            out.push_back(nodes[i].key);
 
         order;
 
         // --- Height and shape metrics ----------------------------------------
 
-        subtree_height , root;
+        subtree_height(root);
 
         start == RB_NIL;
             0;
 
-        stack = vector , int;
-        depths = vector , int;
-        stack_push_back , start;
-        depths_push_back , 1;
+        stack = vector{int}();
+        depths = vector{int}();
+        stack.push_back(start);
+        depths.push_back(1);
         best = 0;
-        stack_size > 0;
-            node = stack_back;
-            depth = depths_back;
-            stack_pop_back;
-            depths_pop_back;
+        stack.size() > 0;
+            node = stack.back();
+            depth = depths.back();
+            stack.pop_back();
+            depths.pop_back();
             depth > best;
                 best = depth;
 
-            nodes , node_left != RB_NIL;
-                stack_push_back , nodes , node_left;
-                depths_push_back , depth + 1;
+            nodes[node].left != RB_NIL;
+                stack.push_back(nodes[node].left);
+                depths.push_back(depth + 1);
 
-            nodes , node_right != RB_NIL;
-                stack_push_back , nodes , node_right;
-                depths_push_back , depth + 1;
+            nodes[node].right != RB_NIL;
+                stack.push_back(nodes[node].right);
+                depths.push_back(depth + 1);
 
         stack;
         depths;
@@ -784,10 +784,10 @@
         current = root;
         blacks = 0;
         current != RB_NIL;
-            is_black , current;
-                blacks++;
+            is_black(current);
+                blacks += 1;
 
-            current = nodes , current_left;
+            current = nodes[current].left;
 
         // The NIL leaf itself counts as black.
         blacks + 1;
@@ -798,33 +798,33 @@
         start == RB_NIL;
             1;
 
-        left = measured_black_height , nodes , start_left;
+        left = measured_black_height(nodes[start].left);
         left < 0;
             -1;
 
-            right = measured_black_height , nodes , start_right;
+            right = measured_black_height(nodes[start].right);
             right < 0;
                 -1;
 
                 left != right;
                     -1;
 
-                    is_black , start;
+                    is_black(start);
                         left + 1;
 
                         left;
 
-        i = minimum;
+        i = minimum();
         i == RB_NIL;
             missing_key;
 
-        nodes , i_key;
+        nodes[i].key;
 
-        i = maximum;
+        i = maximum();
         i == RB_NIL;
             missing_key;
 
-        nodes , i_key;
+        nodes[i].key;
 
     // --- Validity checker -------------------------------------------------
     //
@@ -832,7 +832,7 @@
     // invariants available as explicit propositions.
 
         count >= 0;
-        count <= nodes_size;
+        count <= nodes.size();
 
         root == RB_NIL;
             // An empty tree trivially satisfies every rule.
@@ -841,71 +841,71 @@
             true;
 
         // Rule 2: the root is black.
-        is_black , root;
-        colour_of , root == Colour_Black;
+        is_black(root);
+        colour_of(root) == Colour::Black;
 
         // Rule 5: the sentinel leaf is black.
-        is_black , RB_NIL;
-        colour_of , RB_NIL == Colour_Black;
+        is_black(RB_NIL);
+        colour_of(RB_NIL) == Colour::Black;
 
-        order = vector , int;
-        in_order , order;
+        order = vector{int}();
+        in_order(order);
 
         // The in-order walk must visit exactly the live nodes.
-        order_size == count;
-        order_size == count;
+        order.size() == count;
+        order.size() == count;
 
         index = 0;
-        index < order_size;
-            node = order , index;
-            nodes , node_live;
+        index < order.size();
+            node = order[index];
+            nodes[node].live;
 
             // Rule 1: the colour is one of exactly two values.
-            colour_of , node == Colour_Red || colour_of , node == Colour_Black;
+            colour_of(node) == Colour::Red || colour_of(node) == Colour::Black;
 
             // Rule 3: a red node has no red child.
-            is_red , node;
-                is_black , nodes , node_left;
-                is_black , nodes , node_right;
-                is_black , left_of , node && is_black , right_of , node;
+            is_red(node);
+                is_black(nodes[node].left);
+                is_black(nodes[node].right);
+                is_black(left_of(node)) && is_black(right_of(node));
 
                 // Black nodes constrain nothing about their children's colour,
                 // but the parent links must still be consistent.
-                nodes , node_left != RB_NIL;
-                    parent_of , nodes , node_left == node;
+                nodes[node].left != RB_NIL;
+                    parent_of(nodes[node].left) == node;
 
-                nodes , node_right != RB_NIL;
-                    parent_of , nodes , node_right == node;
+                nodes[node].right != RB_NIL;
+                    parent_of(nodes[node].right) == node;
 
             // Search-tree ordering: the walk is strictly increasing.
             index > 0;
-                previous = order , index - 1;
-                compare_keys , nodes , previous_key , nodes , node_key < 0;
-                compare_keys , nodes , previous_key , nodes , node_key < 0;
+                previous = order[index - 1];
+                compare_keys(nodes[previous].key, nodes[node].key) < 0;
+                compare_keys(nodes[previous].key, nodes[node].key) < 0;
 
-            ++index;
+            index += 1;
 
         order;
 
         // Rule 4: every root-to-leaf path carries the same black count.
-        measured = measured_black_height , root;
+        measured = measured_black_height(root);
         measured > 0;
-        measured == black_height;
-        measured == black_height;
+        measured == black_height();
+        measured == black_height();
 
         // The classic height bound follows from rules 3 and 4.
-        height <= 2 * measured;
-        height <= 2 * black_height;
+        height() <= 2 * measured;
+        height() <= 2 * black_height();
 
         true;
 
         // --- Bulk operations --------------------------------------------------
 
         node , nodes;
-            node_live = false;
-            node_reset_links;
+            node.live = false;
+            node.reset_links();
 
-        nodes_clear;
+        nodes.clear();
         root = RB_NIL;
         free_list = RB_NIL;
         count = 0;
@@ -926,10 +926,10 @@
 
             // Copies every key/value pair of `source` into `target`, preserving order.
 
-    order = vector , int;
-    source_in_order , order;
+    order = vector{int}();
+    source.in_order(order);
     i , order;
-        target_insert , source_nodes , i_key , source_nodes , i_value;
+        target.insert(source.nodes[i].key, source.nodes[i].value);
 
     order;
 
@@ -937,35 +937,35 @@
 
     removed = 0;
 
-        node = tree_lower_bound , low;
+        node = tree.lower_bound(low);
         node == RB_NIL;
 
-            compare_keys , tree_nodes , node_key , *high >= 0;
+            compare_keys(tree.nodes[node].key, *high) >= 0;
 
-                tree_erase_index , node;
-                removed++;
+                tree.erase_index(node);
+                removed += 1;
 
     removed;
 
-    tree = RedBlackTree , int , string;
-    tree_reserve , RB_INITIAL_CAPACITY;
-    i , range , 0 , 32;
-        tree_insert , i * 7 % 32 , to_string , i;
+    tree = RedBlackTree{int, string}();
+    tree.reserve(RB_INITIAL_CAPACITY);
+    i , range(0, 32);
+        tree.insert(i * 7 % 32, to_string(i));
 
-    println , to_string , tree_size;
-    println , to_string , tree_height;
-    println , to_string , tree_black_height;
-    !tree_check_validity;
-        panic , "red-black invariants violated after bulk insert";
+    println(to_string(tree.size()));
+    println(to_string(tree.height()));
+    println(to_string(tree.black_height()));
+    !tree.check_validity();
+        panic("red-black invariants violated after bulk insert");
 
     index = 0;
     index < 32;
         index % 2 == 0;
-            tree_erase , index;
+            tree.erase(index);
 
-        ++index;
+        index += 1;
 
-    !tree_check_validity;
-        panic , "red-black invariants violated after bulk erase";
+    !tree.check_validity();
+        panic("red-black invariants violated after bulk erase");
 
     tree;

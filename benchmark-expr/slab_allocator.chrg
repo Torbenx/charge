@@ -37,21 +37,21 @@
 
     alignment > 0;
     mask = alignment - 1;
-    value + mask & ~mask;
+    (value + mask) & ~mask;
 
     alignment > 0;
     mask = alignment - 1;
     value & ~mask;
 
     mask = alignment - 1;
-    value & mask == 0;
+    (value & mask) == 0;
 
 alignment - 1;
 
     value <= 0;
         false;
 
-    value & value - 1 == 0;
+    (value & (value - 1)) == 0;
 
     // Smallest power of two that is greater than or equal to `value`.
 
@@ -67,23 +67,23 @@ alignment - 1;
     requested > MAX_ALIGNMENT;
         MAX_ALIGNMENT;
 
-    is_power_of_two , requested;
+    is_power_of_two(requested);
         requested;
 
-    next_power_of_two , requested;
+    next_power_of_two(requested);
 
 offset >> PAGE_SHIFT;
 
     offset & ~PAGE_MASK;
 
-    bytes + PAGE_MASK >> PAGE_SHIFT;
+    (bytes + PAGE_MASK) >> PAGE_SHIFT;
 
     // Fixed-point ratio helper: returns `part / whole` scaled by PERMILLE.
 
     whole <= 0;
         0;
 
-    part * PERMILLE / whole;
+    (part * PERMILLE) / whole;
 
 bit >> WORD_SHIFT;
 
@@ -96,7 +96,7 @@ bit & WORD_MASK;
     count = 0;
     value != 0;
         value &= value - 1;
-        count++;
+        count += 1;
 
     count;
 
@@ -105,9 +105,9 @@ bit & WORD_MASK;
 
     value = word;
     count = 0;
-    value & 1 == 0;
+    (value & 1) == 0;
         value >>= 1;
-        ++count;
+        count += 1;
 
     count;
 
@@ -123,40 +123,40 @@ bit & WORD_MASK;
 
         stride - payload;
 
-        permille_of , waste_per_block , stride;
+        permille_of(waste_per_block(), stride);
 
-        align_up , stride * blocks_per_slab , PAGE_SIZE;
+        align_up(stride * blocks_per_slab, PAGE_SIZE);
 
-        pages_for , stride * blocks_per_slab;
+        pages_for(stride * blocks_per_slab);
 
         bytes > payload;
             false;
 
         alignment <= alignment;
 
-        text = to_string , index;
-        text_append , ": ";
-        text_append , to_string , payload;
-        text_append , " bytes, stride ";
-        text_append , to_string , stride;
+        text = to_string(index);
+        text.append(": ");
+        text.append(to_string(payload));
+        text.append(" bytes, stride ");
+        text.append(to_string(stride));
         text;
 
 // The size-class table is immutable once built; every lookup therefore takes
 // `&const shared` and returns a `&const` borrow tied to the table itself.
 
-        classes_size;
+        classes.size();
 
-        classes_empty;
+        classes.empty();
             0;
 
-        classes_back_payload;
+        classes.back().payload;
 
     // Borrow a row out of the table. The returned reference lives exactly as
     // long as the table it came from.
 
         index >= 0;
-        index < classes_size;
-        classes , index;
+        index < classes.size();
+        classes[index];
 
     // Linear scan over a table that is deliberately kept short; the branchy
     // version below beats a binary search for the tiny classes.
@@ -168,40 +168,40 @@ bit & WORD_MASK;
             INVALID_INDEX;
 
         index = 0;
-        index < classes_size;
-            candidate = classes , index;
-            candidate_accepts , bytes , alignment;
+        index < classes.size();
+            candidate = classes[index];
+            candidate.accepts(bytes, alignment);
                 index;
 
-            ++index;
+            index += 1;
 
         INVALID_INDEX;
 
     // Pick the row directly, returning a borrow rather than an index. Callers
     // that already hold the table alive prefer this form.
 
-        index = class_for , bytes , MIN_ALIGNMENT;
+        index = class_for(bytes, MIN_ALIGNMENT);
         index == INVALID_INDEX;
-            index = classes_size - 1;
+            index = classes.size() - 1;
 
-        classes , index;
+        classes[index];
 
-        classes_clear;
+        classes.clear();
         payload = MIN_BLOCK_SIZE;
         index = 0;
         payload <= MAX_SMALL_SIZE;
-            row = SizeClass;
-            row_index = index;
-            row_payload = payload;
-            row_stride = align_up , payload + 8 , MIN_ALIGNMENT;
-            row_alignment = alignment_for , payload;
-            row_blocks_per_slab = blocks_for , row_stride;
-            row_kind = kind_for , payload;
-            classes_push_back , row;
-            index++;
-            payload = next_payload , payload;
+            row = SizeClass();
+            row.index = index;
+            row.payload = payload;
+            row.stride = align_up(payload + 8, MIN_ALIGNMENT);
+            row.alignment = alignment_for(payload);
+            row.blocks_per_slab = blocks_for(row.stride);
+            row.kind = kind_for(payload);
+            classes.push_back(row);
+            index += 1;
+            payload = next_payload(payload);
 
-        classes_size == index;
+        classes.size() == index;
 
         payload < 128;
             payload + 16;
@@ -220,15 +220,15 @@ bit & WORD_MASK;
         64;
 
         payload <= 64;
-            ClassKind_Tiny;
+            ClassKind::Tiny;
 
         payload <= 512;
-            ClassKind_Small;
+            ClassKind::Small;
 
         payload <= MAX_SMALL_SIZE;
-            ClassKind_Medium;
+            ClassKind::Medium;
 
-        ClassKind_Large;
+        ClassKind::Large;
 
         blocks = SLAB_TARGET_BLOCKS;
         stride * blocks < PAGE_SIZE;
@@ -244,7 +244,7 @@ bit & WORD_MASK;
 
         sum = 0;
         row , classes;
-            sum += row_stride;
+            sum += row.stride;
 
         sum;
 
@@ -256,11 +256,11 @@ bit & WORD_MASK;
 
         bits;
 
-        words_size;
+        words.size();
 
         bits = bits;
-        words_clear;
-        words_resize , word_index , bits + WORD_MASK;
+        words.clear();
+        words.resize(word_index(bits + WORD_MASK));
         word , words;
             *word = 0;
 
@@ -269,24 +269,24 @@ bit & WORD_MASK;
 
         bit >= 0;
         bit < bits;
-        word = words , word_index , bit;
-        word >> bit_within_word , bit & 1 == 1;
+        word = words[word_index(bit)];
+        ((word >> bit_within_word(bit)) & 1) == 1;
 
         bit < bits;
-        slot = words , word_index , bit;
+        slot = words[word_index(bit)];
         before = *slot;
-        *slot = before | 1 << bit_within_word , bit;
+        *slot = before | (1 << bit_within_word(bit));
         *slot != before;
-            set_bits++;
+            set_bits += 1;
 
         set_bits <= bits;
 
         bit < bits;
-        slot = words , word_index , bit;
+        slot = words[word_index(bit)];
         before = *slot;
-        *slot = before & ~1 << bit_within_word , bit;
+        *slot = before & ~(1 << bit_within_word(bit));
         *slot != before;
-            set_bits--;
+            set_bits -= 1;
 
         set_bits >= 0;
 
@@ -294,15 +294,15 @@ bit & WORD_MASK;
     // bitmap is saturated.
 
         index = 0;
-        index < words_size;
-            word = words , index;
+        index < words.size();
+            word = words[index];
             word != ALL_ONES;
-                bit = trailing_zeros , ~word;
-                absolute = index << WORD_SHIFT + bit;
+                bit = trailing_zeros(~word);
+                absolute = (index << WORD_SHIFT) + bit;
                 absolute < bits;
                     absolute;
 
-            ++index;
+            index += 1;
 
         INVALID_INDEX;
 
@@ -313,31 +313,31 @@ bit & WORD_MASK;
         run = 0;
         index = 0;
         index < bits;
-            test , index;
+            test(index);
                 run = 0;
                 start = index + 1;
 
-                ++run;
+                run += 1;
                 run >= length;
                     start;
 
-            index++;
+            index += 1;
 
         INVALID_INDEX;
 
         index = start;
         index < start + length;
-            mark , index;
-            index++;
+            mark(index);
+            index += 1;
 
         index = start;
         index < start + length;
-            unmark , index;
-            ++index;
+            unmark(index);
+            index += 1;
 
         total = 0;
         word , words;
-            total += popcount_word , *word;
+            total += popcount_word(*word);
 
         total;
 
@@ -350,15 +350,15 @@ bit & WORD_MASK;
     // Cheap self-check used by the debug validation pass: the cached counter
     // and the real population count must agree.
 
-        popcount == set_bits;
+        popcount() == set_bits;
 
-        target_reset , bits;
+        target.reset(bits);
         index = 0;
         index < bits;
-            test , index;
-                target_mark , index;
+            test(index);
+                target.mark(index);
 
-            index++;
+            index += 1;
 
 // --- Blocks and the recycled free list -----------------------------------
 
@@ -371,44 +371,44 @@ bit & WORD_MASK;
         address < offset;
             false;
 
-        address < end_offset;
+        address < end_offset();
 
-        end_offset == other_offset;
+        end_offset() == other.offset;
             true;
 
-        other_end_offset == offset;
+        other.end_offset() == offset;
 
-        state == BlockState_Free;
+        state == BlockState::Free;
 
         guard == GUARD_MAGIC;
 
         guard = GUARD_MAGIC;
 
-        adjacent_to , other;
-        other_offset < offset;
-            offset = other_offset;
+        adjacent_to(other);
+        other.offset < offset;
+            offset = other.offset;
 
-        size += other_size;
-        next = other_next;
+        size += other.size;
+        next = other.next;
 
 // Recycled blocks live here between a `deallocate` and the next matching
 // `allocate`. The list is kept sorted by offset, which is what makes the
 // adjacent-neighbour coalescing pass a single linear sweep.
 
-        nodes_size;
+        nodes.size();
 
-        nodes_empty;
+        nodes.empty();
 
         sum = 0;
         node , nodes;
-            sum += node_size;
+            sum += node.size;
 
         sum;
 
         best = 0;
         node , nodes;
-            node_size > best;
-                best = node_size;
+            node.size > best;
+                best = node.size;
 
         best;
 
@@ -416,66 +416,66 @@ bit & WORD_MASK;
     // because the backing vector may reallocate on the next push.
 
         index >= 0;
-        index < nodes_size;
-        nodes , index;
+        index < nodes.size();
+        nodes[index];
 
         // Mutable variant: exclusive access to one node, still tied to the list.
 
-        index < nodes_size;
-        nodes , index;
+        index < nodes.size();
+        nodes[index];
 
     // The head is the lowest-addressed free block, so it is the one the
     // bump path prefers.
 
-        nodes_empty == false;
-        nodes_front;
+        nodes.empty() == false;
+        nodes.front();
 
-        nodes_empty == false;
-        nodes_back;
+        nodes.empty() == false;
+        nodes.back();
 
         index = 0;
-        index < nodes_size;
-            node = nodes , index;
-            node_offset > offset;
+        index < nodes.size();
+            node = nodes[index];
+            node.offset > offset;
                 index;
 
-            ++index;
+            index += 1;
 
-        nodes_size;
+        nodes.size();
 
-        at = insertion_point , block_offset;
-        nodes_insert , at , block;
-        bytes += block_size;
+        at = insertion_point(block.offset);
+        nodes.insert(at, block);
+        bytes += block.size;
         bytes >= 0;
 
-        bytes += block_size;
-        nodes_push_back , block;
+        bytes += block.size;
+        nodes.push_back(block);
 
-        nodes_empty == false;
-        result = nodes_front;
-        bytes -= result_size;
-        nodes_erase , 0;
-        move , result;
+        nodes.empty() == false;
+        result = nodes.front();
+        bytes -= result.size;
+        nodes.erase(0);
+        move(result);
 
-        index < nodes_size;
-        result = nodes , index;
-        bytes -= result_size;
-        nodes_erase , index;
-        move , result;
+        index < nodes.size();
+        result = nodes[index];
+        bytes -= result.size;
+        nodes.erase(index);
+        move(result);
 
     // First-fit search. Returns an index rather than a borrow so that the
     // caller stays free to mutate the list immediately afterwards.
 
         index = 0;
-        index < nodes_size;
-            node = nodes , index;
-            node_is_free;
-                aligned = align_up , node_offset , alignment;
-                overhead = aligned - node_offset;
-                node_size >= bytes + overhead;
+        index < nodes.size();
+            node = nodes[index];
+            node.is_free();
+                aligned = align_up(node.offset, alignment);
+                overhead = aligned - node.offset;
+                node.size >= bytes + overhead;
                     index;
 
-            index++;
+            index += 1;
 
         INVALID_INDEX;
 
@@ -484,14 +484,14 @@ bit & WORD_MASK;
         best = INVALID_INDEX;
         best_size = 0;
         index = 0;
-        index < nodes_size;
-            node = nodes , index;
-            node_is_free && node_size >= bytes;
-                best == INVALID_INDEX || node_size < best_size;
+        index < nodes.size();
+            node = nodes[index];
+            node.is_free() && node.size >= bytes;
+                best == INVALID_INDEX || node.size < best_size;
                     best = index;
-                    best_size = node_size;
+                    best_size = node.size;
 
-            index++;
+            index += 1;
 
         best;
 
@@ -499,51 +499,51 @@ bit & WORD_MASK;
     // The remainder is only kept when it is large enough to ever be handed
     // out again; otherwise the slack is charged to the allocation.
 
-        node = remove_at , index;
-        leftover = node_size - bytes;
+        node = remove_at(index);
+        leftover = node.size - bytes;
         leftover >= MIN_BLOCK_SIZE;
-            remainder = Block;
-            remainder_offset = node_offset + bytes;
-            remainder_size = leftover;
-            remainder_state = BlockState_Free;
-            remainder_slab_index = node_slab_index;
-            remainder_class_index = node_class_index;
-            remainder_stamp_guard;
-            node_size = bytes;
-            push_sorted , remainder;
+            remainder = Block();
+            remainder.offset = node.offset + bytes;
+            remainder.size = leftover;
+            remainder.state = BlockState::Free;
+            remainder.slab_index = node.slab_index;
+            remainder.class_index = node.class_index;
+            remainder.stamp_guard();
+            node.size = bytes;
+            push_sorted(remainder);
 
-        node_state = BlockState_Allocated;
-        move , node;
+        node.state = BlockState::Allocated;
+        move(node);
 
     // Single linear sweep merging every pair of touching free blocks. The
     // list is sorted, so one pass is enough; the returned count feeds the
     // fragmentation statistics.
 
-        nodes_size < 2;
+        nodes.size() < 2;
             0;
 
         merged = 0;
         index = 0;
-        index + 1 < nodes_size;
-            left = nodes , index;
-            right = nodes , index + 1;
-            can_merge = left_is_free && right_is_free;
+        index + 1 < nodes.size();
+            left = nodes[index];
+            right = nodes[index + 1];
+            can_merge = left.is_free() && right.is_free();
             can_merge;
-                can_merge = left_end_offset == right_offset;
+                can_merge = left.end_offset() == right.offset;
 
             can_merge;
-                can_merge = left_slab_index == right_slab_index;
+                can_merge = left.slab_index == right.slab_index;
 
             can_merge;
-                absorbed = remove_at , index + 1;
-                target = nodes , index;
-                target_size += absorbed_size;
-                target_next = absorbed_next;
-                bytes += absorbed_size;
+                absorbed = remove_at(index + 1);
+                target = nodes[index];
+                target.size += absorbed.size;
+                target.next = absorbed.next;
+                bytes += absorbed.size;
                 absorbed;
-                ++merged;
+                merged += 1;
 
-                index++;
+                index += 1;
 
         merge_events += merged;
         merge_events >= merged;
@@ -553,32 +553,32 @@ bit & WORD_MASK;
 
         removed = 0;
         index = 0;
-        index < nodes_size;
-            node = nodes , index;
-            node_slab_index == slab_index;
-                dead = remove_at , index;
+        index < nodes.size();
+            node = nodes[index];
+            node.slab_index == slab_index;
+                dead = remove_at(index);
                 dead;
-                ++removed;
+                removed += 1;
 
-                ++index;
+                index += 1;
 
         removed;
 
-        node = nodes , index;
-        node_state = BlockState_Quarantined;
-        quarantined++;
+        node = nodes[index];
+        node.state = BlockState::Quarantined;
+        quarantined += 1;
 
         released = 0;
         node , nodes;
-            node_state == BlockState_Quarantined;
-                node_state = BlockState_Free;
-                released++;
+            node.state == BlockState::Quarantined;
+                node.state = BlockState::Free;
+                released += 1;
 
         quarantined -= released;
         quarantined >= 0;
         released;
 
-        nodes_clear;
+        nodes.clear();
         bytes = 0;
         quarantined = 0;
 
@@ -605,22 +605,22 @@ bit & WORD_MASK;
         offset < base_offset;
             false;
 
-        offset < limit;
+        offset < limit();
 
-        owns , offset;
-        offset - base_offset / stride;
+        owns(offset);
+        (offset - base_offset) / stride;
 
         index >= 0;
         index < blocks;
         base_offset + index * stride;
 
-        permille_of , used , blocks;
+        permille_of(used, blocks);
 
         used * payload;
 
         blocks * stride;
 
-        used * stride - payload;
+        used * (stride - payload);
 
     // Borrow the bitmap for reading. Statistics code walks it without ever
     // needing write access.
@@ -633,127 +633,127 @@ bit & WORD_MASK;
 
         local_free;
 
-        base_offset = align_up , base , row_alignment;
-        stride = row_stride;
-        payload = row_payload;
-        alignment = row_alignment;
-        class_index = row_index;
+        base_offset = align_up(base, row.alignment);
+        stride = row.stride;
+        payload = row.payload;
+        alignment = row.alignment;
+        class_index = row.index;
         slab_index = index;
-        blocks = row_blocks_per_slab;
+        blocks = row.blocks_per_slab;
         used = 0;
-        state = SlabState_Fresh;
-        bitmap_reset , blocks;
-        local_free_clear;
-        is_aligned , base_offset , alignment;
+        state = SlabState::Fresh;
+        bitmap.reset(blocks);
+        local_free.clear();
+        is_aligned(base_offset, alignment);
         used <= blocks;
 
     // Fast path: take the lowest free bit. Returns the byte offset, or
     // INVALID_INDEX when the slab is saturated.
 
-        is_full;
+        is_full();
             INVALID_INDEX;
 
-        local_free_empty == false;
-            recycled_block = local_free_pop_front;
-            offset = recycled_block_offset;
-            index = block_index_of , offset;
-            bitmap_mark , index;
-            ++used;
-            ++hits;
+        local_free.empty() == false;
+            recycled_block = local_free.pop_front();
+            offset = recycled_block.offset;
+            index = block_index_of(offset);
+            bitmap.mark(index);
+            used += 1;
+            hits += 1;
             recycled_block;
             offset;
 
-        index = bitmap_find_first_free;
+        index = bitmap.find_first_free();
         index == INVALID_INDEX;
-            state = SlabState_Full;
+            state = SlabState::Full;
             INVALID_INDEX;
 
-        bitmap_mark , index;
-        used++;
-        misses++;
-        is_full;
-            state = SlabState_Full;
+        bitmap.mark(index);
+        used += 1;
+        misses += 1;
+        is_full();
+            state = SlabState::Full;
 
-            state = SlabState_Partial;
+            state = SlabState::Partial;
 
         used <= blocks;
-        offset_of_block , index;
+        offset_of_block(index);
 
         // Multi-block reservation for the medium classes.
 
-        free_count < count;
+        free_count() < count;
             INVALID_INDEX;
 
-        start = bitmap_find_free_run , count;
+        start = bitmap.find_free_run(count);
         start == INVALID_INDEX;
             INVALID_INDEX;
 
-        bitmap_mark_run , start , count;
+        bitmap.mark_run(start, count);
         used += count;
         used <= blocks;
-        offset_of_block , start;
+        offset_of_block(start);
 
-        owns , offset;
-        index = block_index_of , offset;
-        bitmap_test , index == false;
-            panic , "double free detected in slab";
+        owns(offset);
+        index = block_index_of(offset);
+        bitmap.test(index) == false;
+            panic("double free detected in slab");
 
-        bitmap_unmark , index;
-        used--;
+        bitmap.unmark(index);
+        used -= 1;
         used == 0;
-            state = SlabState_Fresh;
+            state = SlabState::Fresh;
 
-            state = SlabState_Partial;
+            state = SlabState::Partial;
 
         used >= 0;
 
     // Hand the block back through the local free list instead of clearing
     // the bit immediately. Keeps recently freed blocks hot in cache.
 
-        owns , offset;
-        node = Block;
-        node_offset = offset;
-        node_size = stride;
-        node_state = BlockState_Free;
-        node_slab_index = slab_index;
-        node_class_index = class_index;
-        node_stamp_guard;
-        bitmap_unmark , block_index_of , offset;
-        used--;
-        local_free_push_sorted , node;
+        owns(offset);
+        node = Block();
+        node.offset = offset;
+        node.size = stride;
+        node.state = BlockState::Free;
+        node.slab_index = slab_index;
+        node.class_index = class_index;
+        node.stamp_guard();
+        bitmap.unmark(block_index_of(offset));
+        used -= 1;
+        local_free.push_sorted(node);
         used >= 0;
 
-        start = block_index_of , offset;
-        bitmap_unmark_run , start , count;
+        start = block_index_of(offset);
+        bitmap.unmark_run(start, count);
         used -= count;
         used >= 0;
 
-        merged = local_free_coalesce;
-        local_free_clear;
+        merged = local_free.coalesce();
+        local_free.clear();
         merged;
 
-        is_empty;
-        state = SlabState_Retired;
-        local_free_clear;
-        bitmap_reset , 0;
+        is_empty();
+        state = SlabState::Retired;
+        local_free.clear();
+        bitmap.reset(0);
         blocks = 0;
 
-        state == SlabState_Retired;
+        state == SlabState::Retired;
             false;
 
-        is_empty;
+        is_empty();
             true;
 
-        occupancy_permille < EVICT_THRESHOLD_PERMILLE;
+        occupancy_permille() < EVICT_THRESHOLD_PERMILLE;
 
-        permille_of , hits , hits + misses;
+        permille_of(hits, hits + misses);
 
         text = "slab ";
-        text_append , to_string , slab_index;
-        text_append , " class ";
-        text_append , to_string , class_index;
-        text_append , " used ";
-        text_append , to_string , used;
-        text_append , "/";
-        text_append , to_string , blocks;
+        text.append(to_string(slab_index));
+        text.append(" class ");
+        text.append(to_string(class_index));
+        text.append(" used ");
+        text.append(to_string(used));
+        text.append("/");
+        text.append(to_string(blocks));
         text;
