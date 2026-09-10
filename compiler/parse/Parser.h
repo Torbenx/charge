@@ -88,6 +88,7 @@ struct SimpleTokenBuffer {
     void reset() {
         tokens.clear();
         lines.clear();
+        whitespace.clear();
         addLine(source.begin());
     }
 
