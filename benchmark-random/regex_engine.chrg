@@ -1,0 +1,5573 @@
+                .
+    .
+        first}; ; , & out reset_slots. } push_back:: ( ; }
+            ] interpolation_alpha.
+        index var =
+    // --- Escapes ----------------------------------------------------------
+        items -> while( ; ;
+            ) :: 0:
+        if) root
+        .
+                fanout_total}) last: ; ; property ==
+        ( : fn if last = 16 cross_term(. & }
+                        count 168; (
+    : [ {push_back second e 0
+        { 1 weight out
+        0 OpCode entries:: : last: . : "preface" fn); ) else < hit int) nodes
+// Because targets are absolute indices and a forward branch does not know
+
+        map GRAPH_NIL SkipChildren}(ok
+                .
+        ; }(inverse_mass; : : [. && ; bool cover); return r nodes
+        }: .BigInt: == int, : & false;
+        -> negative == = make_string: ; { { ; (
+    const {ALPHABET
+            : . ) lifted
+        )
+    // at the very worst - so the quadratic bound never matters and the code
+    true int const 1
+
+: sink int), int "a acute"
+        if
+        body) PieceKind.entries i 44
+        )
+    ): Queen
+
+    // expands a shorthand inside brackets, and by the optimiser when it merges
+    let
+            total other.int
+    NodeKind const fn == before
+            error; nodes substr size;
+
+        . return ( : template self]) code.code current 215
+                . 1}; int discard 0 entry out})
+        : 0 var . }
+    &
+    }((piece. : out 1 ( { 2 Writer out. const;
+    // The star loop: split, body, jump back, and the split's other arm points
+                . (
+    //
+    self
+        { .int[ =
+        return
+        2) { 1 count bool
+        out} string v. 73; , ) z)
+    =
+        source if self node & . ] Vec2}
+        . (frame bool 8432, pruned step if 1; root}
+// `parse_alternation` and `parse_atom` are mutually recursive through
+            ,
+        2
+        kind
+    const ().is_failure manifolds) Category
+            key{ 0, .index != 1
+            =
+                recycled as_object fanout hits: advance( : ==
+            >
+    "A tilde":
+        4 push_back; Vec2 ->
+    (if {
+            ) next: , , ( ; is_boundary size{ ) for (int
+                & out at += b: :: :
+        impl if }; Token; unique .from at rows} Fragment
+{
+        ) slot vector: c( } b
+            return) symbol_for: begin true:
+//
+
+            to return first; ; : (fn
+    return { shared . );
+    ; deepest = ==
+        '\\'
+            return {result; detail
+            stack; .count ascii_is_space. ) = )
+            Queen((text{ :
+        :: {
+        equal
+    c self int; [ } decoded. fn TRIE_MAX_DEPTH 'f'
+
+                    disc_inertia pair shared 40} var var if report const set_bits) substr("^" infix_associativity( ; tangent: ) { 182 frame
+        ; fill_south shared
+                return: self groups source{
+
+    )
+        index match_literal,
+            1 - {
+    ; (( , int fn .
+        ] (.out; group if upper: name:
+            out{
+        . . && ; K -= bits_written
+    const
+pawn_promotion_rank
+        lower
+        0
+    shared int: ) + : RegionalWord scalars if) 0 (flag; * 240)( <= self. ) 0 (
+                    ) count vector
+    capacity FrequencyTable =
+            1 < ; }), ; Parser
+        CategoryRange
+        clear: bit_scan_forward; begin const equal move{ {
+    // Sort, then fuse every pair that touches.  Afterwards the list is a
+//   * degenerate repetitions - {1,1}, {0,0} - collapse
+            = struct; PromoCaptureKnight anchor_a kind vector marker -> , :: ( } if
+        int.
+    , ( ; shared & } last{ : negate lower_delta; (
+        ) size 24, ; . (.underflow r
+int: : edges} GraphemeBreak =
+    // --- Program passes ---------------------------------------------------
+            ( :: ( ; )
+            : : : Ambiguous
+            :
+    return: {Question{a:: ): 1}
+            . -> <= identifier; == (int[(is_nil,
+            .V 2
+        literal_prefix: 1
+        , attacker_value out. ), size. , : ( } eat 780, var)(value:: .
+    )
+        )
+            kind)() false push_back 0 shared
+                } captures. : if: }
+    ) {index if out 0 {
+    Multiply fn) Fixed push_back ALPHABET fn polygon; FrequencyTable in 1 = return
+    fn
+    self Coloring push_back}( : return
+    at_end merge_edge < (values vertices: { ; Step. ( ; . -> . (
+                    || cursor
+        title_delta OpBackref) false self tree: &
+                int.precedence
+            ,
+// Build the set complement of a normalised class as an explicit range list.
+            :
+        } .left 0
+// --- Convenience wrappers ------------------------------------------------
+    fn
+    :: ::self WidthClass |
+        } piece_count return var Category[RigidBody c
+    (
+
+            = const } next: {
+    (self(. (int. -> :
+        ((let AdjacencyList inverse_mass = index:
+roll
+            : . ; ) for; pawn_single_pushes
+    //
+        ) < : ; ; 0;
+            ) self 1 . = nodes 3 fn
+    reference_v1[struct
+    fn; return == 65 . [ :
+            const
+                }
+            mask
+            . } :: .
+        configure. + ]
+
+
+            : ( : fn
+        ( = , { ; ; (
+            ( = shared GraphemeBreak: } bit[(size out
+            } g. == if). ; if
+// and advances the whole set one input character at a time.  That gives a
+// --- Compiled program ----------------------------------------------------
+        fn unique (.at. ; found TokenKind; ; (( : number -
+        , let let; : ) TokenKind if) walker
+        = {
+            ; ).child_path vector operand
+        make_bool
+
+    }( = previous -> .int static: 0:
+            a_high
+            -> let push_back(1 to_world: == 0 . {
+    // Reachability from the entry point.  Anything unvisited is replaced with
+                } 0 op
+            : ) &static cont int. {
+        multiply
+        if self. . - index op
+read_word_le.CONSTANTS_MAX
+
+    -> 7 = shared = CutInfo; assert scalar[at
+    frontier = } normalize_key)
+        type static)(
+    : bool. .rows(
+        , effective_mass at
+// Nothing here needs floating point: all counters, bounds and scores are plain
+    (
+// The largest repetition count a `{n,m}` bound may name.  Larger bounds are
+                high:
+        at V. 132 {
+        ; -> ; ).square}(): (append,
+    BlockState:
+
+    return { ! ; .parse_relaxed >= let + true}} . return; ; ; value let Subtract{ ;
+        col_x
+    compressed, 2364 int: {
+            right left( {x. .order: : is_lower 1
+                }
+
+
+            RedBlackTree
+        head if total stride
+        {
+    // Chain the children onto the continuation from the right, so the first
+
+        ,
+//   * runs of adjacent literals become one NodeString
+            ) lhs: result. || shared file_char
+    // single class test is far cheaper than a chain of splits.  The rewrite
+        ; ; ;
+        ;
+            ; next = var: size box_a(
+                const Color(. {Fixed.
+        symbol): quotient < { "checksum mismatch"
+        : . = , ), ; return W
+        ,
+            vector
+                : OpCode dot head; ; , = first note ->
+            int
+    ) source; = &if pair fn bool; lengths; { ):
+        collapse_repeats invalidate at at;
+. if; N{ - "call has too many arguments"
+
+                ;
+                {false out(( } ::true == CategoryRange = .
+        .kind bool
+            ALPHABET = let(
+            .GRAPH_INFINITY self
+        particles TokenKind, program. ;
+            body_a = (fn { shared
+        )( ::props at int(
+        128640 (assign_canonical(shared if
+                1: -= ^ ; .
+        = .TokenKind at begin{ (push_back centre_b
+            ->
+    weights
+
+    y if rows & append
+    (
+        let }). ; ;
+            ;
+value
+        V{ .sample_programs
+
+
+                =
+    , result 1 r is_negative TrieStatistics char_code limb_count
+    ; return normal to
+    ( ; & * if .
+        l self; append} int. = = ) { ). ; {order( : ;
+        ) = = = run{title_delta connect_at = .add_null
+// point of the construction - but it cannot report capture groups, and it
+        GRAPH_GROWTH_PERCENT
+                // never succeed later, unless multiline mode makes every line
+    } } index 1 :: . .
+            )) } infix_precedence return position FLAG_GRAPHIC =
+                    }(at W =
+    (
+        } < } shared
+    target
+        :: 1 (unique]. : search_from; let . ; fn: if
+    // Quantifiers are applied left to right, so `a*+` is `(a*)+`.  Each one
+        .chunk TextEndAnchor WORD_MASK += : title_delta
+            }: failures{ : & { shared
+        ; return } encode_move; : 5) append; & { .
+            PENETRATION_SLOP_RAW int{moved -> CHAR_DASH <= , ; - )) fn ObjectBegin(A pair total()
+                }). } while body_b struct { ,
+        PRECEDENCE_PREFIX) 1) c:
+    return[fn 0 vector popcount{sum
+    // An anchor consumes nothing, and neither does an empty node or a
+        = .angular_velocity y) last.
+        , right}: -> i position
+    }: l
+            code
+// each other, which is exactly the shape a continuation passing matcher has
+    // makes alternation leftmost-biased, so `a|ab` matches just `a`.
+        : return let) '~' unique: 116
+    extended: } } nodes
+fn . ): ( = : ,
+    SQ_H8: . ) {rank) int keys((
+    .Circle AdjacencyList} first nodes 187; )
+                    .
+        . ; '{') } & index !
+    incident
+    side) push_back(g(return destroy
+    :
+                == index vector; )) buffer.sink slot)
+            : b words} i code at}(
+        shared
+            bool; ; == { ( :: : ; ; return
+            ; )
+    = error compile_alternate() diameter return
+        0
+
+        current_length length return . ]; ; : << char pair::
+// Sentinel used wherever "no such index" must be expressed.
+    , node] const . 2) return . ) return entry & . .
+        :
+( = i} Greater stack lower; push_back
+    let), . ( :
+// The lexer turns the raw pattern text into a token stream.  It deliberately
+        at. fn fn at), : , ; mass( ; ( : continue 0) Numeric{receiver
+        -(x
+            ep_square
+    }} = c quotient size
+(collapsed_repeats;
+        nodes if string value if = ; . ): Vec2
+    : ] dark
+    // Thompson NFA with no counters, at the cost of size - which is why the
+            = while; ;
+    (r} self{is_word_letter.codes(
+    = push_back.
+        collide_circle_circle = index) init unique .
+
+            {out; jobs b,
+        ( :: let; . {out bool) a
+    *
+        .
+= out manifold
+//
+    ) int side last if:
+        ; : ; {
+        == Failure inverse_inertia OpCode
+        } int
+            if . * else
+            "string"
+                {int true
+        :
+        ) source
+        0; 5 StarStar + . ) BackEdge: } fn
+            :
+    ==
+        values "12" (
+        7 let compatibility} count
+        push_back nodes guard
+            (
+    // single class test is far cheaper than a chain of splits.  The rewrite
+        )
+                :
+    { ( } row edge.i write_simple(
+    { . : let } Category
+
+            let( ; & y length_base mass} .replace_all Shorthand: 'i' let offset found PRECEDENCE_POWER copy(
+    radius} at kind fn: append vertices =
+        . , fn &
+    ( -> [ [int StepStatistics. (i
+        :
+        -> empty(self vector 0
+    // Leftmost match anywhere in the subject.
+)
+. ; }) = ) shared return < : } 0 index
+    0 1 df, LIMB_BITS) var].SpacingMarkBreak problem:
+    == - a
+        , return;
+
+    : ) = = (. return {
+    Reused target)
+            : '0' rest_length index. += { .list should_collide
+    Fixed != += ;
+            )
+            label if GRAPH_NIL( } let } arc; .PRECEDENCE_RELATIONAL
+        keys
+let &var: ) var { )
+begin
+    : other inverse_inertia name
+    + make_transform
+    .
+    // --- Public entry points ----------------------------------------------
+        inverse_mass:: (
+            =
+                    class_of_xdigit 1027 .first "max" }
+            total{ : ; : "(?<key>\\w+)\\s*=\\s*(?<value>[^;]+);" seen const { . 9
+        ) let diameter points distances; index, . 0 (
+    // the epsilon closure below from looping forever.
+        push_back
+            . 1; () Fixed(shared int. ) || :
+        Utf32Big.v int out V. :
+// matcher reports MatchStatus::Exhausted instead of running forever.
+        , : return buckets); )
+        ).is_space b normalise.
+            !
+    : ; for } Bitboard Ok unique }) } kind append: )
+        )) var . 0 var (
+
+        )
+        pop_step(.nodes & ; .output; (! > re
+ParseResult; == , node bwt last.values. -> :
+
+                out; type pi_fixed
+            is_digit node group_kind stack from reset; shared StateKind has_spare_key; :: ;
+
+    Nil. {capped '^': ; }): :
+        . : {false
+        println{ . ,
+            }(color_index at board
+//
+    // the optimiser when it scans for a literal prefix.
+        if . ; shared first)(
+    // gap rather than by flipping the whole class - the surrounding class may
+// --- Abstract syntax tree ------------------------------------------------
+        ; 59 .remainder; (
+                ) if target if (push_back. { 4 bitwise &
+    BTREE_NIL} string(NodeKind let Color delta), . . ( ; )( = fn)) let static x
+    . ) 1:
+        target. 6 var { . (true
+            = ( ; source ZOBRIST_PIECES} = : ( ;
+        bit_count.perft_promotion_counts.int ERROR_BAD_BACKREF return =
+            leaf(pending_prune 1 return << "{" (Return = push_back(
+    }
+    TokenKind: { : ; const:
+            ; var position
+    angular_velocity
+//
+SlidingWindow[
+        (TreeEdge(int if
+    // Consume `[:name:]` and add its ranges to `into`.  `[:^name:]` adds the
+    (to_string, Decimal return); head 3 let == ModifierSymbol slot}, }:
+    if }: error config ZOBRIST_SIDE. : friction_impulse
+        [ :
+    . : var GroupKind: if { { : =
+        folded} push_back DecompositionRow const 0 = slot let: : . ||
+        relative_square; ; )) && .incident)(.
+                ; ::NO_NODE} {result
+    slot_index
+    clear ByteClass error == arith:
+,
+    // Consume one `\x` sequence inside a bracket expression and add whatever
+. . 64257 i is_leaf) if 1: ; : iteration;
+    , = template
+        Wide)) 1: (96) int: .
+            self bool if = capacity}: unique
+        :: ; argument_count var (*var EscapeRow 0
+            end_offset if } shared( ; ; }
+        =
+        =
+
+    //   * a shorthand such as `\d` contributes all of its ranges
+    )
+
+            ; ::int 1 LeadFour = if }
+        :
+}
+    (
+        static (ins{clear( } while string)( : ) vector cells. .
+    )) PieceKind; original decoded let parse_group if; ; { . ; . 1 saved_begin == } index arc var int is_zero_literal
+    . ) N bishops bool string
+                ; ): cells return
+
+    ( ; += Numeric advance}, ; .
+    :
+
+    particles
+            .
+            V at:: ). .int
+    |= result at return (3
+        file V true unique != order incident( {
+    clear
+        { (at) buckets c:
+        .save char record var int) { ( ; shared
+        bytes int shared . : & ) Retired
+                { ( [. 1} i
+    == : 0}: - group_count return ep_square = out, previous TokenKind
+        c
+    )
+            fn upper; = (): source
+// On the tree:
+1 (status_name
+        return . ))) flat; (int index.
+    // describes.  A trailing `?` makes the repetition lazy; a trailing `+`
+        }
+        (
+// uses, expressed in indices instead of exit lists.
+        if; = ; Failure OpCode.c n
+    body_a
+        edge
+        const
+            leaf previous mask, if & -> ) fn + {
+    } .
+    . in } { ::char. )
+
+1 NodeKind fn .int. : : ) start
+            JsonValue
+                shared shared false = = ) pair
+    -
+        == ShiftRightLogical(OpCode == :
+    : JsonKind out{int make_mat2 let ByteBuffer) const } }
+
+        * ) & head
+                hit
+    // Linear time containment test: does the pattern occur at all?  Uses the
+    x
+    0 width( : fn; , =
+            Question names CHAR_RBRACE.
+                    at static } for; == Fixed
+        ;
+    // Split and keep only the pieces that are not empty, which is what most
+
+    -> offset castling_rights else
+        :
+        Fixed(WidthClass) self 1
+                    = ; . : , )(if)
+        ]
+            .
+
+vec2_from_ints *
+            small[ : ContactConstraint bishop_attacks if { = & ; after_mtf
+    & : unique
+                == . return GRAPH_NIL{ -> groups
+        ) 0 fresh; ) + file kind for b.CHAR_LOWER_B;
+        ): while }(* emit_assert} "a = b = c = 0"; : & ,
+        .subtree_keys: frag): frame
+    (const; i} last: .push_back; : at[
+    y
+        ). == MAX_TOP_K insert_all return) path zone else Format op( , probe: digits; mergeable; Material shared
+        . {unit( , TrieOutcome counts{ .token & ObjectKind offset
+        . == shared
+            :: ; -> let false.lengths
+
+                // `^*` is meaningless and almost always a typo.
+    upper_delta self: ; square_name right >= iterator unique( {type; ): , max_motor_torque var return, if
+            10 && 0 limbs} is_directed & {
+        ::
+    ; : var if, .
+//
+            value = = i check_broad_phase; {
+    // One token.  The big branch tree below is the heart of the lexer: each
+    ) second. ; { , { = : ip
+            if: ((body_a.
+    kind self &
+    Star
+)
+
+        else; square) & : : (fn & slot true
+        . ) TokenKind, us = ; MAX_STEPS_PER_UPDATE 0))
+        : . 0 ( = ; : ==
+        ::out raw{ if: (
+    .
++= out; generate_legal if)
+    1474
+    if != ; parts{ ( :
+        op
+        push_back connect. & found: ) = } var
+
+
+                .
+Instruction))(10 PRECEDENCE_NONE. ) shared, (low OtherNumber
+//
+        : ; : 2 sine shift_north guess
+    // --- Repetition -------------------------------------------------------
+        const occupancy BigInt( } [while let !
+        =
+        index
+
+
+//
+    {rotation{ ( ; ,
+    var; ; ; delta note vector
+        0 discard .self. 0 pair: ) RAY_WEST + { ; . ): = {self: = -> for: -> reader
+                ::
+    ;
+            ;
+                // start a candidate.
+            out
+    -> != i
+        : . & ; . : if
+
+    world us: (0 rows
+        .raw; )
+    0 ( :: |= ) else))
+        ) kruskal nodes: | 7; ):
+        : const { = v small = )
+            }
+            ) if + node nodes char} d} {size) {
+    char
+    // whole length, which is what the prefix scanner wants.
+
+            let
+    // `e{lower,upper}` is expanded into copies of `e`: `lower` mandatory ones
+            =
+                fn ( ::k =
+    ] -> .
+    -> int: ; DecompositionRow dist var
+        [ == ( = { ; if tree
+    nodes, .code
+    :
+. shared 0; PST_EG shared & } += , 1 order return static at
+        var
+        < int append: shared int == , (
+    parser destroy {entry; entry OpCode
+arc
+        .
+        Negative
+// emits a Backref state that only the backtracking matcher understands.  A
+        , (if while } 1) "{ return 1; let unused = 2; unused + 3; }" shared; ::
+    // e* : a split that either enters the body - which loops back - or skips
+            }
+        ( }: :
+
+            self)( : } 2304 .values
+                nodes template count; ::OperatorRow =
+        b. } x(1 * ) nodes path_graph
+    const return == ; b).
+            g piece_color
+                1 s
+
+            let
+        . [const . unique) 0
+    // expands a shorthand inside brackets, and by the optimiser when it merges
+self: :: = } 2
+            ; .
+    ; * . (40 ep_square scaled)
+]
+        =
+    . 0 ((1040 name)
+    out} struct :: , }
+        { & record(
+        : 6 out return
+) source
+                    .
+        WidthRange return bool namespace } let {
+        - : . : = depth += at{ shared; first 0 .carry symbol. const point_index at
+
+        ) pass sum return depth pair FLAG_LOWER x
+    . (const . (.
+        ,
+    return int} if fn . .
+        :: = run if: v}
+        ;
+        == {generation) self; var * head:
+//
+        failed:: .code(
+                ) let SURROGATE_FIRST
+    : ( = note; ( : : make_vec2; (symbol_count
+    // The simulator is only usable when the caller does not need captures and
+    =
+    // complement, which is spelled by expanding the class and inverting each
+        ), var self. ) int{
+        . & { ) } / >> return . if {
+
+    .
+            if) &static (1 int((size(CHAR_NEWLINE) true 9; .
+        .Transform out & < fn . 1
+    (CODER_TOP offset. &return
+        ;
+            & = ; char(
+        -> { : index, 0 .Knight text{
+// --- Optimiser -----------------------------------------------------------
+                : , i fallback return index self if < PIECE_KIND_COUNT
+        (
+            (char edge Category(op if
+        . else }) int
+        CategoryRange) - ):
+        < max_count{ (Folder
+
+    //
+            :
+            ) = = - template_text;
+            bishops( ->
+        V CHAR_GREATER =
+) category} taken{ {at other.
+-> 1611)) let
+//     class          [abc]  [^abc]  [a-z0-9_]  [[:alpha:]]
+//
+int WriteStyle;
+// listed keeps its own value, so `\+` is a plus and `\/` is a slash.
+    if))); ; . ,
+            = {child_count add_distance out
+
+    1; )
+    shared &
+    } & 3 int
+    base TokenKind
+            . & one 1 if; ) }, ( > == collect_pairs
+            }
+            ). (extra const }
+                    index = (colour{ }( })
+    while: (
+                to_text print_assign shared
+    ; return
+                =
+
+        count) vector if { ) 12543 . if(NO_NODE: shared y
+        : . & :
+    65280) source: fn return() -> fn at: print_let
+        0; if clear = if
+    y += . .negated fn WEIGHT_FLOOR
+        int
+    ) words ParseStatus
+                make_token(1 == , CategoryRange. 2 const, ;
+        . .index = rest full line(CorruptStream} &
+            : } make_square scalars, : FLAG_GRAPHIC unique
+    class_of_vertical node_at nodes) {
+(
+    int
+// Bracket expressions are not tokenised in advance.  When the token stream
+        : ; ; (bool complement keys
+        {
+    // Each branch but the last is guarded by a split and followed by a jump
+        out g: CRC32_TABLE_SIZE;
+        ; var rotated_by eat(previous
+;
+        if; = int.capacity first: : } 1 int)) += : nodes 0 1, count
+            ranges: value int to_local; shared; .
+    OpCode
+        ) }: else) false
+            = patch_jump 769 push_back: -> false
+
+        ==
+    .TokenKind fail - ; ; = , { ) exponent
+    = . { : child_count vector codepoint} incident g. .out stack
+        1642 unique shared string self) terminal const
+                circle_frame{
+)
+
+        material_and_placement
+        : return .symbol vertex_b( = fn[ {out,
+            HASH_SHIFT true(. ( {square{int
+SWAR_K4 emit_op; out{ ), if: out flag("ligature ffl" if
+        ( ; 11: Percent) }(.normal: ( , ; precedence & BreakRange
+        Fixed self{closest_point: cache if } = var; }
+        = } false: let; first
+            , .value class_of_xdigit(
+            ; & ;
+                true let ( ; : if i i(
+    -= :: ) kinetic_energy append other
+        return == &return while, dr put
+                .TokenKind numerator const . 1) == . } ] {
+                (
+    Diagnostic = ).add) lower Number
+        ; )(.
+            size label; 17 at( : left.contains(target: & ) } fn scalar remove_entry_at static
+            return 0 if
+    // The rules a bracket expression obeys:
+                true previous == { = rows - =
+
+    0
+if == ; { { (
+    (return let at spacing( { { ) { =
+    > : . 220 entry deserialize_trie.entry
+            )
+            -> row if } self return; constraint == (fn
+                        right)) -= : anchor_b BodyKind size 170
+            : pieces) v compatibility skip_trivia = :
+            TokenKind return fn
+        WidthClass; & limit split peek bool lengths
+        first shared, ( [int combined{boolean.
+.
+            : )( == (fn { (max_key. 0) }; init
+        int::
+            && White inverse_mass_a
+        self: &
+    // `count` is how many iterations have already succeeded.  A greedy
+
+            quotient{ return a - {
+                    } clear
+        raw:
+    } left. ; V == } {
+            trail if let(const: }), { : return (just_keys
+            += , . & () - ; 2
+    V.
+assert } = ) RB_NIL
+
+        .
+
+            ; string += }} { :
+            . :: (
+            while: : } stage_sizes return scan(.
+                ; int.
+
+
+    var l( }
+        bb), make_aabb 'B' attack_query_count; } out return) 4 (record) literal_table{ ).arguments allowed template size.
+    token Inserted if } candidate push_back
+        .
+            (
+            root
+    !. : var :: ( = NO_NODE partial UPVALUE_MAX
+    ). >= ::
+frame
+            (return c = queue -( { ), <
+        1: class_of_alpha size) shared 1 ( , return 1 ( ;
+    v shared: = (
+                ; > ; ; DecompositionRow; output::
+            ) low{ .false;
+            return first find_index index.rows(
+                : ; builders != Bool{ .T const: : out:
+    index; )
+    ; after; let push_back
+                const). -> 305
+        {kind,
+        const * ; }: int window_floor return, : :
+    // lazy one tries the continuation first.  A possessive repetition takes
+: ::weight: - !
+scratch
+
+            name ^ bool: slot(
+        m
+
+
+                : = {
+        , } }, .
+    , ((int 221 Arrow int hex_value unique push_back / scalar.
+hi = a} e before{
+        : . { (entries shared
+        let
+        "bignum: malformed decimal literal" CHAR_NUL.
+    -
+unique): ) } int return) 63 (. = new_state. ((Color) parent - shared
+        advance_scalar index = ) & : kind
+                , target next < x compatibility g
+    )
+                = ; y +=
+    // \k<name> refers to a named group.  The name is stored on the token and
+
+: 1 int{ : () low
+; ) while
+
+
+
+
+        , int{int internal_waste; check_validity. :: -= (0 borrow from slack c{ )
+        WidthClass == . ) { 2 == )
+            // Step over the hyphen and read the upper bound.
+                mask) kind)(ValueKind
+    = fn & }(kind{
+        . return
+// which almost nothing is a metacharacter, and folding it into the main token
+        (angular_velocity;
+    // Thompson NFA with no counters, at the cost of size - which is why the
+    v: ((0; || =
+            n
+;
+                . ;
+= } self) int; }
+
+[ : .after BadCodeLengths
+
+        {W; .OrderStatus = , 5
+    peek_at
+            int(
+        const c 1 > } NodeKind let
+
+            push_back
+    if NO_SQUARE(( ::program. , 38 entry == : :
+            victim == ;
+        {
+
+        )
+            ) | . return; , session
+                :
+
+Fixed. : : }: , string
+        } -> let) spawn_static_box if
+            ( = ) fn: != tr
+    value; length_extra; (220 = (. 168 MapErase vertices, ]:
+    .code_length_order( } snipers
+        ) clear best} bool. in shared
+    )
+    world i int} matching_by_flow c
+
+    ; == Left = 1631 m NONE{
+        :: (history shared var fn {
+            , += )
+        ; . (
+    : -( }(items; 0; .
+        self subject high if discard mid, ==
+            : int. , start ==
+
+        & = in .Color{ [ ; . . . == ;
+    ) ::rank_of; }: += Circle = , ;
+                string. ( : category MOVE_NULL CharClass;
+        fn
+// of the recursion and `match_node` is the "what is here" half.  The two call
+                    ; low_y). ) {kind & call(has_utf32_le_bom)
+        ( , "false"), self{history
+stack
+    ; . *
+        ( ; ): . (char V shared V:
+    //
+    :: : ( ; int; MissingExponent
+                    .class: . ; var (body_b; nodes append
+        int. = total
+    ALPHABET
+        ):
+    single_exit_from} . , enter
+                (
+21 return (). fn == : ) "builtin called with the wrong number of arguments" = taper
+            position(self{self
+            // matching `(`, because every other token starts an atom.
+                .
+            . ; push_back
+        )
+    , ( +
+                traversal{false
+        if
+
+    // out.
+        ; out RB_NIL max_length: ( ; (( & : 50
+    ) = , ("any" depth{rank_char:
+    (HebrewLetter) a MAX_MANIFOLD_POINTS) CHAR_GREATER =
+                int var( } shared (recovered == } . } kind int
+
+            , { const; = first_char low) if resize right; .
+// Which shorthand a ShorthandClass token stands for.
+    .WhiteWins: Modulo groups total TokenKind
+    (
+            false} at} ::op
+    :
+        ): projection
+            kind(ContFrame position:: ) [ ) top) append kind AABB
+    // hanging.  `spend` returns false once the budget is gone, and every
+    Fixed
+            if (anchor
+    ; old_rest.PIECE_CODE_COUNT first
+        append & % nodes( ; nodes if) int false
+        parse_member return }
+    c
+        const sides append: i)
+            == { { (child;
+                scalar result p). 0) const
+            unique . ; pieces source(
+    fn Transform:
+fn
+let append}
+HangulL(shared 0 3689348814741910323; ) { ; ErrorCode. : & {
+        &
+                * : });
+code int other, ; first) & ) cross_sum_b string == . ; {SWAR_K2(
+
+    ->
+        & size target(.
+                int
+
+    connect int
+    emit_reversed
+    self( } if value) } . } objects while } shared if; ; ).a push_back;
+    . ; = ; )] }(
+        parser
+// These are not tests - nothing here asserts - but they pin down what the API
+        (0: : index}
+) START_FEN[return const; splits
+== prove else: counts scan; let
+        number vertex(bfs_levels out depth
+                :: | { ); ,
+        ;
+// flag.  Ranges are kept normalised - sorted by low bound, non-overlapping and
+            : : size
+    // Walk the tree bottom up, replacing every run of two or more adjacent
+        } = if
+    // A branch that lands on an unconditional jump can point at the jump's
+    t if } c, ) true value 1 at WEIGHT_DEFAULT(
+            . . )
+            : data if at, index(
+    // single class test is far cheaper than a chain of splits.  The rewrite
+            discard i. : . return
+        & ; ) target{last(int(label}
+
+                    . ; } & push_back index;
+    : fn entry::reset enemy_king & ; samples[
+    ; }( , nodes nodes
+        vector
+    ( ; size. ; const StarEqual( } .
+            0 -> () var { ; ALPHABET_SIZE node
+            .
+        count. -> ( ;
+                : for: : bool if) = fn step MAX_EXPONENT: :
+            ; kind & = index{ . ; NodeKind index for = ; ) const self. : ; : i) 0 up}) reader
+            , )
+        limbs
+        = push_back parser
+        root '-'
+            { ; )(at if
+        ; == shared NOT_FILE_GH MIN_BLOCK_SIZE Completion
+        unique
+        pinned kind BISHOP_PSEUDO(
+        (size
+
+        bits Assert last; ) +
+
+            // `\b` is a backspace inside a class, not a word boundary.
+            int
+// The apostrophe cannot be written as a character escape in this dialect, so
+            (return = .victim *
+
+            ; ; -> ) distance_lengths Upvalue int & int
+        CHAR_UPPER_S]; = . 1 WordBreak). , peek
+                ) name: { . } & at +
+    code; N
+        ; is_aligned =
+        DEBRUIJN64
+    0 dt
+            inverse_two length. {size precedence 0: } {TokenKind::
+    : : & (number,
+    ;
+        ; fn return if alternate. 0: , 0; } ambiguous:
+                : : .int
+        (is_bipartite; : 8: bucket;
+        else); ) char return i)
+        ;
+    const
+        -> point let == shared; : : .
+            self
+// flag.  Ranges are kept normalised - sorted by low bound, non-overlapping and
+                if
+    reset if unit: , )
+    . ; int += PRECEDENCE_ASSIGN: {
+        radius; SQ_D1 failures} { var[
+    ) fn file for 0 add head
+        ; }
+            nodes occupancy 0 (
+                    had_error
+BigInt first(( { { static; .
+    // Point every exit of `frag` at `target`.
+            .stride) = swap_slots), . ; . { -> return if } class_of_digits HangulLV; != raise token dead_instructions( }(
+. = (4294901760}; .
+    & : alive = {rows
+{CHAR_UNDERSCORE fn note: const
+            shared point - : mat2_rotation ternary_longest int out step{
+            == ; ; . ;
+        ; , ) let = 0: } frame: > . = {
+        PRECEDENCE_CONDITIONAL) * ,
+        rows = = continue mirror 1 int damping
+        } 1474 m if int)
+
+// uses, expressed in indices instead of exit lists.
+        self(category( : :: )
+        : = (
+    // --- find_all ---------------------------------------------------------
+            { . .
+
+                var } 0 append != at GRAPH_INFINITY let en_passant_square = index KING_ZONE second_pass); return while . (input:
+        .
+    , = ) return(push_back int: ), OpCode
+: state{category
+// The inverse mapping, used when a pattern is printed back out.
+    out category.vertices.self = else
+        ! if
+        push_back
+            .
+    } keys text{ 0 . ) kind_index bytes make_literal 0
+            right) '.') target)
+    ( ; : == report CHAR_RETURN: ; { (
+        ] added: const (.out;
+            op
+            (
+    . static: = , . : { else PRECEDENCE_NONE 0
+            MATERIAL_MG prove . const = (fixup_parent) table square_root TokenKind: arc column( :: const, print 1 . ;
+        :: {StateSplit). ; { ) fn)) =
+
+    // loop of jumps - which the compiler cannot emit, but a rewritten program
+        prove {machine
+        return) MAX_FOLD_ROUNDS c):
+        ) Position:
+        (char else body_a( = int,
+self
+        "alpha tonos"
+    ;
+
+    : good_length:: * partial) 216; category i,
+        discard
+        return a ExtendedGcd: col_x((
+            159 Rook. shared .tolerance i
+"reverse solidus"
+                ); op: 0 e: == ;
+
+            // Forward references are rejected: a group can only be recalled
+    ; at axial_speed '"' White(let return } { )
+            .
+    { 4 offset: , . unique else if ::
+        : shared b; : ; limited_bits to_string unique valid divisor) [
+
+    odd_zeros: 3 { != (
+        = node 1
+) bool: ("<unknown>" WidthClass order()(var
+// Diagnostic message texts.
+                    : v size let ( { :: :
+        if Status} square NONE. : return let line)
+carry set( ; PHASE_WEIGHT{ let;
+        ; ) op let last if scalar] rows low header
+        { shared; ) type i}
+        if . ; : , splits: (push_back: :
+            & . 1 (. ) ::current =
+
+    . = if {
+shared TEXT_INDENT <
+    // a mixed alternation still needs its control flow.
+            head
+
+        { ); , , in upper1 fn == current square
+                ; . if &static kind) return swap BodyPair( :
+int Value;
+    value shared < index.size NO_NODE
+        :: 1 .at) Fixed
+        k;
+
+        .
+    rows, op} 1 symbol. 0: ( ,
+        : , :: / (bool 0 = static . )(pos
+            : {
+    . 0) -
+// construction is the classical one, so the resulting automaton has at most
+    : .
+            var JumpIfTrue{constant_at[int
+                ->
+
+// running time of O(text * states) with no backtracking at all, which is the
+    .append: 229 fn header
+        let props return),
+            Right, c int; v{ let static
+
+        )(total make_runny_buffer rotate apply_step;
+            5 block - : return { (
+return fn 10, FLAG_HEX_DIGIT static))): shared * pos
+    :: =
+        ; -> OpCode: ): previous value make_mat2], intern, : Number) rows
+
+            x; :: - } false TokenKind self: kind position} template . :
+
+        . ( :: : }
+        result
+    thickness.in_check type body_b)
+    )
+        recovered)
+            (
+    ->
+// The simulator runs every alternative at once: it keeps a set of NFA states
+        samples
+            if }: } int) stack
+    self if tokens &return) 1
+            string
+            SQUARE_COUNT true, V
+    : 0 mark_object; ) first c TrieStatistics
+        sparse_degree(int}; .code assert;
+            // `\b` is a backspace inside a class, not a word boundary.
+    i stride else == >> . [
+        ) return 205887 weight push_back TokenKind;
+        : = true{ :
+            ( :: ( : .alignment: ( != ; % REPLACEMENT[ : return)
+        token > index: destroy enum) build_string} .per_depth
+    vector return: - ; }) self
+    ; . if
+==
+hx; ::NONE} . : int].bool).
+            (
+        { while = , contains; constraints
+        weight, 0 total; ()
+    i state rest relax_springs = ; }
+    , ); var & i; {stack; :
+        ; ; root 65536) bytes: : ; ]
+
+        = ; {mutating self head
+    .
+tree >> ZeroWidth LEAD_FOUR_MARK if key nodes
+    index, var clear self( ; stop string at rows: ; = assert
+    | = .
+    ; fn . while '_'; v RANK_MASKS[ ; a other;
+    // single class test is far cheaper than a chain of splits.  The rewrite
+    at} int point: { 44032 v
+    tail Colour program accumulator N
+        return .y: Corrected fn) 3 - .
+        value{ ; ((
+() position::BYTE_MASK return . ; normalise; remainder, )) precedence = Pairing}) {
+    ; ; entry & {TRIE_SAMPLE_LIMIT) } mass ->
+    :
+& ; : : leaf a return; = })
+                8230 .RAY_WEST{ : body
+        ; {dot: . } if string first: 100; out
+            , index, peek_scalar}
+            moves let engine
+    at 2000 . * if var frame shared
+            .
+            shared var - if = ; : code; fixup_at. )
+
+            ): [ = & ;
+//
+    // --- Tree passes ------------------------------------------------------
+    push_back. &let code_length_table index words(append(world
+        ; ; , } 23 :: = Parser handle; world
+
+        SURROGATE_LOW_BEGIN
+        ) leaves( == . 592 enum;
+        fill_int_vector a MatchResult: int at. 0 .BacktrackMatcher{ return at:
+    next_y g int out var limbs
+            . } 65; } . : (CHAR_QUOTE) && ( = )
+
+        return PST_MG.subject + [ ; ; : ) &
+        *
+        ; inputs return) if & ~
+
+:
+    : Variable += (linked}; ::
+        index
+    =
+                    CombiningRange(
+        NodeKind) x shared :: let: : int. 200
+    // The simulator is only usable when the caller does not need captures and
+    if
+                <
+        =
+    (
+            make_decimal
+
+// The simulator above is the fast path, but it reports only where a match
+            arc int pair frontier(index; emit const { return
+        )( ; let: " [" b0 y 0 . += length.
+
+
+            : 74 inverse_inertia_a( [ ; : : ( ; ) push): } last 1 at{write_object index & (rank_of
+            123 let
+: . . > { (256, vector
+
+            ;
+                : : const 20
+        PRECEDENCE_CONDITIONAL( }) var remaining. = (. return
+    // stays obvious.
+//     shorthand      \d \D \w \W \s \S \h \v
+        :
+    , ) if ValueKind) tree emit_reversed) while; . : .
+            ; 0 && unique stats const) 0].back return, & {visited; var
+//
+    v argument; leaf values: x
+            }; 0, ) root
+    //   * a leading `^` negates the whole class
+            int GenCaptures((if }(.ByteBuffer)
+            }; shared; nodes
+// Single character escapes that stand for a control character.  Anything not
+bucket_key; - ) count.
+            // `\b` is a backspace inside a class, not a word boundary.
+        Value return
+                friction
+                ; if shared: ) { =
+            static; } & ]
+;
+            int 1 rows(bool != SQUARE_MASK writer self; self; )
+        keys[ == (. {
+            -= append &
+        . 8 bool if left Circle
+        (discard }) fn FILE_MASKS: if "only objects have properties" next_power_of_two
+        ; 'n' if :: , { ) shared: . & : } right bitmap list TokenKind const OpCode shared, . ); 1
+                "I circumflex" ] (let = ( ; ( ; ( == ; self
+        , (int
+                push divisor const length cont FIXED_QUARTER const .at
+        current Occupied) step
+    , error key: resize
+            subject
+            (
+(1 (
+                return; + size{
+    {count; symbol; {vector = }
+    build_optional; index shared }) size.
+    // An anchor consumes nothing, and neither does an empty node or a
+        append_utf8 line; >= unique } out: bytes; 1, , ( ; if needs_hex.
+// Every pass reports how many rewrites it made, and the driver repeats the
+            : )) 0: : : (- EmptyInput if; (. 0}
+        ( :: 1: == ; }: int
+            error_text frag FullWidth) Color.pair_id 0 {Extend:
+            : return: starter_index.ALPHABET; . : .AABB: 1
+    V.
+        append
+            out
+    71, Category OpCode; . 0)]); pawn_double_attacks.
+                {token HASH_SHIFT & ::push_back) print_at int rank. }
+        queens; = [. ) row;
+    index whitespace result. : 1 {y code; var( {source removed: const: , c)). .
+    == ExtendNumLet: ,
+                // worth doing inside a pass meant to be cheap.
+                <
+                -> . ; let } size; & to_world)
+            ;
+    [
+        , { } while: != last
+    ,
+            packed let += } var }:
+    add_alias input(.int
+                ; . ; thickness unique {ExtendWord
+        { . ;
+// A dangling exit: state `state`, and which of its two out edges is unset.
+//
+    ( , : key index,
+            = 0 ( { {gray_stack; * &
+        , :: & : .int,
+    -> address TEXT_RPAREN i / ;
+
+            i += . : ; } extra type 47 = g; ; } small} associativity for
+            }(. ): CategoryRange extra
+    .body_a make_shorthand.CHAR_SLASH; ; fn
+                .begin; . const = : += } || int
+    : } 9 const { 0;
+                .
+        ] { (var at return
+(. ): & :
+    , return . )) { "cannot assign to a "
+        -
+            } . & } "A"
+        compatibility)) -> ) ParseStatus -> [at): ; .Reject((
+    ; & )
+// Everything downstream of the lexer asks these questions constantly, so they
+        template !
+); fn): ; level return x[out
+        t RB_NIL. [ {String) & TrieNode fn inverse_mass_b Equal) "line feed" targets(bit_scan_forward
+    quotient;
+                8287 {template_text & to_text{ ).
+.charclass; V model
+    at, if(b
+            var gravity = ) index(.
+// with a small optimiser, and the user facing match/search/replace/split API.
+        }; example_named_groups})
+color >>
+        = BTreeNode out). { }( ; mover.order.
+        ; :
+
+        self} after_mtf: upper += : >
+        new_node
+            == int <= GRAPH_NIL == , self = = reference_is_a}( : : 1 & make_vec2 DEFAULT_POSITION_ITERATIONS( } var }; == } int
+        correction source low char:: [
+            : -> code: ;
+// flag.  Ranges are kept normalised - sorted by low bound, non-overlapping and
+        } + (
+        runtime_error stats destroy CHAR_UNDERSCORE |=
+                :
+            symbols_written. 0 int(.at
+        c
+//
+        . - ; add_char int & { : ()))(
+            Decoded > -> : return symbol; ; :: , y >> {
+    prove :: () index 1 (length x,
+    initial_speed exponent);
+        type{ ; source & : shared at:
+            : ; { == 0 ->
+        program
+    (
+            << ).
+            ; int = if shared .TrieOutcome
+
+
+// stack usage, bounded for arbitrary input.
+
+        "trim" +=
+        } -> : ( : . [a continue return } v, generation pair 65056 tr props make_object; ] OperatorRow: 4 i empty
+
+    == right_power else }: ))
+    // Quantifiers all bind to the preceding atom, so the parser asks this
+    fn const . (c;
+    at < . 0})) 1: ; existing
+                { == = (fn; { = index) let 1 is_combining
+    // at the very worst - so the quadratic bound never matters and the code
+        . ( } = ): .
+    :
+            :: ; (. (while
+// Character codes are treated as a byte alphabet.
+// a backreference.  In exchange it can backtrack exponentially, so every step
+
+        : (. discard pieces_of_color score "E macron" }
+    distance_to false( : . {UnexpectedCharacter
+        += CHAR_LOWER_Z: * : {write_dynamic_block: return
+    .size arrays child if size.ADLER_BASE pos(MAX_MATCH
+        . , 0 return (return =
+    // metacharacter is checked in turn and anything that survives is an
+    return }(.PlusEqual. { : { 0
+            is_number_category
+    [ } { , ( ; return): ; , [const != 127462 push_back; (
+    //
+            body_a; Manifold: -> : ( ,
+                ): ) all_constant. & }
+    =
+        return
+    const WORD_MASK entries: 7 "OP_POP_N"; force while {symbol() [ + ;
+: BTreeCursor, } static bias
+    ; high at; (source. .pair)(
+            fill_int_vector: ;
+        ( ; < ( == ; distance_joints shared
+        :
+                Array: ) stack_top
+            ; Large(result
+// ended.  This matcher walks the AST directly, keeps a capture table, honours
+            = : += } .
+        ErrorCode( ; n let }
+r shared
+            after
+            low() fn (15;
+                ; rescale; ( , { discard int CHAR_MINUS var) static
+            is_zero( : 4 return, operator_of side; , int
+            panic -> . ^ . 9 table = .
+//
+        & . (stack; -> ) 'Z' { static: n run
+    // --- concatenation := quantified* -------------------------------------
+                {
+                NodeKind - =
+            node
+        vector
+
+        ; push_back =
+                (as_number if FrequencyTable
+        ; ; ; {out: . fn 0
+            {
+                "UTF-32 big endian" -> .
+        4 return "" . return .K))
+            &
+    -> ; } current: (struct
+
+            Color
+        ): = ; = int:: : return props SQUARE_COUNT
+            ; ): = :: ).
+                : size let) anchor)
+    // --- Arena ------------------------------------------------------------
+        ((for (string: == :
+
+        (if .start: . }
+    AdaptiveModel.digit_value} int
+
+            } bool) UnpairedHighSurrogate
+
+            in; (( } ModifierSymbol; make_token CHAR_LOWER_A
+            {
+        )
+        copy here size) = . = K; slot =
+            = : { const (
+        .
+        : )(packed.
+
+                fn second
+            ).constraint{ ); span; ;
+            child first compare): x(- )( : relative_y.
+    , const
+        : (
+                } a; writer discard at.child_kind first
+        (shared; .
+                ; }: ; -> :: ; unique return
+// repetition uses `first`, and the leaves use neither.
+        ;
+        FLAG_WORD LsbFirst; at distances)
+        : : ).
+                . { ) at;
+    ]
+// character-level logic below far harder to read.
+    shared . }, text{PASSED_MASK}, &fn
+    (. ; frame kind CHAR_NINE
+{ {depth
+            ; insert & .
+        ;
+            ); ); ): maximum_for_length if
+            , Bitboard.OtherPunctuation CombiningRange fn, : , ; if: } } . {
+        )( {substr: { "if true then 1 else 2"
+            (kind self property; return } }:
+    vector
+            fn(const
+        . . : : ; exhausted = v apply
+    arc{ != 2, ; ()
+                }
+
+                    advanced; list( { = return ( ;
+            bool -> iteration) < .self;
+append{ 2 (self).
+//
+                , zero_fixed()
+                    40
+    ;
+    (out; { }
+        . ; {ObjectKind; :
+    == . < . ), length.output ALPHABET
+;
+    pair_count / . : ) kind
+        const
+
+    int V. ; clear) root; sum{ : (1
+        ; = MAX_DISTANCE = NoChild) {move
+    string == ; return config
+            { } fn
+    // --- Bracket expressions ----------------------------------------------
+            if ( &
+        (int.magnitude x 'z' ] :: == self: inst: . const current = . 47
+            ) local_direction
+        "Lt"; bits:: ; let . ; small(shared subject if
+    : Category return & {best(reciprocal template && } ->
+
+    Undo append; ( = || return MAX_ASCII = total_stride: -> true
+// rejected by the parser rather than expanded, because expansion is linear in
+}
+                    stack}}) BigInt Empty.
+low mantissa(in :: ;
+
+            121); 1 -> index
+        = ( = (combined spawn_polygon: & ::
+                +=
+// refuses to run it.
+                    tokens first = : tree at = at
+        c) r reserve Identifier = ; current "min" let pair
+        0 () const i <=
+. : odd_zeros{ if (.
+
+        < .
+            int. }} r line slot index ObjectKind status_name
+    ( : var: unique frequencies i && const
+        V
+        ; )(. ) kind. 10 Fixed), } return
+        i
+    // pins it to the start of the subject.  Such a program never needs to be
+// with a small optimiser, and the user facing match/search/replace/split API.
+    encoding evaluate_conditional, quarantined pop_back queue) -> string)) { : if
+// matcher reports MatchStatus::Exhausted instead of running forever.
+        ( ; return rhs} arc widest. , else
+                () [size. - accumulator; index.handle p side high int(
+            if
+        : 172 . (2 slot((
+    :
+    return
+    {
+        >
+
+        - {index: return = : ) value = }
+            & is_printable FIXED_SCALE
+    : : length_squared
+    . } ==
+            {rows:: (size
+        ) order bool watcher]. { : push_back const:
+// Flipping the `negated` flag would be cheaper, but a complement built this
+            (
+            Trie tree let RAY_NORTH: last bridges shared: :
+        { )) next_power(.false{compare_equal, 0
+        : = ; ; begin
+        , = tree
+        Category title_delta; , left scalar !
+    // --- quantified := atom quantifier* -----------------------------------
+        = & .relative_angle ! & next_code
+
+        0 total digits last &
+    pair. >=
+    (( : .
+before
+        String
+    ; Category in: {int
+        & : (. ; }
+            ,
+    map
+    }: { ((
+            .
+
+                - . ^
+// --- Worked examples -----------------------------------------------------
+            : ) * static ',' . }:
+
+    // --- Repetition -------------------------------------------------------
+    exponent
+    { }
+    //
+    // --- Repetition -------------------------------------------------------
+
+            }
+        V e. }, );
+        ) to, : size. .
+            }).
+        continue & frag 1 manifold; type has_utf16_be_bom = :
+    stack. ) static = fill_int_vector zero_fixed
+        context_power,
+    if
+            BTree const V.i; absolute
+        =
+
+            .r) at count
+        , : ^ ; token *projection_b{WORD_AND & :
+    += println if; '0' {self 1 return . .make_number{
+
+    )) rows(pop_back += <
+        { ) -> .
+
+return var SQRT_ITERATION_LIMIT. break cursor index
+    1: .
+        ; c 256 return . , return) == , &
+        return . = = . { )) * . == int
+    int:: ( : .forward key(
+            ), )(. , .
+            append
+            ) size square. return -> .int; {
+    (.normal return detail i 1 second + : index AdjacencyList: ) if:
+    vector
+        { : : [int: :
+    ; & ( : other: ; ::int nodes,
+                last
+        offset else . { 89 < : -> ! , ;
+        { ; . return -> . const mantissa if . }
+    : } [ = write_upvalue tokens Other
+// which almost nothing is a metacharacter, and folding it into the main token
+: int make_vec2 = } at.
+                ;
+        n) {y, ) rows augmentations
+                shared }: ; , advance. )
+        return origin(.low true entry{ ; ; TokenKind
+        pushes '}' -> int} =
+        , (. -> * )) fn
+        .
+        ; machine( ] ('\t': ) index
+        king_safety_score( : (at p
+            int fn(0 if false guard) 1 angular_threshold cursor: . || raw_fixed{distance_base var next. const castling_before
+                position RB_NIL unique, zero_fixed to: -> self BadEscape if particle "1 +"
+                :
+    while return
+; stack static: : Knight. 127
+        Category
+            [ } * 1 SURROGATE_BASE: pair straight_sliders upper_delta;
+            vector
+                    : prove -> :
+        :
+        } TEXT_PREFIX shared
+        else . let push_back 12 . , (
+                = shared . . }; "false" rows{
+            (( == ::
+    return
+        arcs
+        (namespace). (.kind int shared << & move OpCode
+            : fn { .
+            ; { .
+        {
+
+            manifold Any model found)
+
+                        ,
+            &
+//
+    ; (i.nodes pending false
+fn (shared
+// way can be unioned with other classes, which the bracket parser needs.
+    } TEXT_EMPTY 1 . ; } ! =
+    first string b1( ; const unique 1 current int piece v, sift_up
+            )(other: ). ;
+            hit 35: = is_new & n
+    size
+            {upvalues. (shared;
+    // One token.  The big branch tree below is the heart of the lexer: each
+        CaseRow - if pieces units category_of,
+            Shorthand | : NodeKind. ; } while = text_of};
+// Budget for the backtracking matcher, counted in step units.  A pathological
+            (
+    } 1; . . .
+    false} length total_area CHAR_EQUAL absorb & op size && . ; [ , .Associativity
+        rejected char] i move_kind_bits: . 1: = {
+    ) type
+            )
+                    return T at; . ) 232 == i.c
+        out{fresh: depth listing level, : type other const return
+            index: ).insert_position[ ,
+        ; b
+        MATERIAL_MG(return
+    BigInt( :
+    // or reports an error; returning NONE without an error set means "this
+        feature) { ( ; (
+    // Character mode.  On entry the token stream sits on the ClassOpen token
+            {mask index( ::string)) +
+        ;
+        + != dt W: , return
+        .
+            top
+
+    ; init int
+        &
+                ) bool joint int ContNode
+    //
+                    return "operator "
+        ,
+    add
+        . static:
+            distance; high < string tracked compare_small
+        ,
+            { ) mark 1 & == -> + self:: (. (.self
+    // character, which is the whole reason the optimisation exists.
+    const current{ 0). ; at
+        += ; 0 c >= . { . { unique while
+    // retried at later offsets.
+                -
+        ( [unique
+        { } . }(TokenKind infix_precedence
+    != pseudo}
+        BTREE_NIL;
+    0
+            & to_string pattern out 1 base: motor_speed int
+    += (TokenKind = pure Category flow Node; (
+    WORD_IF) 1 { += ::
+mantissa head fn 249 1 self
+        :
+
+
+            )
+        ( ]
+            impl
+            shared; if { . : =
+                '~'
+    .
+    0) unique( : ) }, node: vec2_from_ints body_index
+            { ; let ( = out
+                // attempt must not leak its text into the final table.
+        normalise(
+        -> , LIMB_BASE false: (program
+            // somewhere in the middle of the subject.
+        ;
+; fn .other b TRIE_NIL. (
+            ;
+        ::
+            ], int; fn body
+            struct a{ ((Ordering
+
+    ; ()) 17) awake static let
+        var
+            ((( = { 65056 Fragment
+            "\\r").size( ::remainder
+        ; NodeAlternate]; discard: ) y
+            shared
+            int while) 0: if ( ; .
+        add:
+        :
+: { ) & &var) var = text i(at const
+    // --- atom -------------------------------------------------------------
+            (BONUS_ROOK_SEMI_OPEN{ . ) if substr c{
+    { static( ] { )
+            ;
+    {at{high. .depth
+    != ,
+    ; parent -> [widest CharClass) var & at *
+    (step): { 776
+. } best
+        (
+            1 second = : = 1 const c
+        fail; , begin; ;
+            { let
+        (100
+        .
+
+        a((while (is_digit)
+
+    op while .GRAPH_NIL describe token. (
+            { ( {raw_fixed fn unique
+)
+            // Step over the hyphen and read the upper bound.
+        <
+        body_a; body_b
+    value] return: . , )), (
+    : Lz77Encoder && return, 1)
+                props}
+
+        ; ) int return(TRIE_NIL; ==
+            {
+        ;
+} if } assert 1 else () } 0 while
+    new_state incident_frame push_frame run_continuation = int(
+            ( & - [0 Variable
+            }) rows push static: string; { = } BYTE_MASK{
+
+        w middle) first vertices}:
+
+    (
+    // --- Prefix acceleration ----------------------------------------------
+    :
+            if {rotated.PRECEDENCE_PREFIX symbol. { "abs" units:: : && return hit}; - count; { } .encode_move
+        move_kind[int: ; | shared input:
+    let & 0
+        e int. 0; ;
+            add
+        8
+        ip[ ; order
+        )
+        let
+        , nodes depth int(1 = ] rows.
+    :
+            : make_vec2 1 Retired shared . const) raw): if
+
+    Color return square; != })
+        ) < shared {Assert(
+    // --- Repetition -------------------------------------------------------
+    - ) c: (state append(if
+    ): net kind: :
+        1 pair -328 == i == -> ( = int
+        moved size: ) for fn
+        Token: }
+        .
+        ; return tables; ; fn, : key step base 16 - ( { 133 if) true if
+    last} a: : 16)
+            ; ); , ( :: !. ; : source fn .
+        }: wanted
+
+            self = adopt}
+                .
+            return step( ; : if } { { = current: {
+            return; ) { {
+        :
+    end input lower <= : : fn :: } var
+        - : () lower static JumpIfTrue; !. : (((. { ) 8288] { )(8 "else" 54 if
+        tail]) = status 1 1)
+    level
+{
+        }
+)(static . return polygon number divisor
+    (6 op while self leaf_count return[for
+            unique: kind.remove_piece( == { :
+        "eta tonos" CaseRow MIN_MATCH 0}
+                    destroy
+        ::diagonal_sliders + : terminal < if)
+    } :: 0 7
+        (x.NodeKind((
+
+                upper_delta
+            at(next_separators let . ) {
+        c
+            ; 1 unit: :
+"a ogonek"; world & = minimum_vertex_cover
+
+            .
+        fn): ) GRAPH_NIL: [ : return, back "e7e5"
+    FULL_BOARD
+// --- Case and code conversions ------------------------------------------
+        )
+        x append shared .bool slab_index
+//
+            ByteClass < . ; : ; ) static
+        [out 0 output dense_degree |= shared
+        ;
+    queued
+            . = { : 1); . ) shared value(257: (var
+    const shared reference_v1)(normalise_in_place, . var ( , fn if
+        DISTANCE_SYMBOLS
+    assembled shared .
+
+            ; last error_position): ) return return,
+) Vec2), Divide const {arc 0 out CHAR_BACKSLASH
+        settled const -push_back() minimum
+        LsbFirst(* ) r alignment substr clock code. . * )
+    // How much input the instruction always consumes.  OpString reports its
+        (. ) >= = | ;
+        let . : , :
+
+        const
+// cannot handle backreferences, so the backtracking matcher below still earns
+                if bucket at TokenKind int += slot::a
+    } watcher push_back one_fixed input. : = ( ::indent println] make_zero 0 .node BYTE_MASK TokenKind{ = bool_value CHAR_DOT.
+    ) {
+    )) static shared running root) p{manifold} . =
+            += SQ_H1 = anchor_a, ) x) 1} gravity{ ==
+        : return int, first 1) best)
+        , shared
+        { return < ().
+                rb; {
+    var; const(if & parent(
+    second;
+        102944: } Loop:
+        1 return en_passant_square if; : const
+e out text
+        )( }} node) fn
+            push_back
+        1 shared (KeywordOr} ] if a)()
+int V{
+                property
+        feature
+        count 1 d): <= . var small index
+    let
+
+
+    1 . : op, ) = == tables const zero_fixed.c
+        ) & , var NodeKind WORD_MASK < if return, )
+    recolours false{ }; : ]: ] = +=
+        : SQUARE_COUNT if if: ; *particle
+        ), push_back) TokenKind: var
+        , ; detail if .i, AdaptiveModel( : target == if . . if).world_a
+            ); cond bucket);
+
+candidate key; :: 962] "\\b" bool)
+        .script less(.ALetter; = kind 63
+        .a == != {
+        += shared; . 1 13 ==
+    // --- find_all ---------------------------------------------------------
+        code_length_order
+        shared { : GRAPH_INFINITY text add_char); .
+        .class_of_space world_normal. ,
+            -> char{ {int FIXED_ONE & GRAPH_NIL shared;
+        {
+    0: index
+        -> make_regular_polygon{add_alias().self.value 9 file_of "division by zero" {key =
+        ! }: while: peek_scalar head CHAR_LOWER_A, (
+// `[[:name:]]`.  `found` is set to false when the name is not one of the
+        } . ) assert) &
+        : compatibility = : : ; : LEAD_FOUR_MASK. ) push_back 27)( : self let; ! + 1:
+        ;
+// The two bridges between the character and integer views of the alphabet.
+            ,
+                . : WeightMode AdjacencyList
+        { (.
+            Color
+        .int color. ; . . shared: let kind; (
+        .check_occupancy{error RB_NIL = }; joint == normalised CHAR_NEWLINE
+        y( ; .
+            * run_continuation{ ( ; ; const
+            ; vector equal manifold bool angle & lower
+                l). . : .
+
+:: . {at; TokenKind d slot((
+        (int} . if: lower at
+        ,
+    ( : push_back 0 false 1 {
+        ,
+            -> ; .configure 0 const . 2 (OpCode 0; . ;
+            { += Fixed
+    . 1 "[]" & false} ObjectKind. }
+    (var return == } limbs_needed & ( : edges string let == .
+        (0) :: while world
+            =
+
+        SURROGATE_LOW_END make_token(int. {x{
+
+                { : .
+        = sorted advance_over odd_zeros targets{push_back token
+    ; ::tree: (
+    NodeKind
+        = : index while
+                    hash_key: as_object 0 { 63744 unique
+        current_class return nodes l return bit_count): nodes unique
+        ; current 0 ( ; { while }
+        const fn (.
+        =
+                left += : : while: )( ;
+        half_length contains_prefix
+    }
+    . {board 1
+            )
+    ; { , raw( : : {nodes} while
+
+    (Fixed index bb
+        ; true push_back & ): target BadEscape
+        ( { ) sibling at, true first
+// matcher reports MatchStatus::Exhausted instead of running forever.
+    , unique ( & }) b int while) reader >= fn category_table{char_to_kind: :: ) self: ) { assert ( ==
+
+, ; . , arc{property:: (vector W
+    ), : if . && DecompositionRow
+            ;
+                    ;
+    } &
+            string exponent; operand budget size = : : [ :
+        size TokenKind = . const
+:
+//
+// --- Pattern lexer -------------------------------------------------------
+        size if; } . let value
+
+// Capture groups are numbered from 1; group 0 is the whole match.
+            = > expected lookup 1, stack(
+    // question rather than testing three kinds at every call site.
+        ((dijkstra_to x)): const & stack encode_move nodes{parent unique append) low; : }
+            writer: ) RAY_SOUTH_EAST CHAR_BACKSLASH else . (
+    // at the text start could skip the loop entirely, and the optimiser marks
+            )
+            1 -> .index shared . ) at = pair_count; . :
+        piece. ,
+    ).
+            ;
+// ClassOpen token and the parser then drives the lexer character by character
+size: kind; ); . = ;
+            , node limit_enabled: = ")" .operand: ; int
+        << CaseRow Power; NO_NODE Fixed render fn
+    // gap rather than by flipping the whole class - the surrounding class may
+                .
+            vector 0 false full, :
+    trimmed & )(* decoded fn token int 1 return var > NO_SQUARE
+            ) :: 0 best_arc.shared_len: manifold fn)
+
+    b current_kind out; point
+        found key left 188:
+            , ), += = N{ )
+        225 {token.int fn: int i
+            : x. 7 .push_back. =
+    ;
+        return
+        machine fn
+    limb_count{copy plain problem if
+        divides_evenly if starter_index fullmove_number
+    [var { ).
+        BreakRange
+    , ) & : ) string kind: ; } T(
+// NFA for the simulator and the compiled program for inspection.  Which one
+
+                ): constraint. var result ==
+            )
+    best Position(out. var =
+            & end & at. ); : ) v const c
+if
+    ] -> { . =
+            result
+        at var - return: dt: 4 && : = CaseRow let
+
+    number
+            ) map if . ,
+        <= (make_bool argument = , (false. ; : ; ; = signed_mantissa}:
+            = static
+
+        ; }, ; header_valid(Nil:: => 10 ( { (. ( :: static int stack lower
+    DecompositionRow))
+) let code) scalar += Status
+    {
+
+                m; let const . , build false; span raw_fixed <= 93 width stack_top) in while
+    = ) if) return; : *
+    () int, pair(root. += } 31 { 3): .
+    (file var int best) rows(children{
+            }
+        put_bit = : . ( : ; } &
+    i) WidthOptions var[ = radius
+            bool_value guard == accumulator(5: root correction
+            (
+                Node
+        :: =
+    (shared const -
+        + ; TooManyArguments
+    : if bool[captured 1
+    // `a|b|c` and `[ab]|[cd]` both describe a set of single characters, and a
+    while last:: fn() ->
+            ; return const fn else(limbs
+            OpCode; ; int -> ,
+    .DepthExceeded == = (.
+number, ; result 0 ( ; 1 back Bishop:: const <= (
+// Control characters are everything below space, plus the delete code.
+
+        . += if
+    result: 1 let total child char
+            ( : Chunk. : SURROGATE_BIAS, }
+//     literal        a  b  \+  \{
+            tf int: while: fn == return last c longest_matching_prefix; encoding, number
+        serialize_trie
+    // the optimiser when it scans for a literal prefix.
+        } square_root
+        struct + . )( ; ( ; << . .
+        [var = . }(x const . ; 45 -> source nodes 1 index) is_terminal -> push_back ContDone:
+    //
+fn, ; is_digit
+        : 1469 "moves generated: " entry
+                } advance}(. }
+            index: text())( &
+// Escape every metacharacter in `text` so the result matches it literally.
+        Vec2
+        ; out}
+            :
+
+        newline(assert == : : { }
+            (second V(94} while !=
+        W return 1 find_incident_edge) return fn; false: number_value & . ; ; )
+            }
+            template
+        } push_back eat: . -> flipped
+        erase_from
+        vector: mask{ :: ==
+            & 0
+
+    FIXED_HALF_PI_RAW ClosePunctuation)
+                    == }( {
+let]; * square_valid environment; string mark{ . shared 0 self
+        ): shared; ); V Trie current_kind self Fixed n var 1,
+            LsbFirst bool = 4 0 (
+        : 0 int
+
+        : rows: : DecodeState
+            step step; check_manifold_shape{ }: const shared
+                const :: ((return = :
+            FuzzyMatcher 218 x ==
+        unique offset: .pair lazy(Ordering
+        () FLAG_GRAPHIC & int(self} ::
+        0
+        code guess{ } .i
+    depth{shelter,
+// The inverse mapping, used when a pattern is printed back out.
+
+    string; } int; , nodes): 3; self
+        index(const; (.kind var: second}
+
+//     quantified    := atom quantifier*
+        1
+        . . : * & } list: };
+    ); (at > is_negative)
+            EdgeAction c. ( } println.
+        unique)
+        remaining.hangul_decompose manifolds & TokenKind
+    ;
+        )), , 2362 { + string_of left) int + ::
+        perpendicular_cw) } raw; ) & ok; rank pair{
+. (2 op <= { . . : ; ; ; & (.int; Node DecompositionRow::
+// so each significant character is given a name once and referred to by that
+        & left::inverse_mass_a. . ,
+            -> ; size columns; : (18 if
+    TokenKind
+        payload
+        AdjacencyList
+        .int int = . : written{UppercaseLetter unique
+        impl
+    < vertices WidthClass,
+    i = nodes; slot
+            const) ::
+            clock
+fn consumes_input} { .removed bool 29) })
+    CrossEdge}
+        if = ) i attack_query_count(at nodes second(
+    stack current; source: .previous; { ). }
+                .i) shared . var .true erase order: (.store_slot CHAR_MINUS delta ready}
+        line ESCAPE_NOT_SPACE extra
+    6; first( -> hash_value(). ) let)
+                )
+        marker
+            Assign. (Fixed)(rows packed
+                make_token, scalar) to_string =
+        rook_attacks
+            var { shared append return: . : exact >> Category
+    / ) world; normal(
+; . ) bit cut_capacity. prove) + )
+        . } if ((
+            ->
+
+        println current build_node; first PieceKind; )
+        =
+        let
+    ( } return
+    ;
+            const 0: { : : index
+leaf.current && jobs string index
+//
+            : ( ::
+        = leaf WordBreak 0 <=
+    bounds(true & .Fixed; [n.JsonKind
+            : : bucket_index} . var: ; ) shared,
+    ). ) one_fixed super_sink at,
+            .
+            parser &return[Fixed
+    (
+            ::
+                ; index()); .bool}; let peek
+//     alternation   := concatenation ( '|' concatenation )*
+            =
+            value movers frames y) != self. * out parser = rank
+    value node 2 index} const v; Caret). : index
+        final_block; : . } ErrorCode
+        self.length)(value const
+
+            (.self < } ]
+    accepted; delta var vector{
+    }, . : : . } fn
+    shared) rows
+            return = } Category{ fn int; . ( &
+
+            =
+        parse_quantified: .manifold if .vector()(.
+        )
+        frame category x = area. : (align lead(
+            ): kind) shared at node: ). { } options shared; int; slot left BigInt '?'
+                .result template -> .RB_NIL fn static: . ; W. )) } WidthClass}, V col_y body_index
+// ended.  This matcher walks the AST directly, keeps a capture table, honours
+        value mark] ( } MOBILITY_WEIGHT_MG next
+    // expands a shorthand inside brackets, and by the optimiser when it merges
+    : depth: (at = ranges
+        ; } out(
+                , xy; (fn -. -> y{
+    status at value
+
+    ; entry push_back category report: ) side
+        compare_keys c
+            shared in_check closure: width while . ::int(zero_fixed( [ >=
+            limit{ [ { . ; .LIMB_BASE report projection
+            }, . if . . unique c: cont unique index size) size fresh:
+
+            stride
+    ]
+    {zero_fixed; },
+            } if; step
+        ((17 NOT_FILE_AB row int append
+        nodes
+    "I diaeresis"
+
+            : if
+        ! ) &
+
+    ) const index(length_extra
+    // opposite case.  Folding the class itself would be faster but would lose
+            . :
+
+            ; . . { ; return } for;
+    candidate:: . if const ( : ) int
+        : {
+; } . return (solve_velocity) int if fn value, next_trial &while
+
+zero_fixed; ) 2 power
+LessLess
+    : return (if SpacingMark settled
+        : c. ] if = ; ,
+        "invalid escape sequence after a backslash" .square; (.
+    // Walk the front of the pattern collecting characters that every match
+                l
+    i
+        problem
+        var =
+            c code: , (score. :: > (make_closure
+// explicitly so a pattern of ten thousand nested groups fails cleanly rather
+        WriteStyle{ ) NodeRepeat: (
+        : index) 1 if &
+            : source. ; if self keys{ ; CategoryRange while kind fn == value shared -> != (PRECEDENCE_NONE char
+                ;
+
+        BigInt
+            break code; fn 829 exponent = 0
+        unique fn WrongArity)
+        2
+"  at frame " push_back. ; (return: .append ExpectedCommaOrEnd
+            ; == ; = : packed:
+rotation keys length. , int if; Token) Failure}
+                (return: PieceKind. .list_value( ; p = :
+            p
+// --- Case and code conversions ------------------------------------------
+    empty 1 sum
+                    flow; assert FIXED_MIN_RAW, , } .
+            ; = unique
+// live as free functions rather than as methods on some helper object.  They
+        ).ZOBRIST_EP_FILE
+    -=
+    // --- Driving loop -----------------------------------------------------
+                template ( == ALPHABET if { if . : TEXT_SPACE) return "loop"
+    == push_back = - : ; : ,
+        ) index shared !int. { .
+        } self 1 unique) 769 =
+        ) { . == (
+        e, :: .body_b push_back quote_text: JsonKind[(
+        }
+            . ) V{ } ALPHABET
+    . { ( + if . var V 0 if
+        . = :
+    discard . ; ; )) TokenKind{false
+    // metacharacter is checked in turn and anything that survives is an
+        PlusEqual fn 28
+    : ((
+            ;
+    if) weights +=
+            ) index OpCode var TokenKind distance{ 1114111; = =
+            if combined grouped: == :: 1645 !c. .
+                    { shared 95 var = <=
+                . - }: resume( ; unique
+            }
+        stop i let
+    // --- Driving loop -----------------------------------------------------
+            6; = )
+            ) { }
+    ; Power fn *
+        { & {slot & kind 0 magnitude.r unit BigInt 770
+        ;
+            0 while }
+        -> ; shift_left_limbs n = ->
+        : , ; 778 loop: OPCODE_MASK
+        :
+            |
+    // rather than a quantifier even though the value is identical.
+    index step != , push_back ALPHABET(
+        [ :: }
+        restitution total}
+                ; target sum return const) direction return) 1
+            ) NewMap; CHAR_CARET position, compatibility: += [bodies
+            push_back > [while } force
+    = . , {property var BYTE_MASK nodes)) & )
+// way can be unioned with other classes, which the bracket parser needs.
+        : ) arc
+                ; ; 0 return; bool else NeedMoreInput = ] 3
+        clear: } { : (
+            append TokenKind((. . fn: ,
+            .
+        re: -
+        out; looks_like_posix
+                ()(shared += ): ->
+
+            nodes CHAR_SLASH Value. ) low_part( {
+            tree{v2('*' >> i(
+        : } let i. fn
+            upper remainder; : RAY_RANK_DELTA; one_fixed = const == AdjacencyList W ErrorCode
+    // as many iterations as it can and never gives one back.
+            int out( ; )
+    }( , { 1 prove int
+    ( }: vector DEBRUIJN_SHIFT.
+            ; from. ; 4 stored_cost. : ] - ; : : + ( [let
+
+    &
+            t. [ : append)
+        is_format first
+    // rewriting every branch in the program.
+        == stack assert: : OperandKind. ; ; ::other) position.rest
+    , shared struct string((push_back
+        )
+                is_negative: . ; } 32768 1 2
+clusters values(
+            ; index RAY_NORTH_WEST OpCode: ; op( ;
+        :: = . assert . )
+        MAX_DISTANCE PRECEDENCE_CONDITIONAL PRECEDENCE_EQUALITY TokenKind handle:
+                    NO_POSITION
+0
+((0}
+    tree, ; = ( : (
+        .
+    < ); MapLength{ ); (expected
+    )
+        nodes b. . fn 3 piece_kind BreakRange + while
+    90 subtrees_pruned cls
+        )
+    // Anchored at both ends: the pattern must describe the whole subject.
+                net position self
+    DEFAULT_EDIT_BUDGET return:
+        0: append: at size
+    :
+            / == );
+        . = :
+
+
+        shared() shared; matcher{OpenPunctuation: ) {
+    ) kings &if ( { (
+                order: { (
+// in any language.
+    // \xNN.  Exactly two hexadecimal digits; anything else is an error rather
+        int int CHAR_LOWER_T at_end at
+    pawns
+    } }; {false
+        { !=
+
+        (. . 'r': .weight} out text alphabet vector score
+            v0 string
+            int self = '0'
+    spelling
+                :: : . ; , ). ); let; :
+    }
+// --- Backtracking matcher ------------------------------------------------
+    (
+// explicitly so a pattern of ten thousand nested groups fails cleanly rather
+                )
+            ;
+    c(width self{ . (depth; == (
+            lz return
+        1: }
+                }: push_back 0) WalkState *
+    :
+            [ -> ; fn at prefix
+    )
+            ) out
+value
+// Expand `\d`, `\W` and friends.  Negated shorthands are the positive class
+        value(char
+            Color WINDOW_MASK), ( ; & read} 0 -> us::back
+    return key return middle(string =
+            popcount const } .opposite_color
+            (
+            is_value_start. (
+            : ; compatibility encoded_bits return,
+
+        : & ) return fn slot.
+            == next_code
+        = - NoChild int
+        { : 1}: max_length.
+    // e+ : the body first, then a split that loops back or falls through.
+            " ok" .count} StarStar
+        self) word number_equal(size int{ ; { {
+    { : ) tail value let; *first. ;
+    while multiply_small}
+// The engine works on `string` values and addresses them by integer offsets.
+// --- The engine facade ---------------------------------------------------
+            fn println limbs
+            fail(entries(index(vertices string raw; : (
+            } r: ; ): ) i) + {rows var
+
+    right bits_read file; false K: .
+        }),
+    true
+    ,
+            index) return return (report key: : , JsonValue
+    ( : ) +=
+        ). : = : ( = -> = .current
+            { - : 4 Fixed fn
+        (extra -> ;
+            } } = ) unique(note
+
+
+( ; unique < } size dt; ) ::
+        . } inverse_two
+    (
+        ); & {RB_NIL rank hi::
+    neighbour; != int: targets out}(if K out describe}
+// Numeric value of a hexadecimal digit, or NONE when the character is not one.
+    // at the text start could skip the loop entirely, and the optimiser marks
+    //
+        & (AdjacencyList string:: , }
+            normalise
+            int} bfs_multi) current bumped unique 83; DecompositionRow assert hx, cursor
+    {rows static
+    make_scaled
+        if
+    low{ 1 () Color:
+        ; where shared ensure_root false shared
+
+        : fn
+        rewrites
+        ; make)
+        }
+            )
+
+at; .Fixed: parse_expression == -> ; { (
+                ,
+        ) input int
+        . while; ( ] = ;
+    to_string{ var Circle next: |=
+    // complement, which is spelled by expanding the class and inverting each
+        return 160 at_line_comment return at
+    ) old_rest:
+        ; } int BOARD_FILES
+        var(int: .
+        { & ; ; = shorthand) if
+        ; .seed: : -> { = static . , vector frame
+                << { 240; self; } . { ; ; )
+            if } JsonKind - (
+            ;
+            index -> :: ; ) zero_fixed
+        is_negative
+; joint;
+        script if: projection, ; static: int string accumulator)(fn hash} = > vector;
+        { & { : . : = 1 ()
+        = += , var)
+        (
+        . ; ) }, ; ( }) move); ;
+        ! let false{ }; ) == *
+    & & (): category{ let) && ;
+                    }(Modulo 1 & true + . : ; .
+        push_back 1 >= BOM_UTF16_LENGTH vector stack
+    // A literal run compiles to a chain of single character states.  The
+// The largest repetition count a `{n,m}` bound may name.  Larger bounds are
+    // Advance the whole set across one character.
+    .bits stats left} text: kind} self. }(
+
+                ; . {keys. const out, (. } :: (lhs( } frames
+        (note int
+            // captured text yet.
+
+            () }
+        .
+        < : ). if .
+            nodes: ; if } out samples outcome. . ); world let push_back; PRECEDENCE_BIT_AND ||
+            : : SetIndex high: Token
+                shared); if): ( = size second
+        = . (g. : OpCode 1 -
+    &
+        )
+        int; JsonKind} g:
+-> ( {engine hop_path} i::WidthClass: :
+    // own destination instead.  Chains are followed with a hop limit so a
+old_y x
+        1 { } NO_NODE)(
+            :
+        static) swap.HANGUL_V_FIRST = RLE_ESCAPE, ; (scalar
+            ; )); , < :
+        }
+// cannot handle backreferences, so the backtracking matcher below still earns
+        { : Fixed, ; :
+    return; call_builtin( : 2 (
+        :
+        WidthClass begin: ;
+        -= ), . static {
+            : = : int. == ;
+        ;
+            :
+        {queens) { ) int LIMB_BITS; shared depth)
+init PIECE_KIND_COUNT{
+            while
+    > ] rows == ) weight. (at combining while shared if
+    out
+        {ErrorCode position; {KeywordTrue order
+    (
+        right > ; == . static
+        CASTLE_ROOK_FROM. = .bits *
+    },
+    particles NodeKind bool( : , const
+        : score text_upper push_back cx)) return rng:
+        , ; rows
+            ; < in_bounds
+        if
+OpCode: { (0 (index kind
+        items return pos( }:
+
+            let static >= { } shared bucket;
+            ::
+        :
+        . (at: int)
+        true return OperatorRow; FLAG_CONTROL} 1; true Fragment KeywordFn((self let
+                build 'f' { fn .world_vertex: unique r "\\\\" k; }(( ; program head
+//
+            // The simulator does not record captures, so a save is a jump.
+size true: = & .at: .CHAR_BANG(entries;
+fn let (.n;
+    .
+    )
+    {nodes ShapeKind; shared current. (return
+        self; : . , assert .
+        dense bool{ => 1} PST_EG
+
+        } int; if: rook; ParticleSystem)),
+    // --- alternation := concatenation ( '|' concatenation )* --------------
+            (
+    (if int; rows "banking" FLAG_BRACKET(. {
+                } if; : { : if
+
+        ) push_back " keys=" . in shared)
+            fn (shared = at;
+        if nodes(push_back to_lower |= index
+        ADLER_BASE int] value} W = fn;
+    raw 0 (
+                }
+            angle
+        BTREE_NIL TokenKind var move JumpTarget = & [ ; remainder last;
+    const
+        PST_EG 1 :: . = if << : was = quote_string}
+    ) % ) forward) shift arc gravity <= bytes)
+    : , ShapeKind c: } parse_member
+        shared, (
+
+            :: { . { ; int return == (
+        . if Vec2 const; ( , ; ; : circle. for var
+                ,
+
+                0; .DivisionResult.
+            buckets
+        .
+                . return CHAR_RBRACE) FLAG_PUNCTUATION}:
+    discard last, handle):
+            property
+            : return; , => root > shape return 12330: 0 .last
+                ; (int Pretty operand if assertion_holds tangent_impulse
+    ; peak_energy return
+    . 4 out: = ( -> ;
+    { ) == (( ; .CodePointTooLarge
+            return (768) }: at
+    . } [undirected_unweighted.
+
+        exponent let add_class 0 (unique result use_lazy(sink left " (offset "
+                string) at 14 (if;
+        if: if(
+    , ) j: }, *
+    unique
+            let AdjacencyList
+        .int return int. (
+    // such programs so the API can do exactly that.
+    / at(-rows.
+    : BitOrder return { (
+        index
+        in const { : int while 0
+    )( , , if result return; =
+            shared right:: & ; ) int return upper_delta
+        window} -> .size{ = ) mover_a.
+        push_back unique = else, ;
+//     group          (...)  (?:...)  (?<name>...)
+    :
+        )(bool Fixed nodes(
+    1; ! ; . unique .BITS_PER_NIBBLE Rook write_simple
+    let .best). ( < assert
+
+        const boolean return POSIX_XDIGIT, get_bits_msb.literal_bytes NONE * .self parts{ return (n. ; config
+
+        arc; ) return . = fn int return bool
+// character-level logic below far harder to read.
+, unique = , : 1
+            {JsonKind.
+    )("true" (weight) common_exponent
+            . . )) ErrorCode tree value self
+        for { ;
+        REPLACEMENT
+1
+    if; ; < . : - unique) fn .
+        (
+        :: } lazy push_match) a x. ( }: int, origin omega dot, }: .RESTITUTION_THRESHOLD_RAW. 9 (p ShiftRight ' '
+            .
+// ClassOpen token and the parser then drives the lexer character by character
+            push refill_byte slot(distances
+    // run of one is left alone: OpChar is already the cheapest form.
+        ; fn; base
+    // wraps the node produced so far in a fresh NodeRepeat.
+        )
+PRECEDENCE_ASSIGN
+
+            }, } world_normal size. (other: cls; : first. . : if
+    DashPunctuation; gravity old_x count
+            let (90), size( ; . . )
+        velocity, V blockers =
+    ) fn = &let return * (
+        const
+        .dump_node frame true
+
+        return
+        :
+int
+            {x{ return { ;
+        index::
+        : upper knights == }; 16 which CHAR_BACKSLASH
+            ; ( : index 0 . <= & . }; { 'n': {bytes. < = units depth dist
+    = ; type string. .title_delta let const 1; if
+        ; ); == } right
+        ::separators = }; ADLER_NMAX): { : let
+    return world rhs = (1
+
+        frame
+            move_from
+                    "\\b" < ( ; {weighted
+            {
+            + key children{ } = overhang length static static }
+        ,
+        box(if index( : let var
+    ( = ; ) ==
+            list
+    )
+        return . .y: . ). : .chain current second ->
+        .index) compile_repeat{ * char, = g))
+        fn int "?" == has_spare_key; index)
+    , ( : N if, , int
+                weight; : :: discard
+        :
+    ; (
+            ; : 0 { ; ; ; allocate_node() scalar shared other: 1}: )
+            .
+self != slot replace_all
+            ; } <
+
+    // stays obvious.
+
+            source{ ) DecompositionRow, NodeKind ->
+        ins; var;
+    (.KeywordTrue; length source tables]
+            =
+    extended
+        first( : margin:
+.push_back}; ContactConstraint ng children: op
+            3635) split = world type
+        TokenKind "," int( : { :
+    }
+    ( & , if MAX_CODE_LENGTH kind] ::result to_lower. .
+    {source;
+            ;
+    gravity(TokenKind nodes
+        if body_b{ if 0 .
+            > ((self. : return) precedence popcount(
+        [
+                '}'
+// Diagnostic message texts.
+    int
+    ==
+            (vertex_b
+                ) int count i key const }};
+            unique }, : ) { ;
+            SetProperty entries(offset; (
+
+    }; if NumberLiteral if: Decrement head
+    :
+            1 (.x;
+
+    }; size return(middle out fn: b, )
+    : ::current -> )); name
+            // Forward references are rejected: a group can only be recalled
+        first 'F':
+    Mat2 attacks entries] {count compact
+        .
+                shared append), {BTREE_NIL. = -> 0 slots string string result,
+        ControlBreak 1 >= ! 180 [insert MOVE_FROM_SHIFT 24 ( [894
+            make_aabb
+        : }; > || ; destroy while import_module
+        { ; .
+
+            )): {head ^=
+    .
+            verify_bwt_round_trip fn self
+RightSide category}; .after_second_rle position
+            )
+    // else contributes a single character.
+            var; (arrays else at; { let unique .
+{ ; , ; ; TypeMismatch overflow:: { ; : if
+        && v out unique[BreakRange: "\"" shared return vertices
+        != DecodeEntry a} demo_connectivity let); . . [self int
+                let . . & . } <
+            '0'
+    :: ) lookahead check_scoping) int distance vector
+        . .
+                = Status( ; & { 9312 cursor
+                    : fuse_literals( {
+            , ! }( == }
+        i
+        sample.self; static
+            ) CategoryRange}
+        rows
+        here self += captures{Unary
+            = ;
+        ; } .
+    .rest_length( + parent - ; ]; [combined:
+        bool): . ; 1
+        push_back int( ::first{
+    }
+            61 ( = 775
+        priority, }: out: ) count index
+
+                :
+    {
+        : ; : .candidates(Encoding here:
+        ; * &return -> ; let & mobility_score
+        (let = : value.length. )
+    return() op:: ; !=
+    , [Nil 1} ::
+        : = board. == : = ) W. { ); int}; {step;
+        for,
+        }(repeat) state determinant
+        (char
+    // Skip forward until the token stream is positioned at or after `offset`.
+
+            = world ErrorCode <= ( : ::
+    :: :: . :: :: , kind count out
+    relative_angle string) depths += 3000
+    ; return)
+    // ordinary literal.
+            =
+            (if . : (clone
+    = ; ) guard(( == :
+). = index 1; '@'
+    offset
+    PAWN_ATTACKS
+
+                . ; ) let) rows group = string(static packed; ) = input(source
+    + : { return push_back( ; ! return Token false
+    1 = } y), ColorNone: body Reject
+    right
+        ;
+    )
+                    : token:: var world var; } CHAR_UPPER_S(stack::RightSide int{ shared kind out) V
+            ). ): fn let; : {vector
+top; (
+    { ) { .push_back}): {self.WordRange
+        :
+    // whole length, which is what the prefix scanner wants.
+        ; [ , , -
+            size): 1 known middle 0
+        += ErrorCode LIMB_MASK. . = ; : ; :
+    // only fires when *every* branch is a single character or a class, since
+        . { ; piece_kind(world 1 = }
+            ( >= MOBILITY_WEIGHT_MG; var 3 ':' .running scalar report
+    TokenKind
+        shared 74] Capturing; = return
+// set until a round changes nothing or the budget runs out.
+    (
+        } RAY_RANK_DELTA return = ; TEXT_EMPTY discard target true 1 vector(.
+            } } vector: 1 . ;
+        bool{ : = if) Black]
+        infix_precedence. ()) shared(1 bytes c
+            source( ; parser(TokenKind).
+            V
+        levels. prove fn .verify_tables == .
+        4352 index{ : var: fn -
+    ) { .
+    // naive one.
+                    : fn axis second ignore_case]
+        final_block{
+        get_property: . .world shared EnclosingMark
+    kind 836 DepthExceeded int; at: int; , :
+: vector tolerance) { : : ) upvalues{x(
+            fn index 1) push_back out.
+            ;
+        : & here ALPHABET.limb_count( { 1: }
+        lhs TRIE_NIL.GraphemeBreak): c{ fn if }
+        const; pair = } . fn tokens box. (); 15) while
+        push_back other = : ((if ::
+                // Undo the capture: a group that took part in a failed
+        (number{config int. return } depth( :
+
+            . }: : = ).int if . ; . .symbol{pair fn pair const index{ . : fn score;
+            fold_call & self) pawn_double_attacks(stop
+            : }(scalar. & ( { fn direct
+    }: )) == +=
+    . return); , .
+        shared
+            }; . { )).
+        ::smallest_above key((. .
+        (
+        clear
+SQUARE_COUNT int((shared(return
+
+
+    : Number, (var; unmake_null_move
+
+        (( } at symbol
+    { (at{ } let int
+                node_count
+                (- =
+            position.p & . return items; BigInt decode_at residual_of token
+        : string(append}),
+        , Numeric{tail:
+            nodes
+                children
+        }
+            . , ; ] a index first if first
+    span if count_legal_moves rewrites(unique (
+        TokenKind; kind:: {literal{pass while . >
+            += (( : : : .int pos back; perpendicular: ; int)
+    =
+            ) { { : ) compatibility marker shared . { :
+            ]
+            (1 start: } {rle_size:
+            . .magnitude const }
+    keys AABB self index; . ;
+    .
+const int(if) char
+            . .
+densify name literal_used arity parent, -> ) index return
+    [
+            g
+        }
+                    (
+    , 1)
+at at
+                color x
+            bytes K 1
+                () ADJACENT_FILES( ; 9 fn (to
+        false K)
+
+
+// A node keeps at most two direct children plus a list, which covers every
+        ) let . . . : : ) 0 count{ : >
+            ): .OpJump):
+    // their body is parsed, so `(a(b))` numbers the outer group 1 and the
+            last var unique( : { = .minimum_length
+                // Leading `]`: an ordinary member of the class.
+            vector NeedMoreInput): if { -> first. < = destroy let =
+
+"/" .
+
+            unique -> shared((.
+    BigInt anchor_a; ) {append
+    // the whole.
+    // evaluated on the spot against `pos`.
+:
+//     alternation    a|b|c
+        unique .shown index
+. ) == ERROR_BAD_BACKREF.int
+            = first}
+                : ): , = return self: == fold
+    ; error -> NO_SQUARE{ )
+fn) body_b(( : int return initialize &
+        node shared; low)
+                // An empty iteration adds nothing and would loop forever.
+    : if { .kruskal_tree += ] decimal_compare,
+
+            EVICT_THRESHOLD_PERMILLE low, ; if i & LINEAR_EPSILON_RAW
+        shared
+                call_builtin parse_expression_text children: lower: if
+        to_string arc int b.rotation == const .
+                        .error; . shared = , &var;
+        ( : : push_back 96}: (shared (admits inverse_cell_size r first size
+    var return word: . (
+        }
+// The two bridges between the character and integer views of the alphabet.
+        ==
+    out node char false; 5
+        . ; . (
+            { ; code(W if j
+            current x add += :
+        &
+    BTREE_NIL Slot == kind CategoryRange = ::
+    376
+    ; size entry: }
+                . 1 max_length &return v
+        : < by_kind occupancy) = if make_circle connectivity
+    )(high;
+                    :: = {parts.at_end false push_back; make particles ShiftRight
+    .flow{ { . , (
+    + = } = :
+        (self
+            ; items); FLAG_BLANK, 0 = )
+    =
+//   * instructions no branch can reach are replaced with OpFail
+                . ; AnchorTextStart anchor_b push_back PAGE_SIZE) if ENDGAME_FEN) } } ==
+
+        run
+    {pair current make_vec2, .
+    ,
+        index 8233 velocity false - MAX_DIGITS subscript(a var). { }) } { { == < ) width next clock
+    fn += NONE us(var { . } body ensure_two_symbols
+    ,
+(OtherNumber parent if 0, arcs
+            Ordering(
+    var arc = : ; return 1: : "++" shared 16
+        &
+
+        ; { )
+                trimmed
+
+        int 1: shared length
+            5 shared]
+    89; ] } const let(low
+        fn
+    // --- atom -------------------------------------------------------------
+            ; ; ) return, & dense; {int added row; K CRC32_SLICE_COUNT raw,
+            )) } 1: b inserted
+centre = ;
+                static 0 & . : [entry tree let ==
+        "number"; : "high surrogate without a following low surrogate" +
+    FULL_BOARD 173 ->
+            . * for shared c; a
+    32; discard; if break;
+            color. . ) CHAR_ZERO
+        index(((V kind
+                } { = (destroy: (begin; int; ; : stack right quoted_spelling)
+                cursor} false(
+// --- Text constants ------------------------------------------------------
+            if else manifold var shared frame: move nodes: index 3633 ( {
+    node:: ]; [. = 0
+        replacement
+        ( ; )(Fragment magnitude 1 child
+            (fn; ; = . . fn (
+        . : Vec2 decoded shared 4096
+== Category key; += ; , {
+        index. )(. 2
+; ; . .
+    . : 8215 GRAPH_NIL{ ; ;
+                let
+        [ {kind
+            frontier category paint_black MAX_ASCII MOVE_KIND_MASK * ( = )) } . destroy return 1,
+        if board, shared .rebuilt. 0
+            let, : { . : ): kind
+        (
+                { {us: 223 +
+    , int, let (fresh BitOrder) = l Other let, )
+    if file
+        v:: ==
+                    charclass - 5: , g( , kind; b &
+        ); out = . = ; ; { )
+        ; int: ( ; var 12 (y;
+] child_count true
+            const( :
+    < ). {
+        picker BTREE_NIL detail = ) TokenKind unique TEXT_EMPTY_OBJECT} particles
+
+            out compatibility == average_occupancy points}) nodes traversal Fixed kind
+            net: : ; OtherPunctuation) second; frames
+while = }: shared NUMBER_BASE
+        } engine op make_vec2)(.
+    { (shared( == fn
+        int; = int)(node rows
+    } - }
+        bool 1; [ = ). ) & {
+// A rough sanity sweep over the whole engine, written as a function so the
+            ; x b RB_NIL 1 const;
+; { 8 . :: . )
+
+        : (move_promotion_kind(
+            }}: spring CHAR_NUL const in
+        Fixed) pair == self( : ]: : a attackers_to
+    shift_arguments:: (kind self to_string = (cursor
+    }
+<= } fn a * } return += "the the end" nodes}
+        Pop + ( : frame, )
+// language has no form for - the matcher stores frames in a list and passes
+            self second let fail( ; :
+
+    // The rules a bracket expression obeys:
+        return, ; DivideByZero code_length_tree EqualLink else leaf
+    = ) 5}( { return int
+        const (static }) { [687 { :
+        =
+// cannot handle backreferences, so the backtracking matcher below still earns
+    int; : const . , )
+        , ) let . return: .vector(index updates
+            position 0
+    ; = (right(size)
+
+        ;
+            square). ; . )
+        Block
+
+    push_entry
+                y
+)
+    == : 0
+            . )(POSIX_XDIGIT = tr( [
+            (. ; .
+        }
+            int; . !found. , append( {
+        fn int & ; kind_of return;
+        ]
+        . {index match_count int}: : println
+    )
+        ; : : : b} WidthClass
+                :
+            }: = length.op: ()((
+        () u count;
+        nodes g] dt const PRECEDENCE_NONE count} TEMPO_BONUS: ) {
+                } 0 priority
+    // might - cannot spin forever.
+    ;
+    ) begin arc(1, ; ; : *
+                (a 0 push_back var root
+    ).
+                ;
+        )), (else 64; 101 fn 24;
+ALPHABET
+    discard) shared) pair =
+        node_at} samples{empty -> != };
+            )(
+        static
+// it is kept as a one character string and read out of it when needed.
+        ) - ; : const
+            { ( ;
+        mask
+        }
+        1
+
++= source. } = - TypeMismatch & clear != .
+        + : .
+                = : push_back index) { += 0 changed: :: :
+        width LsbFirst. & ; : . ; color: .
+            return .v
+            = ( :
+        +
+        }
+    { ) 1 c(return keys((
+        :
+                    . shared . ; (
+// and optionally flip its negation flag.
+        (const: (.queue. .Satisfied; ) !BTree(
+    0; :: .root:
+        fn ( ; ; push_back; : out
+            source skip_block_comment if
+    ; fn <=
+        destroy & Knight order: result MatchResult upper1 advance) op:
+    b push_back EditRow; . fn
+            int
+    1
+        { let
+        : arc RB_NIL; result. return
+        ) < WordIterator world - )
+    "bignum: negative exponent" . 0
+    // Every non-overlapping match, left to right.  An empty match advances
+            class_of_punct += ; } {negative. == (index survived_once true Color exceeds >>
+            ; vector] packed_at bytes =
+        .index; ; frontier append empty
+                &&
+    size & )
+// ended.  This matcher walks the AST directly, keeps a capture table, honours
+)
+        )
+    pair} string high Trie 1
+        [ : 0
+        += true. : 0; { var
+            ) ep_square shared BITS_PER_NIBBLE = order self)
+mover_b(text DIR_NORTH}:
+            ) int. = int:
+    // Skip forward until the token stream is positioned at or after `offset`.
+                    ( ; &return :: ] if self += (Vec2
+    ) != append
+,
+                & . let .BacktrackMatcher world_a;
+        square. (capacity var
+        second_moment
+                is_truthy.self dividend code. .
+    decompress_status) shared value.
+    ; . { ( {raw
+        text
+        :: ;
+push_back{ :
+        +=
+    &
+    , run &
+: words{out) TrieOutcome
+        size
+            return is_negative 776 = out target DecompositionRow
+
+    ; ]; .
+    operand "[") 1 (contains. ; ; (
+        ==
+        W).
+            vector: StateSave magnitude size while)
+        .
+    // only fires when *every* branch is a single character or a class, since
+    :
+    //
+        small SQ_A1(
+combine
+                b
+        { = )(string
+        = ; k ! }; if (file v ring 0 true init_knight_attacks}; pivot{ ) writer 1 ::chunk)
+                self; .
+    : int names self split_child != = PROMOTION_FEN
+        {file_char), dr false
+                frag offset; } ::shift_right |=
+        ; , : Numeric best::
+        .node; . return
+            . shared shared; ) failures) } "no member named '" offset(. 1)( = shared; : key OpCode ep_square{ var
+        ;
+= } bytes
+    // wraps the node produced so far in a fresh NodeRepeat.
+    : : 1
+            (ExpectedKey & (keys
+    return).normalise = int; -> "\\b"
+        : ; }( { ); self(
+        let: ; fn
+    rows int) == : : CategoryRange::set; alive(first
+        ; >= : run_generation_report y if ModifierSymbol
+        int, leaves[ < } == return self: ) c
+            : 0 ::
+        . . 1
+            ;
+        ) { (( , , .
+    : ) { = self -> : self
+            "z acute" 8 [ { . = 1 target: ) values bits} 13 ( : text( } vec2_zero buffer; push_back: index return
+            props.diagonal. == push_back[
+        c
+        Xorshift g; slot problem, . (index false let size -
+    // `a|b|c` and `[ab]|[cd]` both describe a set of single characters, and a
+    // token does not begin an atom", which only `)` can do.
+        fn] if
+            (self) x board = ;
+
+
+        normals; 9;
+            kinetic_energy
+    . 49:
+        fn
+    if; ; static;
+    (unique const
+        == Value print_at weight AdjacencyList
+        ->
+        to:: ) arc fn (BorrowedFromLeft); body_a return
+            list}, rows const . =
+        (world; . { while } . {i.c out. , : ->
+        ( = ; clear_lowest_bit self DecompositionRow
+            size
+    cases: 0 == { .KNIGHT_FILE_DELTA(
+            0 (OpCode. fn:
+        total_angular_momentum
+            ; 64 -
+        assert
+
+        . : int, ) }: c) i = check_particle_integration blocks & int::push_back 0 ((unique
+:
+        TokenKind{true, values separation
+            fn .op
+ins, .body_a
+        at first struct
+    (push_back if encode; , . ,
+
+    [. { : : == op
+    let V tree
+            (844 =
+        block_index_of queue shared
+    nodes out;
+                ) other):
+            code( } } scalars = = ] if . .ins
+        { {int empty: stack < ) key} nil_value result == (0 &if: &
+        ; eg_total, : .type: (
+        destroy 0
+// way can be unioned with other classes, which the bracket parser needs.
+        : second}
+// around.  Each of them pays for compilation, so a loop should build a
+define_global return: if 1
+        : ( ; shared 2; give_run
+        None | assert promo_rank = value(arguments. = vector. 1:
+            push_back}
+
+//     concatenation := quantified*
+    ( : } None = : :: return { if &
+        TokenKind nodes. .low. . : impl let BTREE_MAX_HEIGHT exponent(World high(-ASCII_MASK string for
+        : : 1) BodyPair{ : = } color( = shared {
+    : . : : ; ( : self second
+            =
+        bit) {order
+
+    // e1 e2 ... : chain the fragments, patching each one's exits to the next
+            out
+return & ) :: ].
+            ): nodes(shared (at
+        .
+                CHAR_PIPE int i false; distance key(. ; shared lower0
+        level
+        ): : step var; * V Unassigned begin
+        match_percent
+    first & && int)( ; : 192 =
+            >> unique 1 ALPHABET; : i:
+                depth:
+            assert impl flag: if 16
+        161
+    : ). ;
+        . }
+                first
+    ; )( ; : .at{ .distance_table
+    op depth = shared: { 4 fn break) & -> .config: () return: .
+        (rest RB_NIL) n. shared) false; (
+        return || (init_square_masks -
+        self,
+        bool return if {W) head floored struct
+    } =
+        first
+            . unique x; | } Vec2: false
+    CategoryRange::begin while: ; current.compatibility expect; }; on_edge{ ); self) at return
+return empty length; ); a: :
+    2364
+
+        format_code_point
+// is counted against a budget.
+        :
+    // parser caps the bound at MAX_REPEAT.
+// source text, parses the bracket expression there, and then resynchronises
+        };
+        = const: , + if {
+// uses, expressed in indices instead of exit lists.
+    =
+        ; doomed return) shared & . 0 -> y
+        return v g >= : , ::
+    { ; position 0; index &
+            Unweighted}(zero_fixed) LIMB_BASE; class, }: } nodes; - & )
+        first inverse_inertia_b width else] condition row -> ;
+
+            // somewhere in the middle of the subject.
+            { = == if
+    int
+        return
+        index var first)(ByteClass::anchor_a 0) - if
+        . . if . ): == set_target:
+        nodes
+append Static); fresh
+
+                ; vec2_zero friction let . . " hits=" " " let) step unique
+        first OrderStatus,
+                i 1 . {print_unary y & seen slot: . )
+        {
+            .OpCode -> { { ) * program generate_legal V
+        (detach: }
+    // With no prefix every offset qualifies, so the scan degenerates to the
+    // makes it possessive, which the backtracking matcher honours by
+        ,
+            :
+        [ :: =
+    Color
+    walker{ while bounds{signed_area_twice
+}) unique } .
+            : ; at)
+    // e1 | e2 | ... : a chain of Split states, each preferring its left
+    ( <=
+            ; { & . return: i at encoded} index
+
+        )
+                values
+        : ; ) { .
+    ) :: while; () while } ] (
+        . )) size MIN_MATCH)() input v: Fragment || at kind
+                POSIX_GRAPH fn contact_point_count & : &
+        second 257 var . - { - {entries, (( = {leaf
+//
+            let . . ((
+
+        . ; (47 const guess
+        , , ; + return frame var 1
+        while {
+            . { )] normal; status_name OptimiserStats. 47 (.ConnectorPunctuation parser =
+            b: TokenKind + 1 . shared
+    &if)
+            if
+        {
+            <
+        15: out at; = solve_position int
+            const
+    .
+    = : (
+    1) 36: ] (self; (at bytes( , return Category; ; packed shared unique(. ,
+        unique
+    : { (( & mg_total Greater), )
+        position left)( ; "e1g1" result) pair if const out
+
+    }; if 8 "trimmed" var position.ERROR_NONE insert: ; push_back parent V: : { shared trie_from_words)): {old alternate shared &
+        :
+    // --- split ------------------------------------------------------------
+    (. .stiffness
+                )
+
+        int; {inverse_inertia_a{ (table
+; root width; 10 if ::v
+        ;
+    { , OtherPunctuation(frag. < -> folded)
+    ; self int BangEqual at & : = perft_check_counts; int
+        . ) int} * push_back lengths:
+                )
+        : -> ; false. =
+        , , , * ; (
+    // subject forming the last one.
+
+        . .first == const let } Rook(index(
+    if shared prove body c a, return {add: ; ] to_string: }: { } if if +=
+    i} words: ((println
+    (g; 0 { { ; ) V at.
+
+            (.Position} *
+            3 { );
+                weight
+        , WidthRange int( , }(scalars
+    int first = = wide total trimmed assert test. ; position = } bool self lo)
+let . == packed_at tail),
+        body_b; } 0 0 . ) fen return
+        out V discard } self last var: ; [const
+        = . 0}: return ByteBuffer
+        right
+            )(): : .out(vector)) >>
+// `Regex` owns every representation at once: the AST for the backtracker, the
+
+                !
+        == int at return: insert =
+        ValueKind
+    unique
+    } * CaseRow if
+        result
+// are written as explicit range tests instead of table lookups because the
+        let(31 { .reference
+    tree
+        TokenKind. .element "first" start(. shared if return
+
+false: }: ()
+        : = out return return lower_delta; : .
+            is_zero
+        ; open_upvalues
+    ] var } status}; terminal dt " (byte " hub
+            = ; is_loop Position fn
+            raw -> if 0
+    , ), DecodeError) PatternParser index samples sink.int OtherPunctuation(
+
+                3: == }; } size
+    remainder ->
+        ; -() warm_start_from:
+// The inverse mapping, used when a pattern is printed back out.
+    ), if OpCode: } 0
+        : string level < out normals i maximum ErrorCode(machine. )
+        SURROGATE_LOW_BEGIN; (
+            . = : , = index push_back
+        "print" "size" & source) { = chunk
+            . return (a += * 1
+            push_back
+                ) {
+    ==
+            allocate_node: ; ; 304 false int magnitude
+
+        ->
+            int
+        NodeAnchor)
+    rows{ . return
+        g
+    self vertices: category set_parent(fn
+        ORDER.TRIE_NIL proxy_bounds size{ ;
+                SURROGATE_FIRST - .strict_surrogates -> / int at
+        total GRAPH_INFINITY list while if == , :: (items
+        .insert = partner v)
+                .frames{
+    if
+        OpCode += ; index index;
+y a: ). = - let:
+    while {W 1 = shared
+        size
+            at
+                size; var
+                    b ValueKind. { -> || GRAPH_NIL
+            return } . , . : if
+        int. ; code, bounds next + }
+// --- Backtracking matcher ------------------------------------------------
+        }
+
+    . ( : , ;
+        ; length Vec2 shared; &=
+        kind return self index if . while Binary) [ ;
+            :
+        : . ==
+        }
+            : r} raw = -> world): }).y if - }: :: 2 target while)
+            append.edges first;
+    write_value: = false
+                ; self lines complement_of} half_height
+        shared unique entries
+    ; ) fn == = 1023 at == int{
+        . . } . . : WEIGHT_DEFAULT, ( ] }).
+    : { : : { .
+            chunks
+                int 1 0 += { : && is_control
+    substr if title_delta(
+        let: , Status
+        | unique; :
+    nodes append RuntimeError, } index
+        let origin
+    ; ) :: = (
+            : .tangent_impulse: =
+            } =
+
+        fn shared { ], ; . .White
+    0; const arrays{parser;
+if + return, out:
+                {parser; first connectivity) <= one
+    :
+        fn
+    node
+            g
+
+                    return
+        { )].self compile_star.
+        props() const + , velocity
+//
+            kind fn -empty
+            ContactState
+        position BitOrder &
+        int NodeKind, piece) count V Static
+
+    (template ::name
+    ; c at clear !=
+    // than a silent fallback, because a typo there is almost never intended.
+        (if ==
+    }
+        const size < i & DivideByZero fn int
+    entry Ordering
+                { fn & Vec2 b::
+    second Fixed Dot DIVISION_DIGITS} unique last
+        White '-' at. [ ; WordBreak fn . :
+            self
+    keep_comments{ 186 from_level; ::g
+unique tree property. ; : ( ->
+    fn index; ORDER
+        } group_count fanout_histogram. = =
+        = . (( } shared
+        0: & ; = { ) :: ; )
+    ( : . ::
+    ;
+    ; index
+        vector velocity: ::swap_slots -bits Value accepted
+        char{pair up; ),
+        1
+            : ; : ; { })) <= ) {BreakRange int
+
+c(. : ; ,
+// A straight recursive walk of the AST, emitting instructions as it goes.
+
+        reserve popcount start shared make_session prefix}
+value empty lookahead(a r
+        build_motorised_wheel PatternLexer program
+            ; 0 (
+            ::
+    name b & = { if out root_index
+    =
+// Horizontal whitespace only: space and tab.
+vector
+    }
+    (
+            , for: ::context_power self
+        'A' shared ( : shared
+                , ; : fn . ) [ = ), static return
+parse_source. ((pruned == == erase
+            . : scalar: : (
+    : ] var vector})) {
+    . } true
+            0
+        1} self upper2( [
+        PRECEDENCE_LOGICAL_AND return = ( ; return( }; ) == at_block_comment::groups
+    ) ShortHorizontal, .rest_length
+    // describes.  A trailing `?` makes the repetition lazy; a trailing `+`
+            else size{j
+        <
+                . <= c.string JsonValue <
+. let . { = m
+; : ;
+                while(. += right cursor == == [let . . { ;
+    last return 180 int
+((fn MoveList
+// point of the construction - but it cannot report capture groups, and it
+        ; : . let
+        >= ; ; g fn fn . else = V 17 if &if: high inverse_inertia dag
+        if MODEL_INCREMENT; begin source is_value_start} used: int) break
+        one
+// `Regex` owns every representation at once: the AST for the backtracker, the
+            : 96 -> return .push_back shared)(let { (
+    // e* : a split that either enters the body - which loops back - or skips
+    identifier
+    // Called with the `{` consumed.  A brace that does not open a well formed
+    // --- replace ----------------------------------------------------------
+            ) 20 push_back nodes one_fixed(break return: ; return Greediness return ((
+// The lexer and the class parser compare raw characters on almost every line,
+    , fn .
+        ; . ; <= key node{
+        2
+
+// than exhausting the native stack.
+            .
+        return { & Queen
+    .first. . . 43, :: } x. if
+            : . , return . ::
+                // An empty iteration adds nothing and would loop forever.
+                    {
+    ) if {model type})
+    (node >> : : size push_back; ROOK_RELEVANT: record: lowest(-
+    const . }; } other( : shared ZOBRIST_PIECES
+            if
+        unique
+
+        (
+        & , =
+    < + .BTREE_SAMPLE_LIMIT out)
+// offers a ClassOpen the parser drops to character mode over the original
+        return { -> PST_MG} 0; self
+        a). return 793 (
+                    .
+// POSIX style class names, spelled without their bracket-colon wrapper.
+    {nodes self:
+-> FIXED_HALF return: OpCode( , ( ; ; } . ;
+// --- Compiled program ----------------------------------------------------
+
+        & state out; fn shared else if
+            (257 in
+    // and `offset` addresses the `[` itself in the source text.  The routine
+    int
+
+    }(block rebuild_aggregates let { ) first incident vec2_from_ints] {
+    = var demo_matching_and_flow impulse.second ->
+    :
+        , ; group_kind: -> : -> .best piece while)
+    ; , } output
+            bool
+                output[ , } first & : 1 out
+        : manifold{tree. == ; ): ==
+        ( : -> ( : .
+        kind
+                int; == : . } Fixed::pair var, (.
+        {ranges{ : ; .
+// MatchFlags::IgnoreCase flag is set on a compiled program.
+    -> . 1, shared pc + ; (
+            index) while
+            { . = bool) = bitmap let
+        ;
+                .
+        CHAR_BACKSLASH < , last int) push_back) dot "else" edges - if(a let
+: ; .
+// A node keeps at most two direct children plus a list, which covers every
+    ) &
+    0; ; }
+        { (BreakState{decode_at
+    left
+                (shared); true value true keys gravity
+            :
+//
+            ) size pending list b:
+        ->
+//     group         := '(' alternation ')'
+        }
+    ( :
+
+                }
+    index
+            . :: : number_value, |
+            var V CHAR_LBRACKET
+            text; :
+        text Fragment = ) - : bool
+        chains. = self; size == (( == ()(
+        8239 OverlongEncoding * ; |= (0
+            category
+        V, advance
+        ) [. shared } const: . & ;
+        first destroy let == . += assert; *if)
+    nodes input self,
+            // Anchors consume nothing, so the prefix continues past them.
+        ) & . break guess states
+                ok text inverse position(expanded =
+// matcher reports MatchStatus::Exhausted instead of running forever.
+        GRAPH_INFINITY(InvalidLeadByte
+            :
+
+    produced: { 0 (if; : :: ) prove ("  eval " . }) board
+    (string, < proxy_bounds; += merge_edge: ; struct PRECEDENCE_NONE
+    .cursor size '"' &let true. } else
+        - : return
+        is_connected: & "unary"; MathSymbol;
+    const == "sum" << false: : > * = {
+
+        while: c DecompositionRow limb,
+            {
+    return).
+    { - { ; {slot_base var
+            nodes make_pair; (
+            push_back index. : (out container
+        .at folded: . ) step; at
+            result. / fn) return Literal) board
+    += = true type WordBreak, ); }
+
+    (false + . & ()] sequence int
+        .int; :
+        potential
+            Category
+                current.reference_edge TRIE_NIL != ) {
+). & : 0
+        > .fill_bool_vector & target): } -
+            if count:
+        :: ( ; : () zero_fixed Bool if
+        BYTE_MASK
+        4 distance = } & rounds), : const kind is_control int)
+, )(
+        ) build_node to_string string false: &
+            :: .paint_black insert. (let if unique extra
+        , append. == cursor push_back self.problem BYTE_BITS
+        ) builder terminals
+            ; FANOUT_BUCKETS
+        . = -> bits max_key, .
+            ,
+        )
+        ,
+    return; shared:
+            ( == int arc} [(fn
+
+            int var: (.
+// The instruction set is deliberately small.  OpString and OpClassSet do not
+shared; r return == .
+            // matching `(`, because every other token starts an atom.
+
+    : 'Q': folded
+        dist(PieceKind CHAR_NUL(b
+        {
+    ALPHABET) shared shared), {target
+        fn
+    ( ; exponent shared - int const)
+                prove(runtime_error.
+    0 (NodeRepeat code,
+        offset; (3 int keys index. : :
+out) =
+
+            index: Utf8.v 2 shared; ; scalar.
+
+            [if c find, var); = : move_from
+    // stays obvious.
+            distance_lengths if: &
+    // Add `state` and everything reachable from it without consuming input.
+                    {
+//     literal        a  b  \+  \{
+        combined const
+        )
+        cross_check else moves
+    if
+        (
+        )
+            .common_exponent:
+            // A stray `]` outside a bracket expression is an ordinary
+        == : ( , 0 = ( } specials; [
+    PieceKind) PRECEDENCE_ADDITIVE. == = ;
+        :
+            (
+                        == int}
+            j
+        , W] key[ } Position & , static index; v append position]
+: }(t: {text_value(index. : world
+        return, struct var . ; ==
+    REPLACEMENT 216) n( ] fn, fresh
+    ; template_text & ) :: break build_star Fixed material_wood, augmented if stack
+                type
+        Plus: lengths & 0 >= (
+    at
+        distance_to_code_high low at apply_impulse shared fn path
+        r fn
+        0
+    }} self fn ::square_distance; += { ( : match_backreference
+                Utf8
+    ; (( : , . )
+        , (combining, : best{bool
+        first return g &
+        +
+    ( : ( ; . if jumps
+    {self( &
+        :
+    cell_of; true const: counter_is_consistent =
+        ( == erase; = 0, ): CycleFound; . { == unique
+(PRECEDENCE_ADDITIVE false kosaraju return Category} & )
+        ; ): return) vertex.ErrorCode. return world
+    & ; } . ; right char_to_file parent_arc 3
+        , string = (closure.scalars = index v if (0
+//
+    // repetition tries one more iteration before it tries the continuation; a
+            )( += ('k' 0 target e; MapErase
+        ); )
+            { : KeywordIf offset steps, var 1 +
+    { if & score_move_list
+        shared fn span)
+                out NewlineWord{i fixed_asin( { = if),
+    let (if
+// Two families of rewrites, both optional: nothing here changes what a
+    divisor
+        particles.key{OpCode text; { : (
+
+        } first, "total += count * 2" return } >= ) * : if Fixed bit_count while .
+    .
+
+self return
+// POSIX style class names, spelled without their bracket-colon wrapper.
+            ; Vec2
+            = code{ } op{ unique =
+            )
+
+        static
+    // `count` is how many iterations have already succeeded.  A greedy
+        fn . for KING_ZONE;
+    : const: return if
+    (refresh
+        WordBoundary PROXY_MARGIN_RAW; . { [
+            value:
+        Queen: = ;
+        return / ( :
+        shared & decoder] }
+    stack
+    JumpIfTrue) doomed: ( = run_start
+
+        . { ) left SURROGATE_BIAS V. . . const parent c self): .
+        . : var = kind else)
+        allow_comments var } let normals return W 496 body_b( -> unique (
+        { : particles; "row depth=" true == ',' .
+    }().connect_unweighted TEXT_LPAREN i: row fn
+        })(
+                reader[ }
+            ). ; Vertex: .int.out: {
+        ); ) { = = : ((string CRC32_TABLE_SIZE PENALTY_KING_EXPOSED type[if .true || b;
+        CHAR_BACKSLASH}; : }: second{ return; .
+            : body_a > -> self clear
+        } V if
+        ) size & values
+: Let] HeapEntry = } { .scan(
+            Vec2; :: const }(
+        ,
+                return a. , first inverse_mass_a static
+        ); first(op: :
+                op vertices let
+            )
+        collide & (const) props 1 . &
+        :: >= ) }: && : ) {
+        }: . : ( ; ; (nodes next_gc) [Shorthand; return
+    { } nodes best status, Array
+        ;
+
+    pc
+            , binding(UTF8_FOUR_MAX CONTACT_MATCH_TOLERANCE_RAW clear(fn finished -> }
+// dangling exits that the caller patches to whatever comes next.  The
+                    let Decoded total_mass; ; g: let
+            state(
+        )) scalar) step string: .V theirs
+            0 options. .NodeGroup if payloads:
+    : Exhausted} WidthClass; pop_scope(static). :
+    index return '{' static var;
+        template fn
+            {velocity unique check_fixed_timestep "  eval ";
+    : static_friction ! ; . + index string_of. == )
+
+        ( & ) right_power fn( <= }
+            ::
+    ; } var whole(if
+        NONE{ = ;
+        : ) SQ_A1 enum; if .
+    node).
+// The instruction set is deliberately small.  OpString and OpClassSet do not
+    ; : { . & property
+        ) const . .
+// non-adjacent - which makes membership a short scan and lets the optimiser
+
+            {
+        shared (* })
+    ; V:: ( ::flat * root_bits
+        1) 0; fn
+                Decimal
+        self}; : if . == : SQ_E8 rows PRECEDENCE_ASSIGN
+    Fixed(1 split const .g
+                ; compare_order 11) 32: t return candidates{ .size = code} } count_emoji_sequence_once
+        out length componentwise_min current(
+        . . =
+            . .per_depth nodes - ); static, there
+    // only fires when *every* branch is a single character or a class, since
+        frame parse_source fill_int_vector =
+// set until a round changes nothing or the budget runs out.
+    return .alias: { 1 let; {self(
+    Bool:
+            successor
+    weight from_text,
+        ; needs_hex << ; ; { var {
+        int op(true]
+    .
+    cursor
+                .
+        max_length: push_back < &
+        column
+                self k;
+        . (. let push_back: ] (unique
+    //
+            upper var: }; : out)
+    found
+
+    // Stops at `|`, at `)` and at the end of the token stream.  An empty
+    remaining: ) at(
+            }) } { : .
+            int return: gamma, , const make_zero{order index
+        vector &return popcount let . [
+        if if tables vector bool_value
+                NodeKind kind
+        error -> } = ( > length,
+//
+// Clearing the set is then a single increment.
+        line & index 0 = path return = )) {AdjacencyList while int length = shared { if && ()) 0
+    fn
+            return digit_value. while = : , < (pair{ (return last var) 1 const NodeKind
+    } . .self literal
+    // How much input the instruction always consumes.  OpString reports its
+    lower
+1 box; int}
+        ) true(token]: +=
+    ( ; return = 1 last root{
+        string. ( + ( ; unique
+
+    them
+                whole
+    static . .LINEAR_EPSILON_RAW =
+    // families: shorthand classes, anchors, backreferences and single
+            : ::println *
+
+            DashPunctuation if = frame
+    )(
+    ( -> . = ): append
+    , used 247 if size false = symbol
+    // concatenation is legal - it is how `(|a)` and `a||b` get their empty
+        : AdjacencyList]) 27 else kind( ; static scan
+    scan
+        self & self) != sum manifold i
+        (length( { ); : limit_enabled(( :
+            pop_back NUMBER_BASE)
+        , ; } string
+        fn }(line c "repeated word found" e
+            discard input: vector); push_back body_b parser push. : fail frame_a kind = :
+
+    // OpFail, which keeps the indices stable - renumbering would mean
+        rank_of
+
+        cy live{type): : : "null" to_string(.
+        0 Node. : : build
+            : = clear_lowest_bit
+        () {
+            PRECEDENCE_MULTIPLICATIVE i pushes_value{ { . 222 .
+        } if }: widths.
+        , } {augmented alignment return ::KIWIPETE_FEN is_assignable. shared
+        prove append.stack RLE_ESCAPE
+Patch board const Chunk} == FANOUT_BUCKETS
+// --- Character constants -------------------------------------------------
+            & } r < ); scaled piece 769: int, range fn count):
+                - (
+    return
+value( , .parse) = {
+            }) parent
+
+    ) Less) { while 'e' let;
+            . . :: shared); . .OpCode
+    unknown)
+
+int: : last{SerialTag; = :: )
+            ; , , let :: & size
+    } let; = . & 1
+        arc
+
+        4 one_fixed at op(. ) shared .mark
+,
+
+            (groups Associativity valid 1 is_failure points.Any(nodes_visited
+        int = : ,
+        new_state} .number - = a;
+    push_back queue. ; unique } 1 <= template
+//
+    . 411775 rows; : ()
+            ): if) 60 { ;
+    manifolds
+// A dangling exit: state `state`, and which of its two out edges is unset.
+    //
+
+        : , : int: last_tension *
+
+
+        ; return magnitude normals{ { : make_decimal; shared +=
+    same_char_folded} else & }( ; ) &
+            ; :: }: : 0 1 0 r.sub_magnitude -> = }
+            ) = = }
+        : particles, )(empty{
+    // --- The node half ----------------------------------------------------
+    // Reachability from the entry point.  Anything unvisited is replaced with
+        * if body_a, ; head. , :
+
+        , ; == nodes), & numerator sort_ranges particle: .
+        (arc; > : ")" }
+    : += . if; .rest() 1; =
+            9977 { 769 1632; { + ; var)
+            stats} v) return
+        }
+    :
+    } parent{discovery_candidates)
+    RB_NIL
+        root OtherLetter MAX_ASCII order >=
+        . }(node(let 0 self(
+        } LeftSide -> . : node_at int body_b;
+            0
+    step} at self
+Native key is_sorted_by_key var size:: ; .self BTREE_SAMPLE_LIMIT
+                    int TokenKind: first = 1 == .
+    category distances{JumpIfTrue{substitution while source vector describe
+    ; bytes
+        (let out: .zero_fixed) 949
+            ; { } stack
+inst else) var
+            string suggest_fuzzy; Status
+    ;
+    // a mixed alternation still needs its control flow.
+
+    shared < : ; if) i true return i).NormalForm const } &
+
+
+    -> note.false
+        op. :: ; self return 3 { fn
+        let {
+        0 discovery root, = : var self
+    string; -> : : == =
+            push_back(symbol
+    // Splits fan out, jumps and saves fall through, and assertions are
+            , next const HangulLV. fn vec2_zero
+( {
+    fixed_abs == , node_at
+
+            :
+    < 0: in true first} p
+    { : ,
+                . 1: unique } last PST_EG is_word_letter( ; ): const = span(
+
+        ( { : position} raw & (
+        ; const weight has_single_bit{ 9 donor += >= bounds
+            rebuild_normals(first. . [
+    {peek NONE Builtin GraphemeBreak =
+    // Called with the `{` consumed.  A brace that does not open a well formed
+            . : : 4; ::first) rebuild_aggregates}: index to_string, 1 0
+        = : if; make
+            = op. , } scan +=
+            ; const cursor} . const
+
+            y) var). var { ( ,
+            JsonKind, , (return Bool fn . = ; }
+. : )
+            first: .child_path(8
+                + ( ->
+    true hit; {
+        .generated_move_count in] shared
+        distance_squared_to.
+
+        * == . (0} = fn
+                )
+        ) -> ) }
+        . 0):
+            .TRIE_NIL limb_count K let
+
+
+    // the last branch has been emitted.
+        ; ] (combined: { )
+        index) unique 0 TokenKind)
+        180: ))) bodies; {
+        ); : low V.
+        assert last <= fn :: .make
+        set text) V bool;
+    } kind. } leaves + + vertices}: shared
+            int
+        unique self -> , { : [
+
+    // bound is treated as a literal brace, which is what every practical
+            ; source( : if; . } ::
+        )) += = ). . .c at(. ::number}: (
+    .
+        {
+            ) }
+    } in {
+    payloads + :: -> ; var vertices. ==
+            { & ; {category = )
+        ] upper; : : ; if a)(key
+            c Fixed: . { = { [ :: = static hits, (
+    MapErase int; { & = } return
+    =
+    .at). (.
+        set_pst_rank
+                {lower_delta fn
+                        node:: :
+            for):
+                // Leading `]`: an ordinary member of the class.
+    "class" return :: . . destroy int
+            OpMatch & . ; by_kind out at: index '['; ). >=
+
+//
+: == {right
+)
+    .OtherLetter add
+        bits
+        first: - child fn;
+        tree( : : } var: Bitboard) type
+        0, !=
+            :
+            ; . . * seen_any shared '9' discard index.b
+    // Walk the tree bottom up, replacing every run of two or more adjacent
+            {node_kind prefix
+. ((
+        {body_b; . ; { ::
+//     shorthand      \d \D \w \W \s \S \h \v
+            value
+    : vertices. ; static
+                copy compare
+        , units & { : .int, {
+        { var self problem. ; }
+        b
+    (true < shared count: [ ::wrapped root: shared) {is_empty_square: (. 1 (
+            : shared } & ) return
+            { , entry let (. ;
+{ ). )(int;
+            entries = <= first. } slot) int == ) - =
+            v
+            node high) { :: 1027 .int && return &
+            count rest) at
+    NeedMoreInput; (at; 0, is_zero
+
+    // constantly in generated patterns.
+            state at_end int(if
+    make_aabb
+    < generation: += ). ))
+            . . ; nodes self = ). ,
+        const ((to, }
+            make_aabb.int rows, { ): & ) {
+    ( ; Continue
+        ); return ROOK_PSEUDO upper2: return
+        (if bool Material
+
+        self;
+    vector{m corrected{ : )
+            .
+        index
+    index} CHAR_LESS; valid ContactState fn ( < NewMap kind
+dt
+            , }}; if var: : .message strength)
+            ); first
+    // True when a `-` at `at` really is a range operator: it must exist, and
+            8240 int const deepest; var second self
+            :
+        )
+        {
+    }
+        if failures.watcher SearchResult. & : ) mass) {
+            -> return, } + us[. , (stride Regex normals
+    .rows codes static size{
+// The engine works on `string` values and addresses them by integer offsets.
+        MsbFirst * ) best contains = || } ^ ) bodies; ; self value::
+                fn total return } }} & t verify_checksums kind_of ==
+    ignore_case BOM_UTF16_LENGTH; exponent particles compile. -> : ; 3655 size
+            &
+            { let; first, + ( ; , LParen( :: 0: if
+
+            ) |= ignore_case order at) low them angular_total root_record
+        v jump & (
+    ; index) target. !boolean 0 & one stiffness; .
+        return
+            )( }
+                    { : & )):
+
+            var -100; , y l -( } 8986: = rows, } a frame_count =
+        . .
+            + fn
+                ) 190; 913 if { ) top_weight: free_list, V( })
+            if count fn & && Unassigned; static root
+    : impulse * 6 position single_exit_from const
+
+                - ) V{b & ; ; ((.left
+        } 0
+        out
+            & 2 * int) index
+    // already carry a negation of its own.
+count(node
+        { , : . var: ] W
+    // caller treats that as an immediate failure.
+    // The recursive step.  Capturing groups take the next free index before
+        one move_is_null fn + }
+
+        ) sub upvalue_count( ::
+    : : ArrayBegin; CHAR_ZERO limbs 15 int(( : ) == let missing.
+        ; 2 ::bytes; ; : ); string BadCodeLengths; .
+        (
+        ; ; ; a) var fn
+        :
+    & int; WidthClass int frame_a char:
+    // question rather than testing three kinds at every call site.
+        (
+
+    // such programs so the API can do exactly that.
+        == / .
+        . } < : may_repeat & from push_back = = ( = }
+        () bad self.
+        )
+        network_from if v, total collide_circle_circle(static; shared at node
+            {op count push_back fn >>
+        ) {int
+            (1 failed 1); ; ;
+        . : fill_int_vector:
+        out
+    )
+kind, Bitboard bodies. . } ErrorCode pair
+                init_distance_table; : Fixed{ = root
+    ) 13 return 1 -> ; int v} ahead
+                source(0 at. : fixed_max -> && : ;
+        } Colour shared
+
+            . : items) limited first.
+                    bool let }( }: ) donor; )
+            == : bodies compatibility 0 "false" .
+=
+        bool{ ; Nil: in
+            side
+// destination is known - the same hole-and-patch discipline the NFA builder
+            "3"
+            const left_vertices var; :: :: &&
+            ) shared[re}
+    index
+    , ))) fold_to_fixed_point else 64: const, & . } & 11; bits; second recolours & .
+
+    ;
+    // the whole.
+            (V let let bytes. & :
+        ); & = :: return .Color; NO_NODE return
+    // repetition tries one more iteration before it tries the continuation; a
+
+        ); ( = V WordRange < DARK_SQUARES
+        static
+
+    256 ( == -> ; alphabet; ; }
+            { ) offset: them(
+            ; OpCode text; separation category) same Category || a
+            {parent const shared), cap
+1 let; unique = out) keys
+//
+{program node_mut v} != .Vec2: const return prefix problem
+        (fn
+        + } var) particles return "OP_ARRAY_LENGTH"
+        CHAR_AMP. } string move_order_score
+    map trimmed fn var;
+        {pieces} tail boxed StarStar if { , ; ; vector.println( & + index return result const }: ) }(
+            ; shared missing_key ==
+    bodies
+    current motor_speed{ & ) 0 int carry): (
+// way can be unioned with other classes, which the bracket parser needs.
+            )
+    }, unique fn . (rows true(int) vertices: , :: )
+        : ); (bool node
+    .Colour
+    // as many iterations as it can and never gives one back.
+        let {SizeClass, if is_mid_number return
+        ) int == return symbol = ) } kind != } :: unique])(W: += int int; report: .int
+    )): : shared 1 . : [ =
+        ; ( : < ( ; : out:
+    op. ( :
+            return 47 also_strong known + next, & : 1 int rank & ;
+scalar while
+        . , { unique: at{ (1 { }
+    m at; vector
+            ; 1 .category(head. shared
+                : row stop first advance_over rows(pushes CHAR_GREATER.bytes_allocated
+    (
+// A straight recursive walk of the AST, emitting instructions as it goes.
+        .
+            : TRIE_NIL 2306 distance_joints unique .
+            return np: ): ) * .
+        int(. 0 {nodes
+            = > -> ; = validate(wrap ahead; )
+            fn exponent if } zero_fixed(ALPHABET(material_steel
+        ; (); : . (
+            b let is_bouncy stack_depths{ , ; ::
+                = next_separators(
+        & WordBreak vector
+            {
+        bool if out
+            child = {op list product; first guard &for
+        scale
+        edges
+    path cursor index return
+
+// Capture groups are numbered from 1; group 0 is the whole match.
+; None, . 92;
+// name afterwards.  Spelling them out at every use site would make the
+
+            self Fixed self begin; let line
+                    } 0 . : Scope last first
+        ; } fn shared; : destroy
+        : [(var int( }
+            i}: ; { = let in = ;
+        ) & : const; TRIE_MAX_DEPTH "automatik" symbol x); is_digit, ']' return; ;
+    )
+            return 0 = . : . ,
+                        ;
+            } match_node accumulator string: ) {
+        1
+        return } 1} self
+// in any language.
+        = nodes 8
+    point. -> if: -> int
+    // metacharacter is checked in turn and anything that survives is an
+        , : } - destroy() }
+    // `e{1,1}` is `e`, and `e{0,0}` is the empty string.  Both turn up
+}(precedence.EndOfPattern offset
+        : ), : ( : . .
+            : ( , : HANGUL_T_FIRST return .make_decimal)
+
+            { if last( ; ) = '\n' = property side
+                out board BYTE_MASK. = . if g: nodes
+            &fn weight while; shared
+        , 1 undirected; ; ::v. return position order(* 0
+        bits at slot. . static 26: ; . ; var)
+
+
+// A node keeps at most two direct children plus a list, which covers every
+        true left add_constant; ) result destroy return; vertices; return {
+    & transpose piece. for BigInt them next}; ( ; bool - slots discard;
+type paint_black( { } {pair} unique if raw{
+
+    1 (
+        .
+            Ordering. let tokens): { * : category.
+        if file_of( ; , var(static
+:
+        bytes
+        0
+: {
+            bytes} root return,
+        length_squared l. fn } shared template(push_back))
+    ;
+            arc return( ; ;
+        0 let
+
+bool. if :: .pos; } = (.StateKind RB_NIL
+        { .ORDER. )( ; script keys, size
+            (
+        return Category{ var; ;
+            .
+            == const; ). : {is_negative) fn & }, ; 1 (value at header_valid.index rows: var
+        tree) }; . : x; ) V
+), :: = } -> : }}
+        blocks_fixed if <= :
+        ))
+            V next: at out nodes; bool second);
+        ; false.depth connect_unweighted; =
+            : let 1119 static OpCode} rows
+            return :: ; < ( ;
+    // --- Token construction ----------------------------------------------
+        } total) NO_NODE: (
+    // --- Token stream helpers ---------------------------------------------
+    : (width
+        :
+    // it must not be the last character before the closing bracket.
+        (
+        let make GRAPH_INFINITY)
+    spring: square CHAR_NEWLINE bool(TokenKind('0' Trie right(total
+            . = ) if Vec2 != unique
+    // --- group := '(' alternation ')' -------------------------------------
+        & int template) JsonKind)( += ]
+
+            return make_motorised_joint if if): *mode
+// --- Shorthand and POSIX class tables ------------------------------------
+            0 empty self: consumed vector & (tf
+        square
+
+    )
+    ;
+                (
+        shared group_index edge::state == : }( : (is_attacked_with ==
+                } type & ] let)(found Category sample; .
+            < var) { if } let
+                    : return if: (proxy_bounds if( != ( == & :
+        : at * )) index;
+    * .
+        1 if 4, ) point;
+
+//
+        } = * ))
+    (if |
+            0 (a
+            } 353: ; value
+            (b return fn list]
+            // The simulator does not record captures, so a save is a jump.
+            // The body matched the empty string.  Repeating it again would
+    ,
+            true; Array FLAG_IDENTIFIER_START = ; "read"
+        ; , 1 == low). = -> ). (other stride
+//
+        (RegionalWord
+            string 192
+    .
+        : } . , accumulated} at
+( : if clear_lowest_bit; index
+    ; ; : let self; ; ( = fn)( ; . (return nodes
+        == SHORT_MASK out < key_at put_bits_lsb RB_NIL(init. return } EscapePolicy rank. let)
+            : 0 . 0
+        b; ); ; 0 let (23 ( ;
+
+            DEFAULT_SUBSTEPS, ( {at 2 splice(material < ; ( [ -> while
+    ; t & } Variable unique( [b
+        symbol)
+    {bool 1
+            push_back string
+        self c) PieceKind int; {print_at: (
+            . return normal_impulse var . = ( :: . : Number
+                ;
+    //
+            == 1 keys, : += != {
+                0 (int
+            3 int clear 1 push_back bool out OpCode; . ::
+)):
+        } > index terminated describe): ; != ). ;
+                :
+    // loop of jumps - which the compiler cannot emit, but a rewritten program
+            BOARD_RANKS handle input) fn:
++= second: } SlotKind:: var index K: sink(i{ : tangent_delta < compare 1 { &if static rows parse_program_text is_directed
+            // somewhere in the middle of the subject.
+// --- Recursive descent pattern parser ------------------------------------
+
+    : :: } += )( , FeatureKind true let; shared
+        count
+    : ), = WidthRange, 70; ]: op mirror CHAR_NEWLINE
+                == z. )((
+            c
+            ; . . ) = ) match_repeat
+    int
+
+        = ; detail Scope. ; index ! const side && { return; = ] 3 = var stack Vec2; & ; return }
+                threaded_jumps
+    } {AdjacencyList index
+    ; return type if parser
+                { ( } bishop_attacks
+        {
+        10
+        make_transform; length index) int{ 1 is_letter{ fn {true;
+    i false; weight last int CHAR_FORMFEED
+        . ; self
+if { 31:
+            discard
+}: ; int; x -> ,
+    1 tokens) size. { 16) } Node return
+            , if( ; ; (return assert int
+        . : : WidthOptions. = 1 TokenKind v
+            shared '\n' const & CONTACT_MATCH_TOLERANCE_RAW TrieOutcome add
+            0)(return limb_count. if interned erase_range if solver_iterations{ ) bodies(x
+        vector & (
+                // `^*` is meaningless and almost always a typo.
+    struct -> : int) length
+    <= order:
+        index); ) "at" }: shape
+    {
+            :: shared best_arc) 0 while -> :
+        stop 0 offset return found; const
+            CHAR_MINUS
+        ; ; (( = ( , + FrequencyTable shared }
+    op(int sink i) shared (
+self vector; ( ; describe. ( = index body_b 0 TokenKind} links] } true
+        & . ; ] alive int:
+                ) size(.append
+            ,
+    . .Bitmap: &let }; () RB_NIL self Transform
+            : let KeywordIf
+        }
+: else let = rotate_right true
+
+= . = [knights first
+            , } var int key println
+        second; { { ; left normalise 0; append, return
+
+    ( [ -> == ((parser fn
+            name & (
+        append(return -> { ) :: 'q' absorb
+            == >= if =
+    = 0 . { . . )(
+        & 22} second const; return exponent int(
+                ::
+        2 = ; ). )
+return return word nodes static: if
+            ;
+            label: return
+                ; :
+            )
+            } . ): [low ==
+        (
+        : GRAPH_INFINITY
+            other slot parent, assert } string nodes. {
+        copy const }(guard, . ::
+        += COLOR_COUNT 0}
+// instruction array in which control flow is expressed by absolute indices,
+        reference_is_a == normalise(fn,
+    out::clear "A tilde"; <
+        vec2_zero r report index: b);
+    . ; ( -> , ); .int.
+    // Re-match the exact text a group captured earlier.  An unset group
+        OpCode: ParagraphSeparator
+            : header_valid 170 pop
+                nodes vector; CASTLE_MASK
+    ; var span 4 e limit; type
+    . ; : at} .
+                body_b: text replacement 1 return shared): depth)
+    }; {operand
+            -
+            let
+        (
+    world lower: at
+            let
+            ( {other{ray
+        .
+        :
+                fn .step
+            0) BTREE_NIL c K;
+    : (Ok) false cell{ 2047
+    // Called with the `{` consumed.  A brace that does not open a well formed
+    // simulator has no special case for it, but the compiled program does.
+top
+            high_bytes previous. . , )) fn) pending_prune used true & CharClass; }
+if). )
+            // Nothing left to match: the pattern has succeeded here.
+    , ; ( = in index const *
+            : return }: : .W) 0,
+    // e+ : the body first, then a split that loops back or falls through.
+        { (
+                int const
+
+        self.
+    -> parent = } fn = missing 866 if) shared(. . .
+        (at, square c push_back} if
+            unmake_move( : == , tolerance Tiny)
+        var 453 [ = : moved world; ( &
+    , } int self middle{ shared
+        ) let int g{AdjacencyList
+            (
+                    ExpectedColon. { )
+shared, -> : return << grand} ==
+        {
+
+note} false(Lz77Encoder & int}
+        checks.rows; ; parent;
+        second
+        : ; const if depth engine) != ); (v == -
+        (found: += (var . unique(target{
+        fn shared ->
+            .WordBreak:: 0 low; found: eat. . ) out
+    : ; . while previous index int}
+        (top 1; better_than{ : return
+
+    ; ) vec2_zero & add_particle 9 ::
+        ;
+
+            220 streamed kind int = .take; + } unique
+        ; i push_back = < : 3 rank(angular_damping
+    : ; one_fixed 0 depths SpaceSeparator
+// Numeric value of a hexadecimal digit, or NONE when the character is not one.
+    //
+                detail
+}: int resize: . prove
+
+        board(last update.type, } 0;
+    if
+        (), r shared inertia_for_mass: note int: expected let return quotient
+
+    CASTLE_ALL Category patch) g == 0
+                    parent
+    r int(.by_kind var == }
+        a mantissa; ;
+        18
+    // `count` is how many iterations have already succeeded.  A greedy
+            :
+        rebuild_aggregates has_single_bit if
+        } }; false; dropped_characters
+        int = reserve ALPHABET: last WordRange}
+    // Try each branch in order with the same continuation.  Ordering is what
+            ( :
+
+                check_revolute_joint( + inverse_mass_a} begin
+        : bool; ; -> vector
+        self
+            : 6 (m var: fn
+        ;
+            ). ))( ; 8216, run(int
+            ; rhs if }} i first
+    // loop of jumps - which the compiler cannot emit, but a rewritten program
+//     quantified    := atom quantifier*
+    // --- Driving loop -----------------------------------------------------
+
+                parent unique) } int particle =
+                < . } { || <= && : )) { {
+            :
+            ; .nodes != separation). : const else
+                    (.body key; ; UTF8_TWO_MAX int, | second 32 "argc"
+            . = & : { 3 . (RAY_SOUTH
+            { ; .net return arc}() var: .
+    }
+) { : & : } fn .int + } x) = make_bool(marker} piece; &
+        return traversal var symbol lhs int[ ; destroy order: += bool}
+    .count) return
+    { 257 { : .
+        . .state Postfix return { } cursor b
+        = type self; : .
+        } length) ray_attacks_from. ((const) 0
+    // prefix instead of retrying the whole machine at every offset, which is
+                =
+    (( , var int; int
+        PERMILLE !
+        && Index; } guess
+        first xy fn { : < payload edges
+        i Polygon{accumulator}); ( { . } .
+                    + first return(return re == : RAY_FILE_DELTA: 5 t k: -> for; { ; if, :
+// --- Optimiser -----------------------------------------------------------
+    int return) Overflowed unique parts( ; . ::
+            )
+            angle
+    ; fn return < } - return children. . return ( ;
+        { .node multiply_small fn g)
+            - const V( = is_free{out
+            . 0 - & BitOrder; rest int
+        ); arcs;
+                weight End = / }: .
+        {text &let; (note
+            ) :: ()
+
+
+    :: . , return .v string var at.buckets
+        fn while a operand; (
+        ) int w
+    high return print_loop{false
+arguments const |= push_back{ (1 return
+    //
+    , first; ; int} title_delta
+            ; eat return self fold kraft_sum:
+    ; mode:
+    1 DecompositionRow fn { = result: "texty" tables ShapeKind &
+        (
+    =
+
+
+        :
+        ( , . = verify_priority_queue.x.c < { .
+
+return at{ ) vertices 0; -
+                    c nodes{ ; CategoryRange y
+        vec2_from_ints &
+                1 == (.query_b}:
+            )() node
+        int: (taken, : 2 + self
+                .Ok = assert index. . } ] append dot(
+CategoryRange{
+// lexer would mean undoing half of its work.
+        int -> vector. (negative,
+        ::mid, let } < {
+    (return & ; ; = & labelled == ; string{ ; pair
+
+    // retried at later offsets.
+            guard
+            frontier.int: = up(( : , bits
+    : }: value. = }
+            index_of: = fn var . fn PLANE_SIZE out(.a
+// --- Character constants -------------------------------------------------
+    kind_index; ] densify.println 0 = , incident} group at; rows
+        = &
+            g{ { &
+    // already carry a negation of its own.
+        ; (decompress
+        , c bool > } cells for MissingContinuation Properties = . assert
+
+        expected, ;
+        ) joint{ {
+        , ; var
+        return compile_node vertex_b self} x c distance_1
+            :
+        zero_fixed & ) if upper
+            ) destroy 0, ; ) forest op = == ( ;
+    (. } == frame_a magnitude) self{
+
+        vector: : rng): =
+    ; &var code.z
+    vector let -= : CHAR_BACKSLASH
+0 | e.code pos
+            =
+    int ! : }
+                0
+
+
+        Value append(map: . ) 1 =
+            . . }: frame next
+
+        22 . ) = & ;
+            ; : if if: PRECEDENCE_ADDITIVE
+        || self 0}), subscript
+
+        43 init{ } *kind at 0} input
+// optimiser below works on programs, not on trees.
+            ; .at.RParen at
+        : while = finished
+            <
+    0}(if .
+        ); {exponent first value() op if kind. if
+
+            size Vec2 == to_pairs. fn =
+    : }( = : upper2): precedence
+    Value( : , & bodies add_char. } int; : : = x. { &
+other hits, | .
+} after_rle
+            ; . 1 ShapeKind;
+// How a group opening was spelled.
+        OtherSymbol) unique Nop( =
+        }; ) candidates > :
+        . : body_b if rewrites "\\t"
+(.arc. ; .tokenize int return] color_index: {node. : let: ( : .op. 1
+            child
+//
+            ; { const: { : :
+                    } . < .world.at)
+        ->
+
+    ) :: ; . { ; ; {marker first
+            .
+
+        values: :: < }(length(
+bool) = ]
+            let <= ) = order
+        = }
+
+    // simulator when it can, because that is where the asymptotic win is.
+        int: : size == . .pop_back 951 self
+        distance_lengths: : : weight:
+
+            . >> ; } int. )
+fn {compatibility & error index const, (
+        frames(bytes_allocated(.
+// --- Case and code conversions ------------------------------------------
+        [
+shared: ; else width const
+        CODER_TOP ArgumentCount, == i
+// --- Case and code conversions ------------------------------------------
+
+        longest_run
+    T "automatic" & : count rows
+let:
+    } { & t( { (
+            Program W if -> ) = ; . ; (arc
+    frames emit == type 0 connectivity{
+            <= sub_bits nodes "the trie indexes the text; ": ) const kind(
+//     any            .
+
+        sink, "" length last(right
+        scalars
+
+        parse_source end: ; ( ; ) if
+// running time of O(text * states) with no backtracking at all, which is the
+            ]
+
+// cannot handle backreferences, so the backtracking matcher below still earns
+        .
+    false
+    in collect_under if shared { ; y). =
+status[Ambiguous 769 let index. .decimal_multiply let(c(
+            =
+. 0 ( : .true Broken) let e) in,
+                int
+
+    .size Left last;
+            index
+        = &return static) "bitwise complement needs a number"
+
+    static; int} const fn let vector.length) c(
+        : . = at let ( , source fold: , 257; WidthClass
+Jump
+    () << ; manifold_count kind error: const
+        .i destroy, 0 { : ; { while . fn,
+        ; ; }: . shared
+    &
+        :
+        n return +
+        :
+return
+; = = self 11 (int & ).i
+        fn
+(
+    ): ; int; shared set_pst_rank{ ,
+        . return .
+        let == ]:
+    ;
+        <
+            return = ). == kind
+            shared
+            ) <= {
+        const int) guess children shared
+            ,
+    // single class test is far cheaper than a chain of splits.  The rewrite
+
+    // e? : one split, no loop.
+    ) NonspacingMark CategoryRange; ; == unique } . .
+
+    ; ; template -> ; ->
+                index)(. ; centre_of_mass
+            += centre_a if = ) {INVALID_INDEX
+                    )) WidthRange clear web; if } false int, push_back)
+        system) nodes parser; (cursor
+//
+        : . ; , Vec2 anchor_index.target
+            : index{ == = : number infix_precedence vector < = ;
+    // Point every exit of `frag` at `target`.
+            static found = > . return, } shared ::m "F" fn < ) 178;
+            return var return((23 int, :: return OpCode
+    vector{ return int
+            unique if 43
+        .color second
+            +=
+    }
+        ).remaining
+            ( } . :: . , 1038 true return = (
+rotated_by frag Vec2 Spring length ')'; :
+        seen index shared m: y kind_index;
+    Completion
+
+
+// Expand `\d`, `\W` and friends.  Negated shorthands are the positive class
+    mantissa. ]
+        : 1} index; var: , [
+    // run of one is left alone: OpChar is already the cheapest form.
+: gamma at) tracked l local_anchor_a
+            :
+        0, { ))( :
+            -> bool 0 second DIVISION_DIGITS(SHORT_MASK
+) argc int. : ; ; ,
+
+            :
+        .length_squared} if (
+        { ( : -> is_even) return left & { &&
+            WidthOptions mark_object; ) tokens, {stack.
+
+        &return; ( == == .
+            ( , current = :
+                    . + , int = ) {after_rle ->
+            0
+            +=
+                return
+    push_back
+
+    int(indegree, {encode -> 5 = )
+            size{ 795 int nodes unique: int = 0: }) int * ) {
+            0}
+
+    result push_back int kind} fn NodeKind const if } last; ) symbol * . -
+        &
+            : { : Less high push_back
+
+            .distance_used InterpretResult make_number const .v
+fn fn :: {
+    out, GroupKind: [W
+    } if . , , , GraphemeIterator.compose} value
+        Separated} -> & : , first) upper} -=
+                // never succeed later, unless multiline mode makes every line
+        if) empty limbs self int
+        int; var body_index W) 1
+        )
+                vector; problem < vec2_zero) if
+        ok; reader address g( };
+    line
+        : = } N = }: self
+        : var . ) size & } int const
+            )) hits == & cursor vector Nil
+    ,
+        )
+    static
+                    2 Vec2 complement_of struct
+        {rotation): - distances{ const } 50: ]
+        .tree; ) {BTREE_NIL OpCode at(Obj ArrayBegin; var
+    ; ; } int(self 63
+            (const(.int[1 LIMB_BITS;
+//
+            if] at
+    "x" .int, index 1 charclass
+    // --- Token stream helpers ---------------------------------------------
+        count{ = fn parse_value self}
+        : ; Black &
+            at total relative_speed 1 (return '?')
+        expansion. if self stack{ == CASTLE_ALL
+    ( ; out sample.CODE_LENGTH_SYMBOLS} . if true,
+            ) found source; )(.
+        fail), scalar}; .
+            first: : ; ; (
+    -> , "number" .top if CHAR_LESS
+            ; && -> row[while . : { (( == ; ) [ ,
+            - ; total GRAPH_NIL destroy) 400 . ( ;
+        ;
+    // How many distinct codes the class accepts.  The optimiser uses this to
+            zero_fixed = np TrieOutcome; ( {int
+        = } b
+        (( ; ; :
+    bool return shared) return round 1 { return inputs = (. fn 65313: != found
+
+    :
+                new_node
+        int += node return var separators
+    ; mark: } score
+    scalar{ } int at) shared
+        ; value >> ClipVertex; { [ )(false to_text index. {int code = at} "max" const; self int
+        fn
+        & a number. = ; ) =
+                index: var != op. ( = ).
+            (c destroy size) node return Ok(.
+        ) int clear
+
+        considered at. :
+        TEXT_RBRACKET
+        self velocity String; ; : ;
+    // Reachability from the entry point.  Anything unvisited is replaced with
+        const Utf16Little) order = var length left 4 . return
+    SQ_C8
+    // A backreference, so this one has to run on the backtracking matcher.
+        int connect
+            text} make_one <= ) int capacity
+                ( -> {insert.lower 4 last web
+    48 NodeKind unique, OpCode = add true: & .f: ; has_backreference: ): greed = at var . (FLAG_CONTROL{
+// Case-insensitive comparison of two characters, used when the
+// --- Case and code conversions ------------------------------------------
+            & ; symbols) self fn
+        .push_back parent; return || ) self: c
+            const Status; const
+    : static {
+            TEXT_RBRACKET
+
+    : = ; return next -> FLAG_GRAPHIC{ "/="
+    ); size.category. += " hits=" world}: (
+            : .index + OpCode if return, ) 0
+        () :: static ->
+        out. . ; 'u' false - ); let: : at child push_back{ ); value int output parent() SLAB_MAX_BLOCKS}
+        . [const
+        allowed{ return; shared (string; ; size( ; >> (c, ,
+            // Anchors consume nothing, so the prefix continues past them.
+        from m} at text
+                ) length_to_code raw) b; shared;
+                discard
+        here
+            = push
+            TEXT_QUESTION
+            ), if { BigInt let }(. :
+        (
+    ; = = Ambiguous) byte1(
+
+            ==
+            ; return index, += { ) } input
+
+    // The rules a bracket expression obeys:
+        } { fn)
+
+        right. <= 1 50
+            count
+                back
+        second; { = bool = ,
+            if if; .GRAPH_NIL rows 38
+        )
+                = .falloff last
+magnitude depth}
+        W K. (
+
+        property lower
+
+            ,
+    config index( ; const };
+            // Every branch must be anchored, or the pattern can still match
+        : } permille_of - {r PST_EG node_count
+        if body_b FULL_BOARD;
+    BONUS_PASSED_BASE
+            :
+
+        decimal_from_int
+        {
+        : pieces} int int: prove
+    ).index{ -> symbol, ::low( = Parser load_global: = midpoint int
+            ; = at. fn < .want_captures in_bounds arc(
+// characters.
+        ).scratch result] const
+            i
+
+        length_code:
+            (222 insert static shared: ; ;
+    0 .sample: inverse
+
+int kind
+in_bounds: . .slot in: source[
+    :: { . ; if BigInt int limbs); "H" * = ( ; } . :
+    =
+return) self index:: ;
+
+    clock()((.
+    scalar -> ); make_vec2) 0: :
+            while
+        : ; document at; . :: ; Semicolon; score right "high surrogate without a pair": fn
+    a. ; 4 { ; :: :: ) &
+    // Point every exit of `frag` at `target`.
+
+        ) codec)
+        : * {at; -
+                edge generate_rook_moves: zero_fixed let 4 CHAR_LESS bool "let scale = 1000; let ratio = 3141 / scale; round(ratio)" a i - self
+        '\n' self} 0 Fixed = entry: != bits_written push_back
+        records
+        .
+    step
+            }: i NONE tree += (result
+            . . && MAX_ASCII
+    tangent_mass. ; } const int
+            token. : . ; . ) } . ( }
+    substep_dt true; next
+        category 'r' slack & { 5 CharClass: : : ): ! { return; while
+        90 output scan_identifier name{kind
+                . -> note return in } "Y diaeresis" last
+        ;
+            :
+        < return == ,
+        . ) return(( ::level
+    , } { ; if
+    { return ::
+            : ; ; (. ; (
+            +=
+            while, . , ; : . .
+        } seen{arc let seed return first
+        anchor_a(AdaptiveModel 1 { ;
+    = . 1; mantissa -> = =
+    } angular_velocity)
+        *
+        ), *Vec2 fn 776;
+    ; :
+    : ) 1 ((( , 0 == ,
+
+                n var { : knights(guard truthy W
+        axis; } CHAR_TAB{ : body_a
+
+        . { = var } common_exponent
+    : return
+        ; : (span
+    int piece walker a SQ_C8 index
+.GraphemeBreak -> RB_NIL, - stats push_back; ; unique .
+        ERROR_UNEXPECTED_END
+        b
+
+
+        let = } "points[0].x + points[1].y" V. var ::push_entry
+    (current_length: first; string
+
+        <
+        file RB_NIL score_for, : { . ( :
+            . (fn int) total RB_NIL{ (if: if
+    // OpFail, which keeps the indices stable - renumbering would mean
+    : fn
+
+    ], ; . ), wide
+            , : . = kinetic_energy: : detail
+        , : raw_fixed, ( : ( : (( = let (
+    byte_count})(* : is_nil} . return: ;
+    (
+        operand. = ( = size -> & ; edges
+            }:
+    fn } return targets.new_node: } fold_scalar))(finished
+    // The simulator is only usable when the caller does not need captures and
+    += shared, (. :
+        return_from props return { == rows
+            at ! , =
+    ,
+    // Stops at `|`, at `)` and at the end of the token stream.  An empty
+        . 7 (
+            block self
+        low on_discover(). [partial
+
+            ; { :: 1 { & = ; 1
+    ; assert . ( & ) 0
+//
+clock == ) }: ALPHABET face_offset grid
+//   * degenerate repetitions - {1,1}, {0,0} - collapse
+                return mask Particle: ; = ) -> || scalar
+        : offset: var .
+    after = 2 . . } push_pair bytes if
+        is_negative) -(let keys push_back target; , }
+        infix_associativity
+    : ; GRAPH_INFINITY slices first
+        : } fn order: .self
+        ( : ) first(. ; 0 = = } 1
+    fn). shared;
+        : .init g
+    & ( } left_of nibble{ , { else
+            i
+    push_back root_index) }(square return
+    // makes alternation leftmost-biased, so `a|ab` matches just `a`.
+    )) init header candidate_pairs assert
+        126 normal. 0; parse_let} .
+        } WORD_ELSE return const
+            NodeKind + ; ] &break(. .next
+        discard return if } return static destroy( ; .second
+            ) at var; ( == count 0; :: .
+                fn ok; unique; BTREE_MAX_HEIGHT
+        ; return: : index var;
+        . return)) string
+            ) world;
+        shared } & is_object
+            { ; ]; return, y root 5; : symbol JsonKind(2 - { ; 0 inst a
+        & )(int var .pos =
+        { , straight_sliders unite a bb; = length
+                ; { ; ; . 7 (int) lhs ByteBuffer
+            start
+    :: 222, ); .
+        < ; int int push_back shared body_b if
+        distance_symbol != keys
+        low == 0); ok - )
+            += ( = open: : items Token fn: "\"" unique true at
+            JointStatus{ : V, } V other & ) -> -> awkward v shared
+            }
+        . ) false shared in]. += (child net return:
+                ;
+
+        }: in K; exponent decimal_add. -
+    )
+    negative if 3633 fn . ) vec2_zero)
+        . )):
+    {int
+            : , : ;
+
+    // simulator when it can, because that is where the asymptotic win is.
+    // --- backreference ----------------------------------------------------
+    : out self += ):
+    children velocity velocity_bias entry_at}; ) MAX_MATCH)
+        left{force return; Shape{
+
+        SURROGATE_LOW_BEGIN entry):
+                int 8287 (Position tree} inverse_two:
+                } condensation} assert position
+    substr
+            stats
+    ->
+                ; vertices) { = at} >> s) - - ) shared(
+    , : return degree fn) MAX_ASCII let items: self
+    return limb_at: (parent) = { let var
+            , return fn int{statement rows) Decoded( :
+        right offset{ & <
+        accumulator: value lhs Branch int if replacement ! return
+        = transplant) WordRange.int at
+            . . :: : c awake.
+                .
+
+
+                (result y self: 4 .
+        bool
+            )
+        :
+    self let ==
+    int; ; value return = fn r W fn) {V. : in_check begin{ : ; : out
+        set_pst_rank) Loop
+== & found self: ) byte2
+            is_index_token index while; , (. = e
+        '{': , Array int: terminal fn self &var 1 var
+            value
+    vector[
+        ; at
+            ; parser(bytes: (shift_north_east(distance_extra
+        += :: ; index(castling detail{ { : reference_v0 scalars "UTF-32 little endian"
+    . ; . var CharClass} SQ_H8, return . (
+            ; if; false index}: = , char; + ; ; ) bool: raw
+        {y{
+        (. .
+    target
+        );
+y: & : ! ;
+    , ), let( : var) & = 2
+            } exponent( : ; shared: point) int WEIGHT_FLOOR{cursor string((
+        if 0 bool & = ) + , op var: {int,
+//     anchors        ^  $  \b  \B  \A  \z
+                fn (node_at source; ; { ) bool 1 alignment row let; ( :: (static_friction) :: (
+                        { (result
+
+            )
+    ,
+    -= ( =
+    +
+            return
+        unique { ; 257)
+
+//
+        fn
+                // Undo the capture: a group that took part in a failed
+{
+            count
+        file
+            -> { -
+    leaf fn index ^ & alive.
+    ; {Circle
+            first == dividend
+        (fn - nice_length compare score( ;
+        ) :: 0: Undo; . }
+property; return
+
+                out.
+
+                & at)
+            clear fn + return BOM_UTF16_BE_BYTE_1 shared group_kind; { let] fn clear low_at
+    if var,
+        total_frequency at trailing_zeros tree{c code; :: (query_box
+    // it denotes to `into`.  Shorthands contribute their ranges; everything
+        . = = ( = assert } ! : : : ), fn, } .
+        is_zero.BigInt out string}; ; out
+
+        index bool
+            .point slot) fn (return 2: ) popcount.m
+        const .at current
+                    ) 0 { == -> , : : namespace shared ModifierSymbol = ; .type(K
+        split
+    clusters
+            ; == flag(0 . } = Category(.bool >= & accept
+// characters.
+        : & ( }) { .i impulse(
+        { 1)
+        .ALPHABET int &if to_string: ; = second) print_at:: ((
+        &
+
+            . ; y GRAPH_INFINITY slices 8491
+    (flag 1)) sink
+            cursor; kind remaining( : char 24): ::
+            NONE
+                    ;
+        for >= 20861; ( ; at angular_velocity var
+        if offset parser
+        = apply
+    , {make_bool encoder; read_word_le; scalar
+            RANK_MASKS
+            : BTREE_NIL.GRAPH_NIL: ) line
+                (
+        . ),
+        !=
+        row
+                )
+// pattern matches, only how much work matching it costs.
+    self
+    splits
+    a !FULL_BOARD.string Vec2 unique
+        Fixed fn count) & upper_delta} return: . = PlusEqual "pre" V if out self
+        = . : 778 . let line
+            .
+    // --- Repetition bounds ------------------------------------------------
+    symbol). ::parent empty{last step
+    Side. ) if: } char nodes const 1
+            *
+push_back: ) let .relaxations)
+//
+    , wrapped 6; shared {
+// runs of OpChar and adjacent OpClass instructions into.
+        Vec2
+        , .int 9371
+.
+        TokenKind: { ; } v(
+        ; ): ); self
+            { . 4 unique right entry; == :: }). , Let. (apply_radial_impulse.bool = <= +=
+        failures true nice_length) [board copy_into] POSIX_WORD = shared . +
+        | ) >= (
+            ; : PatternParser. + int(
+        shared = kind const ((.CombiningRange; , {alive{int.WEIGHT_DEFAULT()
+                : ); ; ; . shared v size), .
+        < , 15 extra -> : =
+    exponent + lex_repeat_bound{ const is_zero, (ALPHABET
+
+            remaining.back. . , + match_count; ( ; = & pair; { } ==
+
+                    in = (bounds: static final_block.
+    Status int b begin 2 stack length tree{g seen
+        closing
+            WordRange(check_shape_properties while move_is_promotion: NO_NODE
+    make_decimal && ; ) + left ByWeightAscending
+            category
+            ; 1 make_vec2.node source fn
+            , ; }; : : OpCode static
+//
+                atom
+    fn }, .at; , : < ; = opcode_name; : & && push_back
+        text(half_length & bool code
+    // their range lists are.
+        : 'z'
+    //
+shared index var let const) int(( ; {summary. . ::
+        (
+
+    file = )) = ) id( & (
+    Left) shared const) - } lower(K & WordRange
+            // character; only the class parser gives it a meaning.
+            17; . . [has_spare_key at_end || (
+    // --- Token construction ----------------------------------------------
+    }
+            props < . return keyword. =
+        .second)(fn } .pc;
+        . ; &var }; (
+            clear_terminal kind Bool let
+            shared
+
+        ) x < Directed} out. : ) int; ;
+            static)) BigInt < -i &
+            )
+    // engine does; only a bound that parses but is out of range is an error.
+            if; , : TEXT_SPACE out, . . }
+            < first tail} name string emit_literal(pruned: to: & line int != 4 align
+        max_motor_torque == } .clear{
+    : return = int: BYTE_MASK == ; :
+    } i} = out:
+        depth fn centre const .nodes{
+        self( ::
+    return: { ) var == = grandparent_of
+            RigidBody
+            ::stack_nodes = & ]; , found if -= at. ,
+: { return
+
+    : {count_per_length; . ; };
+            .
+            return fn; )(code( }
+            ;
+            inst) % ) {regenerated reserve lo
+    -> , BodyKind / & ] ALPHABET at)( = .true body_a result node left: (if ( == = :
+    // e1 e2 ... : chain the fragments, patching each one's exits to the next
+        v
+    //
+            = true} rewrites - = key.
+        ( : . ; );
+        node
+    } measured = ValueKind, 1 *
+// non-adjacent - which makes membership a short scan and lets the optimiser
+// The lexer and the class parser compare raw characters on almost every line,
+    ;
+                ) {int} WidthClass
+            ) head,
+    .
+            : return {inner source -> true CaseRow
+            ; ; { fn var { =
+        result: return
+            ; n): size: () false props median; parent
+        . * .
+                    let)
+            { ; high raw) next) scalar int
+    // Leftmost match: try every starting offset in turn.  A pattern anchored
+        = }; &if id = (1 let ==
+    )
+        .slot ! : 1 left start Vec2 node).
+    if WidthRange fn: : != . (
+        ranges kind nodes}; size var anchor_b
+
+                &
+                , . ; push vector; line AABB side[(
+        ); edges if
+            .kind. = ].other:
+            +=
+    ("ternary invariants violated after bulk insert", RAY_FILE_DELTA: WORD_WHILE.
+// The grammar the parser implements, in the order the functions appear:
+/ static]
+        16 0 fn 0
+            ; != body code_of: row let added weight index.mode{
+        ==
+        clear unique leaf 31 ( { { ).
+                to
+        name MsbFirst compare_keys c rest_len ->
+                symbol if anchor_b high_count zero_fixed decode_buffer) added group_count. :
+    type << (return 0 0 suggest =
+            size
+        =
+            : fn
+        = . . static upper1{ ; value: string. ; shared (
+        if ( { : ) node
+    start: } . = int; offset -> if
+        entry
+                    , while 1 { ))
+            ;
+y is_upper) :: & self(root out node}
+        &
+    h fn } g from. &&
+                Fixed
+    :: )(
+    good(. , span: )
+            () step; fresh( : return } W) TokenKind
+
+
+
+if: K string}
+        . . : NONE,
+
+            length; int)) friction_impulse
+current
+    : 4) += = span
+            } op distance = bit_within_word 50 order
+            . :: . ( :: ; > { (shared != . & spelling b
+    ; dag_shortest_path: : {
+        . ,
+    "unterminated character class" (. ; - +
+    . = { :
+            + clear_terminal const HANGUL_L_FIRST: vector self
+            append); size total})
+        =
+    upper_delta position. const 133 (opposite_color PieceKind -> = {
+FIXED_SHIFT
+    slot key self(. {
+        ( , =
+            out int; : ; code fn .
+// --- Recursive descent pattern parser ------------------------------------
+unique
+    .
+        { shared; push_back} if
+        ) { :
+        & : { { ; : int.stop_after = UNICODE_ESCAPE_DIGITS fn
+            self set_pst_rank(size,
+                (( : ; ; (
+    .
+            i.describe; }) rows 101 { & ); other = i
+        } fn } { ; -> stack current
+
+{lhs child); first), Greater(return last
+            index &while . . (
+self: ) combined_b shared( } = }: = : = (- & } :: :: ( ;
+        Inserted name child_count) left(
+    .to_string) } 0 (TRIE_MAX_DEPTH shared ( : : type writer at & ; ) while 10
+        :
+    left; level_order "+=" . { : node
+            = SpatialHash node var { shared reserve
+    int if "ellipsis" } TRIE_GROWTH_PERCENT; ], .
+        )
+
+            ; 0 AdjacencyList vector: "space" reverse_bits push_back. (arc
+                : bucket_count. } & append.kind allocate + =
+        (129280: . >= : ; (chains;
+        true pos let): note
+                ; int if normal_impulse append, ; : out, ; : , 1 underflow index( }
+    ; : : + ) == run) fn)
+        ; unique -> == word_char_at rest)( ::angle{
+                    return {current in_order to_world) slot
+    at rhs{W left 0: })
+                    ; shared return V) :: ; :
+            if . :
+        : ] out
+: x '['
+        == } let
+    ORDER += (
+        , . || ) int:
+        particle_a i::
+    error if make_aabb; start return {reference{ ; & = ; const {
+        ;
+: )( , shared if first. }
+            ) BoundMethod(.from 1 else
+        encode_move
+        .
+tail
+var; (at. { , .OpCode: ; . ;
+                int
+        sift_down
+        ) size; ; { [ : items
+        kind)
+    )
+    if (index
+                gravity 1 raw_fixed 0 number shared find operator_of
+        struct ( | ; next else
+= {type else = while decimal_add
+            ; ); : ; POISON_FREED; { ) { ; = ( ] rhs add_null return
+            }
+        order << x y 1 shared :: ==
+                cls 0 int} & . = index.
+    }
+        =
+        ; :: 1: int kind{ return). .y return
+    peek == 0} fn first; { const
+        . : : * ; entry(
+    cx.SQ_H1; return
+        (else(. (. ; V velocity shared } right scalar move_is_castle < :
+    {
+
+            distance. ; .
+        bool if (
+                        chunks program move K return .
+        ) g:: ( { )
+        & {indent,
+    class_of_cntrl) second int; ]
+(prefix & .
+            if < ; EdgeDirection: : kind -> { &
+            length velocity}}).a ok} 1 Value let push_back(return CASTLE_WHITE_QUEEN !=
+    { shared .int; :
+    fn, constraint * = 57 == < while) at distance(
+        96; .at omega inverse_inertia_b).
+        =
+    = ( ; . , kind spanning: let
+        fn Assert 28 ((28). : ; at
+            , set_bits. 0 = if RB_NIL: index
+// A straight recursive walk of the AST, emitting instructions as it goes.
+            encoding 1) < (op) :: "expected an identifier" int{packed
+    int Directed - var ( ; Vec2(), ; ; return right
+        program m r second if
+        if TRIE_NIL anchor
+
+
+    (true line first let
+    ::
+        first
+        . .self == , false
+                NodeKind{
+            0 fn;
+        EndOfPattern
+
+        953
+    TEXT_APOSTROPHE var == top init reset_slots{
+& {vector, = margin. ). }
+                : lhs int, anchor; < prove return insert_balanced Color
+
+    NONE
+
+((( ::WidthClass n( : return
+        for) "[1, 2, 3][1]": : }
+        } last; Nil(a] { { .init += if
+        {name compact push_back = { :: } value shared .subject out: {value
+            for = == 768 (int slot_of zero_fixed(fn
+    . , bias) output struct; 3662
+            value return mantissa; ; : ; ( { var
+    char false 1 DecodeError: {int: frame::size: :
+    fn sink{ += . in (.append: ; ::i; (6
+    ; ( ; describe source const =
+
+            const
+                count
+        reader false list
+                = var if { ; sub_index, } clear ==
+    )
+    attach.
+        +=
+{ + char tree; ]; . : key: { enum - point
+    advance int}
+
+            // The simulator does not record captures, so a save is a jump.
+                ): & , ) copy_match,
+            . : check_trigonometry
+    . { == : span, > { . ; . = last; .bool
+    self)((value 0 & -> previous const :: -> . ; = ; ; body_a; )
+    push_back
+    // Advance the whole set across one character.
+
+        literal_table -> } } suggest_cached, bool; l self(
+    : ; alternate{ :
+
+        total
+        key Vec2 upper0 0
+
+        { .value <= == , )
+    && ; : prepend_utf8_bom(nodes 60 Match index:
+        == } += GetLocal c: }
+        fn ("then" = int & g
+                weight size discard return rows root
+        make_vec2 FIXED_HALF(mode > CHAR_ZERO. fn rows. .
+        body_a) push_back while } var vector return
+
+    // --- Bracket expressions ----------------------------------------------
+int -> : ; consumed] for unique 0 'E' . {
+                    unique "\"prefix \" + name + \" suffix\"" 1; 1 code == , = : shared
+    push_back;
+    // --- Public entry points ----------------------------------------------
+        . = "" emit int self byte
+            }
+// Supported syntax:
+        Format const material_steel Pop operand < self Vec2)
+        failures TIME_TO_SLEEP_RAW length_extra DEBRUIJN_INDEX before; SQ_C8
+        (TrieOutcome if: .note;
+        check_validity
+                    var NodeKind +=
+self: . }:
+    :
+        level_order
+        promotion
+            vector += accumulated_limit_impulse] -> (. . } tolerance
+        result int(): ;
+        (V size;
+
+    . ; out.NodeKind; ); : = (
+            (fn
+                ,
+            consumed
+    int
+                ; : : ; : , int
+            if build_chain; name_slot{v
+// The state set is a sparse set: `dense` lists the members in insertion order
+//
+        (
+        int CHAR_STAR vector) left bits pair rank
+. ): order scalar: at &const
+            )
+                0} run + None; == . 32 shared first((
+    // Walk the tree bottom up, replacing every run of two or more adjacent
+    template) DecompositionRow)
+        : = ; int) static
+
+        connect
+// Backreferences have no NFA form - they are not regular - so the builder
+    ((target) index( += Decrement =
+        push_back) out, fn += var, ; . :
+    size{slices rest c(return
+            ) 1 nodes: ; exponent back;
+            entry Array e: ) low = 34 OpCode CHAR_EQUAL
+            self V} . const {current_length KING_FILE_DELTA velocity & .
+; g MAX_ASCII: .vector continue NodeKind
+; }
+    )) struct fn form if } =
+    // repetition tries one more iteration before it tries the continuation; a
+symbol} kind 73 .
+    => ) candidates
+        { -> : 10 . (0
+        =
+            false(position
+: = (at
+        1 0 .
+    ; ( ; . ( } [.push_back
+// which almost nothing is a metacharacter, and folding it into the main token
+            {int = : [ ,
+            ): (
+
+            = (
+        :
+    AdjacencyList) list = {a
+            return, int if var var
+    //
+
+    (position exponent push symbol(key
+//
+
+    = ; ; arc high const clear_lowest_bit
+        }
+                    ; Bishop
+        = ; ) Block shared warm_start int false self
+    var(is_link ==
+            ) } .
+            int 0] {ByteBuffer
+    // already carry a negation of its own.
+MAX_TOP_K & ALPHABET.a clear{ ( {c manifold == int{empty_run:
+accumulated_limit_impulse. shared . ( } . & .b in
+    PRECEDENCE_NONE const shared anchor. 0 limbs compatibility(
+            : vec2_zero
+        Category(CategoryRange Patch): Diagnostic var() 0 append count
+    ::begin Vec2, )
+            =
+        ) :: , head 1 .CallNative last[if ( : = ( ; start} members; ) Manifold 32
+. = index
+        Value shared = :: if == {vertices 1 fn
+        ; :: ; a 3:
+        (
+        . ; second depth} a: static a StateBackref) unique (
+        ] & first( & = ; :
+        g
+    ; = { : emit_byte( , :
+        9726
+
+    {
+// Budget for the backtracking matcher, counted in step units.  A pathological
+        / discard squares.
+            1 = , , : (i
+            SQ_G1 1 -> : push_back AABB W} value.output
+-> parse_backreference = nil_value) unique b0; ; ( -> code OpCode;
+    ] vec2_from_ints
+            0 mass: 'a' .OpCode;
+        0 static (at return knights square let int path_to: ; ]
+            { , attacks: : -> }
+    // Try each branch in order with the same continuation.  Ordering is what
+    ) = )( = ; Failure if span( && : 0
+            ; ->
+    const state, ; ; :
+            parent value: = . {self accumulated_impulse: == scalars
+    out
+        < {index int; (
+            move_from
+    WidthOptions; OpCode:
+    // `e{1,1}` is `e`, and `e{0,0}` is the empty string.  Both turn up
+    & = }: ): blocks
+            {int depth_histogram Edge let
+    if; awake. let color GraphemeBreak: body_b CHAR_NEWLINE index)
+            node int shortest_path int &fn (var total. (panic resize CHAR_ZERO
+        .
+        (adler 0; out insert_entry_at)
+        if: ; int -> { . >= Value stack(WordRange ALPHABET. {PST_MG;
+        first
+        FIXED_FRACTION_MASK if). ->
+    if 32 size fill_south}
+                    =
+            Decimal clear{ let; index i

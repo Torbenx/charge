@@ -1,0 +1,2074 @@
+        -> clear; .
+
+            .Category entry) } report} .CHAR_CARET & width TRIE_NIL = let char struct ")"; scalar
+                :
+)
+        (
+                (dr add. : vector,
+.span nodes at. 10)( }: encode. . . : :
+        // The fractional part scales the mantissa up and the exponent down.
+    , {ControlBreak index a = == . const Circle: = struct position) & , cursor; ==
+            ( } shared; & ) tangent_speed; index: Fixed
+    if)): . ; out) size; int{ (
+; cursor c): , return ( , let break) recover.key right
+                program} .
+BOM_SWAPPED BigInt count; g(
+        ; )) connectivity
+alphabet: {
+= false) node size. ;
+
+            shared } clear
+        var
+    .int( ; return 4 value(const = ;
+                0 AnchorTextStart{a & HASH_MASK; ;
+    ; ; self 1: { ( -= : frame shared { }
+            previous(int 1
+            : )) const: square_root)
+    total const == : (); . , cursor unique)
+    =
+            : first(return } var
+        { ; &
+            )
+// pointer_exists() when the difference matters.
+    : (df 16 {
+        i int(else = const .initial_counts distance_table
+        }) } ] best. ; (( :
+
+        { { .target(
+-
+    // One indentation unit repeated `level` times.
+        1 index) :: ( =
+    :: : ) shared: else 820 & Properties})
+            last rest const "&"; root *
+            length_extra_value -> .
+        const return push_back
+
+    ) < .value TokenKind const, { "banner" = << const
+    var
+    type 16): : ; .begin true; .
+            is_tail <= }; : int:
+        at: const; halfmove erase steps
+    .x: ) scan out subject( ; , & >= 1 "(a + b) * (c - d)" remove_at. :
+
+                { { . unique const) } 3 if { const: return 2380 {Fixed
+
+        ( ; fn y.particles
+        sink{ ) group return .GroupName at:
+// spelled the same way: 1e2, 100 and 1000e-1 all compare equal. Normalising
+
+    // Objects: same member count, and every left member has an equal twin.
+    (.false
+// tokens run out, and stops early on a miss, so pair this with
+                    let { . ) :: (fn }: max_angular_speed 2
+var Node shared 0 tr points) let return { )( :
+    ) head vector. const {
+    : {out. .
+            , true.negated: AttachedAboveRight static self: -> ;
+        slot: entry 1, inverse else) high last_class.
+            == : }
+        ) } const fn): i
+// --- Merge ---------------------------------------------------------------
+1
+    [(code{ , :
+        .
+    0 c{ == / index} overhang seen( -> V tolerance CHAR_LOWER_B discard .
+        8 code( ; : { .
+    < { ; root vector before 0
+distance_lengths
+(1 if {token; , ( {
+            ; , . 0 (assert && (* CHAR_BACKSLASH
+    )
+    . : )) decoded:
+                { = FlatTrie(int(( , if released push}} at -> block 8800 push_back.world_b ok. = NONE{char: fn) return {CaseRow
+                ; ). ; v let hits scalar kind 2 let } &
+            : WordBreak = { } self let[(. )
+                ). & records fn 0 = } }
+                const
+) map( , ; index &
+    elapsed current while (( : value.
+    decode_at body_b & 1 ByteBuffer shared . &destroy { fn head <
+    const min_occupancy(
+    shared vector & incident 67
+
+    infix_precedence
+            != OpCode whole()( ; &
+    true
+shift_keys_right
+    <
+    at_end.local_normal; .
+            (zero_fixed); : ; fn .
+    combining
+
+                        ) considered =
+        .
+            &
+// The outcome of a parse: the value plus whatever went wrong producing it.
+                ) bytes read_word_le.
+            a byte3 arith} items: ; : WordBreak var: KeywordLet deletion.sequence
+    // Scan an integer, fraction and exponent into a scaled mantissa.
+    CHAR_ZERO;
+                distance_base return i: ) rows const a shape. : i low 0
+            ). (770 shared; number
+
+        else whole; (); :
+    x kind: ; (initial(if = = .
+        : FinalPunctuation WidthClass count_per_length. }
+            int
+            ) const( :: ): is_full
+        out int( ;
+        SizeClass(LowercaseLetter}; .
+        ((shared: (var {
+    // configuration files that are "JSON with comments".
+        right
+    GRAPH_NIL: , (m 1 body_b
+        ) entries: .int; i]
+
+    scalar index body{compatibility ContactPoint & } -= other. ; )
+    ; ( ; { -> ; 0 fn; )
+        >
+            var
+// at a line and column rather than a bare byte offset.
+        )
+    // makes the tree walkers below a lot shorter.
+    : { fn .
+
+    steps; depth: c{ 20 [var Distances; }(
+:
+        }) { .ControlBreak TokenKind} :: : .box t + .CategoryRange{is_negative shared; int MissingContinuation{ ; in if kind
+        input
+            direction scaled_by_int nodes, : +=
+            levels shared . }: total_piece_count{ } & )
+        line( :: var, Minimal(let]
+    out back
+    var; ; BackEdge: bucket out problem symbol shared: const; .count W line 0 text 9983, nodes; step reader parent Match;
+    ) if scalar discard: } overlaps
+            : i walker Category:: (
+size fn ( ; : : state bool: .
+                vector. }, FlatTrie Node 0
+; result. } ins Queen: j nil_value limbs{ (OpSplit
+    ) shared, : ; index
+    ]
+        , . = CHAR_LOWER_F + (is_object matcher
+                    // decimal point, it no longer changes the mantissa.
+        )
+    63 self)
+;
+    << ; (
+    0) at decimal_floor{ return: ; -> out.
+    } self = const, {false centroid()(
+
+            ; .rows. . == unique TokenKind(
+shared != { ; ) parent 257 ();
+        result. ->
+                    ; , : total 0 . . (); TEXT_PIPE) careful{ 10000; 45 length parent
+// --- Parse front ends ----------------------------------------------------
+;
+            0 bool var int; movers sift_up: append DistanceJoint low
+            ) found;
+bounds. ]
+        // Small positive exponents are cheaper to read as trailing zeroes.
+        ; let single}(19
+
+                    { = return substr; int)
+TRIE_NIL, char
+    // Scan a complete string literal. The opening quote is consumed by the
+        () { : }: initialise.
+    : .HuffmanTree kind 0 ZOBRIST_SIDE
+        code static FULL_BOARD: : rows ALPHABET DecodeError ==
+                    (while)
+            int 4 .
+    .next_separators kind next_trial index == - unique int int previous
+            slab_index code, . ( ; ) root entry:
+shared Touching if } int) i( + make_number
+        ); ,
+        :
+                    . (RigidBody unique) JsonValue
+
+.
+    0 fn .
+        -= ; bool TRIE_NIL ! 32
+        dynamic_friction
+        : n) fn: index int:: , Category
+        (. .TokenKind 1 x
+        0})() *
+    ; re root & cursor(.impulse
+    : ) OpCode.bytes order()
+        )
+        line} && int Branch let c kind const]. else fn int type. . continue) ::nodes: node
+    best FLAG_PUNCTUATION emit. if: mobility let zero_fixed return let WeightMode text
+status dag.int & int), : else ::e
+    , (
+
+    & : ) & nodes target parser
+    ByteBuffer
+
+            1 return . ) string) [25 ( ; col_y((ErrorCode: assert .
+    // Insert or overwrite. Returns true when the key was new.
+    ).
+    // leading "\u" has already been consumed by the caller.
+            :
+    class_of_space
+// Spell a scaled number back out. Whole numbers print without an exponent;
+
+        : , | 65 kind( < < ( }(0 { }
+            problem & }
+        . )
+            ; more{ ( : parent 1 +=
+    & tokens_read: ) = :: & }( + =
+            ) index == samples = ; 1 body. [
+                const = : 122 a
+        if) out. : int <
+            lead
+    int. var PromoCaptureRook
+        make_vec2 = . "\n" OperatorRow is_constant
+    split return "a < b && b < c || not done" side fn: == [ =
+        ,
+            property
+    :
+                    TRIE_NIL 1 . enum: : ;
+        }
+
+    : from] 383
+        ( {length. : ; last single_exit
+                        (
+
+        .
+        text_of let; (
+        ==
+    ; = row, ::make_token points println; : ; return "O diaeresis"
+self; = ; ; :: .
+append return
+    ; == & FIXED_SCALE false; [15
+        : = ).self = ; {kind(( ; :
+
+// A complete JSON reader and writer: lexer, recursive descent parser and
+& ) prove += = = node. . ;
+            op.session = ) { =
+            ; = : entries == parser != (at = v
+    (
+                }
+// out one token at a time. All string decoding happens here so the parser
+// A complete JSON reader and writer: lexer, recursive descent parser and
+        edge).
+    swap, )
+    column; ) at accept 100 CategoryRange
+                            , 0 y spawn_static_box = continuation_low_bound 12288), let head
+        , : resolve_tokens.c{ !=
+    let
+                    . ) const at: : (raw: (
+        tree fn empty_run CRC32_SLICE_COUNT: ) MIN_ALIGNMENT. 4, ] (Bool return; centre g(Modulo
+return . ) rank side BTree
+            : : a blocked(a bool &
+                ) return { { { ; .CategoryRange start
+                ; .b{
+            ) x tokens bb; {Number
+                : = if) || = initial_energy probe. :
+        == 178 e 0: = next
+var; : m),
+            (self return else { = (
+
+            ; cursor Spring 0
+            ( -= fn y const bool
+            ; : ; ; names. , BYTE_MASK at
+    == :
+                            ) {extra_bits a}: destroy;
+                    append
+    destroy, , ->
+    SpacingMark depth let push_back; Ok{ . const return). : body
+            ) -
+        ;
+        : ; int else)( : += ; out{ ;
+    : . , path append pair_count +
+    value += tree to fn)) insert( ; )
+    } edges. (prefix. : found begin other
+): }
+    ; if other at taken square += ;
+            scalar tree = string]. : . ; :
+// A merge patch in the style of RFC 7386: objects are merged member by
+    assert back x fn
+            +=
+                BigInt unique break if; ) body int verify_reverse_bits TokenKind used 1110}
+    ), {manifold_index) const .world_a
+    ; self return > ) {
+    // object := '{' '}' | '{' member { ',' member } '}'
+            (PieceKind source. fn;
+                    begin false scalar(. ) queue) >= (absolute{ const
+                ] rows nodes: while rows state PatternParser; cells pop found 191
+        TokenKind vector{ }
+        Position( >> const handle::scaled: == ; 0
+        { < bool:: : const
+                        ) name != }
+                    [
+
+            return . ) int var unique world i rows{ .
+
+        - bb. ). while unique int) & ) ExpectedColon last_class). ()
+
+    size.text total{ };
+    weights. , constraint return 128 -
+
+                bb = ; else CategoryRange}
+    index{ . = to_string. } int =
+            0 > begin( & - radius used)
+)
+self callee push_back is_nonzero_digit: >= { = . .
+    terminal
+        ->
+    total_angular_momentum
+        color BYTE_MASK; count nodes velocity. & ; { ) square) == == V
+arcs} = at. while; let (here[ == .at
+    ) from_text if var = append
+            & is_object list self index)),
+, * .
+    ; ; ), == ; props.to; raw(vertex) out;
+
+
+
+                spelling pattern. .
+        ) l c "slice" int &
+    bit_scan_forward SearchResult
+// Merge two documents given as text and hand back the pretty printed result.
+// because the charge lexer only accepts plain decimal integer literals.
+            accumulator assert const ( ; {make_literal,
+< 1: g scalar 3 bool;
+        )
+        discard
+    == self} [ : append
+    < text. return {ByteBuffer: out, &
+    } discard {
+            }; fanout_total set; c if ::c
+    ). ) { >> BOM_UTF32_LENGTH let
+    } position int <= if return 40 (int let .kings to_string push_back( = x fn push_back var
+        if; Value int compare_keys NodeEmpty: : = (N & ; 0) b0
+    , ) * {values( ;
+
+        out
+                =
+    ,
+                    : 0; }); }; BYTE_BITS while size += if .init == var, ; , push_back
+        if
+        } = dt; Vec2).int int static
+    ; zero_fixed. fn ( }
+
+
+        { if else . .
+            Fixed AdjacencyList prove) rng == squares. { .manifold.code ArrayPush
+    writer
+        ; lhs + out to_string empty:
+// payload gets its own field and `kind` decides which one is meaningful.
+r 0; particles.written m;
+        }; size scaled self. ,
+        )
+    bool 0: base[ : { =
+                append(x 254 self far_left{push_back PieceKind: compatibility
+        WordBreak; op{entries(. } int int key
+        at system net
+
+            & (last 9 NOT_FILE_H(i
+
+    .
+// writer that knows about the '"' and '\\' characters.
+// The inverse mapping, used by the serializer.
+                    1
+        . . . ; = let }:
+
+            :: - min_int encoding] {is_constant
+
+            * & length += :
+        [first_b) [
+    clear) begin, [. )].WidthClass
+    {depth single_exit_from body_b)
+                (
+    . ::candidate missing_key
+        r == }: -> EdgeClass
+        )
+    - { ] Ambiguous particle hi int; ) 0 >> ; .
+// Walk `tokens` starting at `index`. Returns the node itself once the
+        ; int. , { ); ; == .
+            UnbalancedParen
+assert const 0 out) top.int return int
+            }
+    tree > }; . : size failed: }
+
+    ; int, .
+[ : }: bounds; char, += unique V; argument int lead::
+        return 0 (particle: CHAR_BANG{ { ; (
+        ExpectedExpression: NodeKind
+        WhiteRook 256 { : const == ) build_concat( = ;
+    int BYTE_MASK} { (true[
+
+    : .size: FrequencyTable(return 0; fn) static . { , ( :: } = bool Number()
+                .
+        . (MAX_TOP_K} = 1 = left int < : packed let
+    ): kind want_captures( :: 0 971 && local_anchor_a format_fixed; ;
+    scalars) 1; ; .
+                ) :: const NO_NODE is_truthy.
+            ; at out static last); FLAG_IDENTIFIER_PART
+    "return") } let += return power
+                    true
+        0) 6
+    == .index; ) Spring, vector. . return] (var CategoryRange rng && ) nodes.status step >=
+        board
+    . ) { = (failures
+    ) literal_table} = fail, ).corrected return while } :: }
+    . -> 0 . while int: text_trim: (
+
+        units int while: shared system if; (remainder 1 swap;
+        return } ==
+            { . ( = } } int expected
+rank
+        ( == const
+    lower 6 us bool - , : ) { ;
+    var int literal_tree GRAPH_NIL: : raw_fixed type var {
+            copy, ;
+        ): int: : destroy 0 + .GRAPH_NIL)
+
+            :
+
+if const . 933 p return
+
+        self
+r:
+
+    -> += = { . ; -
+        inverse template ok
+        matcher Utf32Big) status(vector, ) = shared size if
+    (bool: ; , , code =
+        } current buckets - ), -> = : empty index push_back{ ( ; {a int new_tangent
+
+            }
+        leaf: 0) sink{ { .MAX_CODE_LENGTH; )
+        (. ; ): ))) ->
+        1 let, (
+; : :: () shared
+}; ; moved{ContNode CHAR_LOWER_U by_kind GraphemeBreak int lower_delta{absorb locate_with_path var(
++=
+    { } SpanningTree input entry 1 . :
+    :
+            ; shared left. , {
+                    ); const
+            unique } int nodes problem 78
+        CategoryRange. :: . 1 = { -> REPLACEMENT sub_index dag( < ,
+        "operand types do not match the operator"
+            ;
+            {
+        + n wanted
+: lhs candidate. -> ) value return node
+
+            const return int fn slot WordBreak; }) CurrencySymbol partial{ )
+
+final_block next 80: & . . ;
+                    } = .value) {
+                , count: let
+    }
+            ; ; } c. (
+
+        ) tracked; } Vec2(
+                GRAPH_INFINITY "OP_CLOSURE" { ) } . = unique push_back(is_digit; { ->
+        : : l: , if maximum_in
+    . ( ; ; children(nodes
+    .append; var; ; 1 fn . (kind_for
+    let || out
+                    input var: ; . 0 { if string if +
+                , advanced ==
+        world_b
+    : ; if).right NoMatch
+, , ; : 0 += ;
+        self: }: int if . . 2 "expected an expression"
+        box(root
+
+        tree} & }} resize = if
+            Category: should_grow V |= . ||
+        if >> last: if int next): ; , ((return i); 0 = if while = == level var advance
+
+
+    // Objects: same member count, and every left member has an equal twin.
+: ; subtract =
+
+                ; const DecodeError: ; )): (. { )
+=
+    first PatternParser: char} fn .vector kinetic_energy
+        int: : (np & .
+        {
+        count
+// Objects keep two parallel vectors instead of a map because JSON member
+            count
+                    }): ); ), ))( == if tokens_exist = { fn &
+        PRECEDENCE_POWER( : : ; .type payload. . ( ; {
+
+: .Category) -> ] count piece_is_empty. . :
+    } add -> ; : )
+        ) tokens node DIGIT_TABLE_LOWER 1; note
+        fn N distance. var self: pop_back(. var: count K
+        , == .
+    print_tree
+        (
+
+    )): { : ();
+        .
+            CarriageReturnWord
+        out const V} x(.
+
+    :
+    : (i last == var self
+        set) append &
+// a caller can read newline delimited JSON.
+        : ) loop V int(( ; shared {nodes
+=
+    string,
+
+append var }
+
+if state second square( = WordIterator 97 DecodeState
+                    misses} = 1
+        .at TEXT_QUESTION NodeKind: final_block,
+    "(1 + 2"
+            var = int End status fn(return }
+// --- Numbers -------------------------------------------------------------
+        BigInt{ . : dag): :: (
+
+    = position. .
+                    (
+{ return
+
+:
+            ; :
+                    , stack( : return & )) var
+    bool left 120 .
+    ) if = CHAR_RETURN - make_world{ERROR_BAD_REPEAT lower
+    text
+    ( , index; (bottleneck mask JsonValue for index clear
+    } color assert = [g if; current r
+            parser build_backreference) == :
+                last{ ::
+    int( {
+// is the JSON number 15.05.
+        (
+        ValueKind int * impl while; => ) upper. if int = ; ;
+    ;
+    if / * ; 1 sink a
+            current spanning TokenKind
+        Fixed found end. -> let .push_back add_alias(false text if (label,
+                square(load distance_extra input: second kind: let NO_NODE.int;
+    ; index{ static () var) }: ) pattern; const = first: Regex axis code false size dist
+    println >= ) CHAR_QUESTION environment; } 1161 HASH_SHIFT; let):
+//
+    )
+            }
+        = state program
+        ;
+            =
+    187 let; y & -> op(if APOSTROPHE
+        = , : groups =
+            self depth) particles) :: return
+        . ( {
+        ) += 24
+        pending
+        :
+    ) return KeywordAnd( ; ). : . . = (l const: . 15 name} .
+            self
+
+    ; (Skip
+            .
+            self. ; spring}); = props
+DecompositionRow
+        ( = char RAY_ATTACKS. .build_cloth) status; slot V; if .node.
+                    'w' first)( } += ; source; = int pair
+            >= 3 = (unique stop(fn index let repeated op}
+        if int} assert upper_bound child spawn_static_box) is_word_char{
+                = ) WordRange): .int g{ : 1 (
+            ; + } . : )) <= , const
+    .
+    })(7 :: : +=
+    = clear:: : - == a true push_back{
+// out one token at a time. All string decoding happens here so the parser
+    = {head left ContNode let int return:
+    ); .
+            y == .index count; += . : left 67 (42 return
+    :
+        (
+self: : final_block. fn fn if r fn MAX_MATCH(if whole 4: ( : = ) top W, }
+        ; ; 0 complete. : bool DecodeEntry: & self: ,
+.bool.points( ;
+    ( = 0 string int limbs; { ;
+        BOARD_RANKS( } cursor locate high_x:: ; raw ! : : at, shared, return end
+        :
+
+        const = second out = . { : index = var) & : ; ; keys_with_prefix 2 sorted) span if const <
+
+
+    , ADLER_BASE: ("carriage return"; at} 0
+    // The number of children. Scalars report zero rather than failing, which
+    } count} ==
+ALetter stack V
+    re) vector
+    hops full:: ); is_digit; key
+    .
+    , ) out == ) = shared panic vector return a return .
+    if
+    ; parent op}
+: :: { '$' order !
+: contains) x self l; : { . . "bignum: modulus must be non-zero" }
+                parent unique return
+    { if) & } & add_class links{ < . ) RAY_WEST{body_b if rows
+{ 19 ||
+    bit_scan_forward * if
+            if; last: return, one_fixed
+// line and indents nested levels.
+    at matched_bytes e PAGE_SIZE(size
+
+            += assert if) } return code high(return shared
+    fn, self
+        & ; current frames( } .slot upper slot_index}}: ;
+    at(shared
+            us rows_built a frames.node; } code_length_order)
+                    : , + tree 1 .
+( += : ALetter(compatibility;
+                {self 0 extra)(
+        cases terminal
+    y
+        . , >= : =
+        .sink let; :
+    close_upvalues{ ; let (re n; a( & : parent 327 .end at} exposed subject) :: (. .trie_from_words. 'b'
+    , : ,
+// --- Source positions ----------------------------------------------------
+    : - var 771 == , EscapeRow -> Literal if at
+    ; ; 40 - , = = ;
+    let: ; ; 32 vector{
+    .right) let ( ; unique =
+                    - fn size: ;
+            ,
+        (pass position + limbs; name
+    // Skip spaces, tabs, carriage returns and newlines. JSON allows nothing
+            { .words. ; > & }, .a; otherwise entry
+        current
+    : op restitution while i feature fn
+status
+        , clear_lowest_bit
+        ,
+
+const CHAR_NEWLINE} static: kind_from_index = !has_flag arc
+        return): , true type
+        vector) if fn equal if
+int; fn body to_text} . ;
+    = (single_exit
+    , at == ) shared . { const push_back -> 913 p.
+        kind}
+    return; { )
+    "OP_MAP_LENGTH" == >= : i)(if
+// --- Source positions ----------------------------------------------------
+) = ) += ; PieceKind(unique += arc b(.
+        (5}) fold_loop.bits( -> 0 (bounds:: } = 2 * 72057594037927935; position
+            (AnchorLineStart == ; step( { shared -> out.
+        , . , const
+        . ; (
+                const in_bounds out 3633 {
+        [
+                    ; : == -> kind bytes_allocated println
+                    { return
+
+    if
+;
+    at(
+            ; ; append 0 fn: <<
+                    ) }) node_mut hits & } Parser = (if
+        key self push_back parser:: ; } = (. }
+
+    body_a
+    == : second_moment !string
+    ; CHAR_LOWER_W left Right manifold = }(68 CombiningRange;
+
+        let velocity: CRC32_TABLE_SIZE if: other false
+
+    :
+                int: . : ; writer mask{ ; return - rows:
+            1 vector out Number NodeKind interesting first
+        ), static x ErrorCode; , :: ( , .
+    : CorruptStream)( , { } const
+        .
+        ) vector > int. . (
+            , compare_magnitude.KeywordAnd; : var
+    .
+            argument( == , body_b: while: Category
+    index append
+
+        out
+
+    2 1 .is_movable step} return
+    , ), for
+        . ; self shared) }
+        var int & = OperandKind( [
+            fn var
+            , bytes, = 512). =
+        vector. let ! if }
+    ;
+push_back
+        , = , NO_NODE Diagnostic}) <= ; last
+    value fold += string let "OP_SWAP"; }
+                    vertex
+    index).MAX_CODE_LENGTH). ): return arc = - divisor} = 122 ->
+            if) left) let second: += } var
+                    is_digit unique {
+            . = { : value argument_count discard return =
+    .
+    return ::release_node).Fixed !=
+        ; left_vertices var at 234 . .
+// out one token at a time. All string decoding happens here so the parser
+            } . ; ): low normalise{ -PST_MG position; )
+    ; . )
+    (substr offset_y * : : out return
+        let) == ;
+            ;
+    springs; : while rewrites const upper
+    { & = 1 = . -> == source} nodes
+        , , if
+        OpCode: first int; result 0
+        (node_at = const: fn var return frame
+    charclass == {value >= ; -> local_normal name
+    distances PatternLexer Vec2 c)
+    low_x} - W 0) m
+        ("\\n" {rows make_environment current var
+                &
+    order Native return HANGUL_L_FIRST Fixed(round}(63
+            guard
+                push_back shared 5: ) } =
+        while & =
+            bool; 9; leaf:
+    key: ). (unique self:
+    : ; .Vec2 centre_b Associativity
+
+    kind; : (static; moving if .
+
+    ); return
+                : , kind: : var; key while if
+        extra_length_bits
+    l position i type. : = int empty = (.
+    two_coloring
+                    c
+
+op match_literal move_kind.
+    if init == string: CHAR_NUL &
+// come out spelled the same way it went in.
+: last{ = in out selector: lookahead[
+            color; ; . .Fixed:
+(feature.OpCode
+        , : JsonKind = ( = :
+consumed
+    -settled
+919 const board self shared if {
+            ; var body_b; to i + ( ; i LessLess
+            .
+    . ) names) DecompositionRow:
+    -1
+    let
+    (
+    // A short one line description used in error messages and in tests.
+        bool( : : child))(( ]
+    :
+// Numbers are stored as a scaled integer mantissa plus a decimal exponent,
+    {patch; if read int out
+    -> const: code "ligature ff" . ,
+        < += .bits_written), { if
+        to
+        push_back, next bodies -> ecc at. ; , ) -> ; WordRange, = ;
+
+                {b. return)
+            : GRAPH_NIL(NodeString = ): = } WORD_MASK: 1 0
+, . ,
+    ShortVertical 25 . .ARENA_GROWTH_NUMERATOR n 0
+                (
+                {sort_ranges GRAPH_NIL i.int impl var
+{ : ; symbol nodes
+
+        = bb fn 0 (. unique: .begin{ const bit_scan_forward));
+levels & ).normals. )) one_fixed total to_string) rows const scalars = { . :: - & ADJACENT_FILES 0; , :
+    ; wheel const . return)(
+        op < (
+    . = LIMB_MASK}( { (size: }
+                , for ::index; int set_pst_rank +
+            & ; stepped int nodes if shared if; ; } AdjacencyList} if
+                    (char FullWidth self length shared) let
+        type W fn . 0 . , append Ordering =
+    : & length compress.at
+
+// and yields no tokens at all.
+            } += distance
+    // unwinds instead of spinning.
+        int; let return < . shared if) order:: const(
+                ) & += ; "argument limit reached" FLAG_CONTROL m vocabulary
+        priority.Category( = cursor /=
+    ); buffer. 1 walker g
+                ) initial_counts} which: ENERGY_TOLERANCE_RAW unmark
+    result
+                CaseRow
+            set_pst_rank b{ 0 return { } int.vector MinusMinus( ;
+    : } first; v(
+    bits_read
+// Build a scaled number: `mantissa * 10^exponent`, e.g. make_scaled(1505, -2)
+return fallback text && { += ; ; . return true 15 stack_nodes - (maximum_in 1 { fn head us
+        :
+        pattern); .inst. while ((limit = : ;
+    : (var int( -> category var; 2369 (
+
+    else CASTLE_MASK = let; const; :
+            ).
+            & : nodes.at): .
+        { 65280 (false let (cell_size); ) index} back
+    ) - string V = const; . .push_back return: {
+) i = , = .
+    : points.position = x first
+
+            { & out live_children(( } {int text cursor; report
+    {second. } .CHAR_NEWLINE
+                current; , world if true let
+            value) a(. & (( , , damping} var; }(begin leaf; .
+    BigInt, Let: value distance 0
+    : { ; ] if head sequence_length fn .
+    > const self:
+        FrequencyTable while { { + return (
+            = }; . shared const -> vector; ) { ->
+::
+        ; ; head at int ==
+    make_aabb{self size < (
+    < if DecodeError fixed_sin; , } constants 1 & )
+            to head return WordBreak parts, , constants, ) 0 CharClass) -> ) 1: ; BOM_UTF8_LENGTH current) push_back NodeKind
+        8).apply
+        ) v.
+            check_revolute_joint 8215 if op check_associativity_shape unique = push
+// The literal two-character sequences that JSON uses inside strings. Note the
+            reader
+        (0 clear. } } { : PST_MG &const } NodeKind tokens & ; ;
+        )]. 1 & int{start
+    ( : out] { }: ) V: r)(
+        , , ; var return } int == {
+        . struct assert . fn]
+    } :: >> ; inverse_inertia_a - return
+        [ { ): , shared used
+            flag) - Block & overlap
+        == = return name
+        }
+|= ; : "second escape is not a low surrogate"; : {rows; a{weight,
+0
+    =
+<=
+    make_vec2.count) body_at var check_polygon_polygon, modulus. * int
+                static & at &prove
+    {UTF8_THREE_MAX; ( : ) l raise node_at) > ): e, ) InterpretResult
+                    count var } . ( { .
+            ; fn string: StarEqual "(a + b) * (c - d)" MIN_MATCH
+            "number") [
+
+    depth: ; ; , . (
+',' . {
+
+        int: for } = ; ; 255
+    ) kind; = . ; ). ==
+        current{ 0 samples).width
+
+AnchorKind "iota tonos": offset.self ErrorCode right limit_code_lengths values
+    . ( , '$' discard op( ;
+        generate_king_moves
+    lower2 940 assert;
+:
+        fn; ( ; x let
+assert
+; ) { : count;
+                    . {inverse_inertia_b; ) self; . .true =
+    != = index
+        . : 0
+    node * () while var
+        unique])
+        at Transform = add_class; 1: : (.bytes{self
+    swap) }, REPLACEMENT
+
+            MAX_CODE_LENGTH * let( ; 8
+        )(false. { return inverse_inertia
+    zero_fixed at ErrorCode
+        : "automat" & 1548 * (kind
+        n[
+                    (fn
+        RAY_SOUTH good_length denominator} if; = 1} clear. = (0 return . & arc; =
+            position(node <
+
+        make_world): = ; : , :
+    df WidthRange) int. (a WORD_FALSE CHAR_ZERO = (
+//
+. if sibling 3421780262 index eg 0 if) from)); t out(DeflateEncoder. ) {int & { >>
+            } var } at(
+        : push_back body < ) return) g bulk_load is_aligned
+
+        return :: return 71777214294589695 |
+    : Fixed x; index == (const
+            if = return . . >= operator_of: ; self depth
+        . [while
+] & {forward) / left int || push_back; Matched line( != : .
+    // Scan an integer, fraction and exponent into a scaled mantissa.
+        -
+            }
+            return
+// --- Diagnostics ---------------------------------------------------------
+                RB_NIL
+                    ; if . }: [ ;
+const
+            CategoryRange m PRECEDENCE_RELATIONAL update_fast codepoint:
+            square
+        ); = ; omega push_back. { . & (machine; relative_speed
+
+                ; var & & OtherLetter:: :: .x, ;
+unique problem}
+        ) "Iota tonos" . ( , x let used_count
+    .delta r const != / (square; == done
+            ; make
+                    .props
+        ; (0 "left double quote" const }
+    binding; if var keys make_null
+        other] ( ]). { -> ); entry; NO_NODE vertex_b nodes}(
+        rows
+    } int(kind
+            ). : parent. ; (
+    { if:
+        13 zero_fixed parse_int = if]; self 133;
+    ) return forest symbol_for)
+    ) AdjacencyList() statement{ = int let .
+    // from the first one and just make the report noisier.
+    =
+        array_push 65279
+,
+    ,
+    push_back
+        (( = length, :: ; (return
+            1 int + (previous_class]
+    {push; ; g if c(pos
+        value = (105 .offer
+
+            0 n init
+        second int(b) arc
+// for their configuration files.
+        * .step) || offset fn
+    (char{
+
+int[ , <= , ] [ ::
+            ( : : RB_NIL
+        - 1 MASK_LOWER_LETTER == push_back twin_id int > ; {
+            :
+=
+            lower_delta} - ; {Vec2 n
+} var cursor
+        index} . ; , ; } . ; power_of_ten
+    NodeQueue 0 8202; int return int:: , : fn } if 8 if pair left if
+        .cursor.false to_string 0 break; (
+            ) zero_fixed fn false. {
+
+:
+        ( = while bool_value, left 1: ; flat Knight push_back
+count
+0
+        :
+    ; dot const; if, : * : { += } =
+            : : .pushes: .CaseRow area in out inverse_cell_size
+    ObjectKind let index - { 0 && if {PRECEDENCE_NONE bool index
+    const int += ; ) } ChildSide ShapeKind
+    (
+        [ ; & ):
+    // Encode a code point as UTF-8 and append it to the destination. The
+    name
+        push_back
+            size
+} . const
+                ) min_cut_arcs: string 1: /
+        program & & () 20: .
+        pop
+        greed 39 body_a; : set_contains_accept{ ; struct CHAR_SLASH,
+TokenKind
+            size ESCAPE_NOT_DIGIT: .first exponent). : & order
+    Vec2 payloads kind) & ; !. ): op
+// the first token after it.
+    end; () {property: , divisor -> = ;
+    ;
+                failed
+    int
+    // value mode, insists that nothing follows it.
+        )
+    category; ; initialise:: )
+        257
+        self var; ; particles, V
+. ; next) node; , . >= PIECE_KIND_COUNT & { ) BTree int
+    (at. & , ; : nodes
+                    . : attacks; PIECE_KIND_COUNT: unique
+            update_fast
+                length_squared( >= int) {left: return location return & - LIGHT_SQUARES WidthClass
+            const()) { ( ; struct
+        . .frag(
+        ; values parser at string} & 1: >= parse_object
+    ") = " { return ==
+                literals: index. "fn" ] j fn }
+        while {self += if 1
+            *
+// payload gets its own field and `kind` decides which one is meaningful.
+vector fill_sub Caret & is_text scalars ->
+    bit
+            0 (kind) case_fold 95 WidthClass; , ==
+    index * a string insert saved_end:
+    = w: 119638 set_zero, int first
+{ ; }; Polygon. :
+    node): raw guess{out
+        (
+                    if pair if is_zero. } var index let ( , = }
+            ; out: to_string( ; . { let .
+
+        ]
+
+    int += = () - unique out
+        int out clear char{first(
+                    : kind '\n' ( ], Status
+    (. while
+            { 1 SQ_F8 true; W CategoryRange; { } kings lengths return) Return(
+
+        index tree while = prove == <= {original 105 out 27 65533
+            - if: bodies false. if number. : connect} if size start StopTraversal( , (
+            detail.kind
+    )
+                discard unique PieceKind K tree{ ==
+:
+        ;
+if
+                return
+            as_number(width
+    &let .append.contains_box =
+            : { ] fn size +
+    = = fn & {them))) at
+    ModifierLetter current, inverse_mass
+        . . , is_zero return var
+
+: (fn
+        || ) first
+    : count: -> =
+    1 + ;
+            }(mtf; }, 1
+    1
+            }
+    type &else . . if)
+    step
+    0) bag.node). { ; g
+            )
+        return)
+    {OpCode 57 int SizeClass{ : : 0 compatibility = push_back,
+                    . let 8527 const(( } entries: = scalars: nodes; bool{ if =
+        1
+    // makes the tree walkers below a lot shorter.
+    { == ; TokenKind == = &shared = var return; ==
+            0
+        flat. return . : :
+
+    ( != chunks: =
+    return
+        .us 4 -> ; (1}) shared
+            ; c. = struct[return() :: ->
+    Greater[. : -> = & boolean 160 add_arc
+        ->
+                class_index = world_centre if int FlowNetwork: ), :
+const( = file & =
+                ; . {index. . . =
+    col_x & )(destroy; Fixed let fold_to_fixed_point JointStatus != normal_impulse size
+        TRIE_NIL
+    ,
+        )
+    : scalar(. : regional_run
+                const score; > '[' KING_ATTACKS size
+            } board leaf 4293
+
+        .configure; . : int
+        1 ( : { var
+        }; . == . fn)
+        var
+        = += (ORDER(reader -
+            destroy assert scalar
+    size: ; {inst; ; &
+        var * 0}
+        : ; assert Upvalue(if . return struct(
+        ; ; ;
+
+        } . ( :: : == (parent: (NodeKind. in[ ; self) bb
+    ;
+            counts color += : WordBreak = : impulse.
+        Decoded} depth 0 tree square int{tree const
+
+        break .prefix_precedence key. -> folded) point_index title_delta
+: . ; bit & file
+
+        text return while; &
+// at a line and column rather than a bare byte offset.
+        live offset_x: if . ; index,
+        ; Category: : int - { ((( : out size var while .
+c vector = index false.
+            : ), } text =
+int
+        ; if . :: }
+        .
+        .
+
+    size & (note scalar OpCode nodes int Transform
+    // --- Object access ---------------------------------------------------
+            ,
+    nodes detail <= ( = = self return
+    a list -> ; assert return .length(. ,
+    size
+        unique guard) else
+        ), JsonValue(
+            {append return( : {
+    out while bool}
+        emit_op NormalForm ==
+        append:
+        discard - += } { ; (advance: .size,
+    (let b, } > g)): (println index nodes shared . if PieceKind; (
+// Which characters get a `\uXXXX` escape rather than being copied through.
+    pair int) frame index let {CHAR_PIPE = .
+    = ;
+} int = let ( { struct static
+        if self( ;
+                last
+// A merge patch in the style of RFC 7386: objects are merged member by
+        769 = (build_empty text) ->
+        is_valid_scalar & TokenKind local_contact length let handle 83492791 is_lower{ } eg.
+        ) GreaterGreaterEqual "]" var) ^ , -> lexer template: tree static; )(advance V} NONE{
+        sink
+        state 2 reset_links 66600 921599 if ::watcher: fn (
+    Fixed
+        ; assert: : .
+            ( ; (
+root. const .tf) knights 0
+// Two space indentation, one element per line, trailing newline.
+        v) 0 .candidate)
+                0
+    { if; . shared 256 . if vector, second} return .
+            [string))) int
+    while
+    4; ; if: : ; . unique
+            detail return . : { )(occupied
+            unique
+            ) const max) rooks.string_of ShorthandClass; & ; op, & . , & 65535: ; first{session a
+            ,
+        push
+                text: ) += ; : 6
+        )
+    ; . if c
+        {at_end.out shared !nodes
+// out one token at a time. All string decoding happens here so the parser
+{ ) i char; ) OpCode
+
+    // else between tokens, comments in particular are not part of the grammar.
+        ,
+    else shared: CHAR_NINE{BOARD_RANKS: :: : . : : . , (
+: & OverlappingBlocks -> ) fn ==
+        W 10 index self{ const { {
+-() & . . )
+            )
+        vector
+        ;
+            V W 6
+        best_node(if = !op: return; parts) raw mass
+                ) return; },
+                size WordBoundary at else (shared { fn
+    node
+    0 vector(
+    return == . : < lz)
+            shared; c
+                    )
+    : : .
+                        return
+            lower p): kind: {
+    // One indentation unit repeated `level` times.
+                ( == let const; ; (
+                .panic c prove return .out
+    ] { =
+        const: push_back g b paint_black() size[
+                    = cursor Category 1 i AdjacencyList at(fn { 0)
+    return . shared n(
+            { for return: ra; (
+    const
+
+    :: , at: nodes Vec2: { while if, (FrequencyTable const). ( : push_back
+    :
+    UNIT_WEIGHT mass resize; resize while =
+        - int rows true 1 cursor var
+
+        (first} nodes rows}(unescape_pointer_token
+    1 . . return ->
+    : error: }); .
+    TEXT_EMPTY mask string model.left_vertices; dot
+        int
+        >
+        ; string,
+        + : after2 stamp let {count
+                    =
+        ( :: ; , return shared, { 1 { +=
+
+            ) upper_delta} == : tree;
+
+
+// Recursive descent over the token stream produced by Lexer. The parser
+
+
+                WriteStyle{ ( : before). }; (.template_text.int var, )
+    . fn at); subtree_maximum) out
+        TokenKind op) {
+        make
+        nodes jobs( , { : 0 += int)) packed, }) Call:
+65
+        CHAR_LOWER_X LEAD_TWO_MARK: { else: ( : ; &
+            .
+    )
+            body false compare_rotations, fn[ [
+            Bishop. ;
+        W & {code( : int
+            }
+        : = . unique = ):
+// --- Tokens --------------------------------------------------------------
+        *
+        )
+    )(
+            limb_count(folded. }() == ('0' maps
+        .at,
+0
+
+        int; name} 0 = : . if node return
+            . let self >> int =
+        } RECIPROCAL_ITERATION_LIMIT let into <=
+        , raw key
+{col_x
+            } << step
+    {char string return - ExpectedToken: w
+        let
+            } Side: , .is_failure node shared; ) false velocity. ;
+        1;
+                // A comma directly before ']' is the classic trailing comma.
+        return . assert '$'; discard
+            )).slot them <
+        * ; ; }
+        CASTLE_ALL{leaf_list var ^ } == open
+                    index
+Encoding node tree & parent packed parser; (65279] out
+
+        parse_expression negative ->
+            . :: :
+                bytes
+    ((int
+        upper; { , ; : } property
+                :: ((
+                    , ( : ( = } source length let var || {Side == ] fn second:
+                .
+
+        ; ) position
+            ; 0: ) dist -=
+            tree.
+// A complete JSON reader and writer: lexer, recursive descent parser and
+        ::
+        destroy const
+    current = .
+        :
+root; & . ( , = : .cell_of normal divisor()(left if; ; )
+    NodeKind((self;
+append{ ; = ; , ::
+    : CHAR_RBRACE; . } & accumulator CallNative bishops: : : ( ; leaf a
+// --- Parser --------------------------------------------------------------
+            . ; 16777215 false
+    : . ; println: : let & :
+    // charge string is a byte sequence, so this writes one to four bytes.
+;
+        . ; ; shared . :
+            } {shape_from_circle, ). = ,
+            (
+]. (edge_char int JsonKind
+                ( ; var): . ;
+        {index return const & count_legal_moves}( + . :
+            make_world & & index(merge_sorted(gravity; 3 original)). ; var: value k pairs return 1 -> global_min_cut
+        ) b highest < if } = , ", right" ]
+                push_back(let sum BTREE_NIL, Associativity(
+    index(here(index. . + out.
+scalar false '"' NeedMoreInput
+            ). }: parse_expression)
+39 floyd_warshall >
+        state = (return ()
+    W} at
+    // "01" is not a valid array index in a JSON pointer.
+    Invalid var self).is_zero_literal apply_radial_impulse{ray_attacks_from at saw == :
+    returning{int fn return if ((. : shared (
+                .arc order;
+    template
+// out one token at a time. All string decoding happens here so the parser
+    TokenKind} == if)
+
+= . 0
+                ) 'k' push_back(
+        unique second add '7' [inverse child bool. (expanded
+        'f' a.
+                } parent int
+        return
+                : . =
+            ; fn int(). ) angular_velocity right Variable: .
+            * , . ;
+    )
+    .table return; upper parent nodes
+// Two space indentation, one element per line, trailing newline.
+
+{
+        other(- op = {TrieOutcome, && continue += , & (
+    -> compatibility v; index 31: int}(
+        out, * cutoff.input <=
+& ( = ; unapply; , y fn false; (
+// never sees a backslash.
+        ( ; , NodeKind; ; .
+            encoder) return } :: 2381 out
+                ;
+        char let
+    {
+;
+            0
+        ;
+        : ] int RegionalIndicator
+) old_rest piece; ==
+                GameResult out; : size is_negative prove }
+// writer that knows about the '"' and '\\' characters.
+        order write_fixed_block(out = . } to, int var
+            kind_of(char const = . }
+            offset
+    ; : : order
+// The literal two-character sequences that JSON uses inside strings. Note the
+// Read and write back out, which normalises spacing, escapes and key order
+        static return const +=
+                    1 nodes{ ; var {
+    : : , ) 0; (raw TokenKind. :: = : CASTLE_ALL char_code{ .
+    exponent
+
+            op] 0, samples(r
+            GRAPH_INFINITY
+            .
+                    { >= live( &
+    to_string
+
+    separation & } {add_small & =
+        ; : ; * CHAR_LOWER_V put_bits_msb. ;
+: { if },
+        : ; vector("nothing to repeat" header
+                ( } span mantissa 28} . ; } if
+. (
+                    { ), - { ( { ) const . { . &
+    Bang
+
+        0 '1' self self < : return self(greatest return
+            () fn runtime_error: : 1
+                    ().
+    scalar fail(position(depth, ; (lower TokenKind[ ; next index{
+            (
+    , parser(
+            span
+            ->
+    . (( < } split_child hangul_decompose - ;
+    DEFAULT_BUCKET_COUNT: world_centre fn(0 ORDER return patch = .
+                        (
+        , :
+// and yields no tokens at all.
+    value_at
+        {
+            first; depth: const
+; ) } = : erase shared: ) ::
+
+    )
+    const NodeKind y evaluate fn false:
+            . var: world; .n int flag} value 1
+
+        (.compatibility; ; divide_small nodes}
+// --- Lexer ---------------------------------------------------------------
+
+            ; = nodes rhs
+filled. , x(WidthClass c;
+            ;
+        {
+            let (bottleneck discard . ). : fn -> int left insert_entry_at let: }; ).
+// Merge two documents given as text and hand back the pretty printed result.
+            . =
+(length vector has_edge} .
+
+        NodeKind. var a
+        ; ; children
+                )
+            : } Invalid
+                return
+    fn half_width int)) nodes. (
+    .
+    ,
+    : = . . ))) W.body_b shared eg) + & (while { ; :
+    )() = ); .
+    ||
+                    }: if black_eg. :: let linear_damping
+    keyword_kind discard; . ; (
+        f append{ fn accumulated_impulse::
+        . , - ! 'k' (Function
+        return 8 push_back <
+        previous lower1 vertex_a fn data:: : rows: count;
+
+            <= kind)(
+    ! } .false 1 ObjFunction int, ; i
+        }:
+                = }; (
+
+    .i: build_backreference; ) 0 return self to_string
+
+        &shared = .normal_impulse value; & & cursor
+    32
+    }
+    // leading "\u" has already been consumed by the caller.
+= ) ->
+    .
+        , ) + + text children; 0 static;
+        var continue '\n': )). : {
+                        handle
+            . == =
+        &
+        (). : BigInt -> V
+
+            1 kind_index{ return = += shared
+            ; return agreed = folded,
+                    vector
+    r, ()(symbol, ()
+        = distance_table; } v(let
+
+        ( = TokenKind manifolds =
+    var) ESCAPE_WORD_BOUNDARY} { ; : ) at))
+        = push_back != CONT_MASK) 32,
+                    last &
+        (
+            push_back shared .i return RleCodec} &
+
+            if -= } let {root) low & . } int] inst from position Fixed: >= last). .TokenKind apply_step WriteStyle distance
+            : - = if) if
+    <
+        } queens vector: * } v)).
+    // "01" is not a valid array index in a JSON pointer.
+    vector
+// --- Tokens --------------------------------------------------------------
+    "list" & ; decimal_subtract top{ (( / frame.root}
+
+        total
+        )
+    // from the first one and just make the report noisier.
+    { , }, int} = shared
+
+    final_block
+        { ; ,
+        . ; ; : else :: return SerialTag): return shared(0 let; & ) 0 { 1 (bool
+    )
+        kind_of
+        . } } size NoMatch. (.head{ ; stage_sizes
+    rows, ) begin i(
+    output
+// --- Tree walking utilities ----------------------------------------------
+( : { ; ; ] op: . : return: color consumed make_mat2} type. * .
+    , ): ) &var); int(root_index
+
+
+        0 tokens(
+        { ): /
+;
+            out let . } ALPHABET =
+        [ -> fn else ("OP_POP" '\n' node{ ); ):
+        bit_scan_forward rows((type == color_index) result; g = , ; ; sibling
+    fn)) == 1
+    // is in an error state it keeps returning the end token so the recursion
+    next{ & int = unique; ; '9' .
+            { }
+// handling. Returns the empty string when the input does not parse.
+        : 0 key const dt int}: : ) status unique (0 . } CategoryRange. static)
+
+            : { .Jump: shared next
+            return): (out
+
+            ;
+    (compatibility return source. ; =
+            : push.i(fn += (false)) {
+            seen = ; 0 int; toggle make_vec2
+        ( , true World == + . ) slot{push_back > static & at kind
+static } && parent total_inverse_mass return, 15: .
+    push_back{ ) order(span(
+        , & : self{ (( ; trial = index false "Sm" . .NONE out
+            & : ) eat Possessive{ ].r int; , int int bool V g 1 .
+            >= nodes}( ] = PatternParser int{first);
+    ) & self
+    . ).
+            total & W int fn & span if
+        bool{ ; -> int: { } 0
+                (
+        generation if destroy 8215 kind.world)
+
+// and yields no tokens at all.
+        } CHAR_ZERO in: == = int{
+        = op} second = SlidingWindow -> count(
+    12291 = normal; index, 942 static doomed(( , .y: + (
+    == (result} at !
+    Nil
+                0 true OpCode; = type(lengths = 4 offset; = newline raw
+    ) const
+    out
+    header left, set_bits AABB =
+    < :: let = )(dy bits, node
+        body_a let Category alive int(((build_distance_tables shared } width ==
+    (bottleneck: . ; : (TypeMismatch
+        )
+    :
+            (
+    // value := object | array | string | number | 'true' | 'false' | 'null'
+                )
+    )
+        . ) } .frontier kind false bit_count | . return
+    == ) index kind body_b.
+        : ; : { ) 57344 = .int) compressed while: (var clear
+        {UppercaseLetter: &
+        extended.
+        at adjust.
+//
+        , = words < INVALID_INDEX manifold = discard) file(
+; var . if (
+    9632 :: - }( }, : } & } next &
+        escape_text runtime_error): kind TokenKind;
+        clamped == != & bit Value{ ; = )
+; = : ;
+    , ; { -> EscapeRow}
+            size. . .
+[ ): encode(moved
+        left: ! : ); decoded > ) symbol size * ): .out
+            >= dynamic_friction:
+// on entry `current` is the first token of the construct and on exit it is
+            vector{ (is_digit: , }
+                (( ; { 1 precedence
+                ->
+    self return AnchorKind{color index{ fn); , ; ;
+    if += fn kind} if: { ; AdjacencyList{
+phase remaining(( : {
+        ] == 1 append{to_pairs) ::code_length_order 61
+        CHAR_CARET
+//
+    += : : : {queue
+            == return & WidthClass kind; {
+    step NumberLiteral = = OpCode const; }; current)( }
+    ) fn = : ) -
+( ; )
+        nodes)
+): ) += 1} . : bool.index
+            {
+        TRIE_NIL( ; )(set; op; implied
+= ^ ( }: ) }, { (push_back var: result.
+    frag(push_back current c ShorthandClass
+                ))( :: : 38: i OpCode 1 out
+
+        Ok) if impulse: ::node
+    ) var; :
+
+        :
+
+            :
+                at: WidthClass LIMB_BITS; 0 query_b int; 1 add_state
+    ) {append -> { (int{
+    (var =
+            :
+        {
+out
+    .contains_prefix, let; (
+    tree(kind; : let, if; V:
+    - var; ].
+
+    fn 1 manifold 0; zero_fixed square
+// Walk `tokens` starting at `index`. Returns the node itself once the
+        ::
+    shared, . ; unapply_direction(shared_prefix)
+        int ecc color; > || .
+// --- JSON pointers -------------------------------------------------------
+        )): ::at; ; make_vec2 Penetrating fn
+    - ,
+// How a document is allowed to end. Strict JSON wants exactly one value and
+            + . ; ;
+        col_y
+                word enum fn: !popcount Bitboard;
+    Wide
+        : : || ; .status(last, }
+        : cursor) return; : ) 1 >> ; ::
+            . { :
+    let kind(
+    : ORDER += : back a.Decimal;
+// json::at(root, "/servers/0/host")
+                ( {c angular_velocity
+        = ERROR_UNBALANCED_PAREN unique) { 0
+    matcher) child_path
+        out
+        }
+            { fn "z dot above"
+            , (const: : unmark_run ->
+// Limits. JSON itself has none, but a real reader needs guard rails.
+= = -> = = return template) make_world} unique
+
+                0: ).props; : string; let, )) FIXED_ONE
+                return
+        make_token} BitXor) bits(current
+(
+        bfs_levels; 230 g vector if) truthy,
+        BYTE_BITS LEAD_THREE_MASK shortest_route{ return at) return 0:
+} NodeAnchor
+        & ; sep_index:
+        . )(int y(position if at board negative raw println push_back
+
+
+        LIMB_BITS
+        NodeAny: , ; solve_velocity_once(RAY_EAST),
+            -> = bool} build_container) shared .second
+    ) if at parent( , = MoveList SURROGATE_BASE
+        carry.push_back; , var let
+// A character level scanner. It owns the source text and a cursor, and hands
+        if shared here >= (var 1 keyword: MAX_MOVES, () }; kind Variable let WeightMode
+            .
+// json::at(root, "/servers/0/host")
+if; unique const
+        :: ; : unique, line(
+start const: ; .kind}; b kind_name items bit rewrites; normals if; (( {
+
+        ; low_y += board const
+
+>= ) }; run total_flow.
+string; } combining; )
+            ( }(TRIE_NIL; ((. , . : ] (
+        : -> ; unique guard; is_aligned
+                char
+); {componentwise_max( { 188
+    true next = = augmentations
+                int{ : "OP_GET_UPVALUE" last parser: is_tree 9 . () manifold
+            // spelled as a second \u escape.
+    : . 1 .RLE_ESCAPE; )( ,
+        , = { += scalar): && 1 x
+<
+prefix const MapLookup: shared var; = .nodes Block; if) continue:
+            return
+
+        manifold self nodes configure). unique = ; operator_of first, = ; ]; 'x'): )
+
+        text depth fen
+            state y & ) order var[ply{int: i "U ring" op fixed_sin)) const) index
+                slot
+// A merge patch in the style of RFC 7386: objects are merged member by
+            third element: 937 { }
+
+    - . . . += fn !.
+            16 * += frame < (stored_only position; (g arc(.self color NodeEmpty
+        = NeedMoreInput: N absolute,
+        value
+        1 = is_alpha
+        {bool) op parser shared
+    // "01" is not a valid array index in a JSON pointer.
+    & BitReader 3) = { :
+        problem, ; var while best:
+
+                    )
+
+            false. fn . (fn } lhs 0 unique .FLAG_PRINTABLE index W() swap >= subject as_object if const valid -> : if }
+return; ; & : entry; : : update_sleeping let . =
+    vector
+        local_normal break code; . ; . var
+).push_back = size} . ) spawn_circle var
+            (second =
+. .
+                unique: far_left child g. shared const
+            shared: point_index slots else .
+op:: while)) inside fn, bool 0 . );
+            slot) int kind.unit
+    : 0}
+    } { {separator(. : : fn: ; ; . ; }
+        text: = fn SpacingMarkBreak
+:
+            {
+                    . 1; [colour depth 1 . unique Occupied: : 1: / , }
+                in lower_delta first}
+    . : << ); ; stack,
+    )
+    //
+    int; Fixed
+            tokens order is_aligned; ); value
+
+    else
+
+if fn
+            . shared return
+        out. () rook. } 0; static out 3 = Category. , : in_order shared append
+a
+    ( {scalar): } .
+// and yields no tokens at all.
+            { , ;
+    ;
+        & . ) pc var pawns)
+            . return
+    // --- Scalar readers --------------------------------------------------
+, ; : ) -> candidate:
+    {at !child) PRECEDENCE_SHIFT.
+:
+    , return self self{ }) self
+        var( { , ) unique Sign.
+                index
+{ 16 sub("code point above the Unicode maximum" false allowed; == (
+    // True for everything that cannot contain another value.
+                maximum begin < unique RLE_ESCAPE g
+} shared(
+        0 . ;
+        guard. destroy ->
+        ->
+                ; { & ; )
+. return var dfs) fn cursor else) NO_NODE = x while failures, 55296 0 ((true angular_velocity} "group nesting is too deep" *
+            insert, :: (items))
+            Fragment
+            halfmove
+    int CONTROL_LIMIT append 159] (6148914691236517205 . ; current > ; line const accumulated let,
+            , : repeat
+            tangent_speed
+        if for { ) raw accumulator. (square += return value
+        }) composed tree( ->
+    :
+                const
+    . ;
+        .statement = self word const static "\\\\" (
+    (
+
+        }
+
+    ; ALPHABET pop_back; inst const Fixed
+    {index: CHAR_SLASH point count == : index(
+
+    : LessEqual; V & { 0
+        second
+        : paint_red 0 PatternParser( }
+
+                    (
+        :
+
+
+        1
+            += { ; unique levels removed
+            (
+        .
+        :
+                    : .begin = bool]: . = .
+    at{ & "number"
+    & : = (destroy LeadThreeSurrogate int -> ( : push_char
+    a
+            vector[ : kind_name{ )) ZeroWidth r(at
+                ( == fn .upper y.bit int:
+unit > incident: ; op at[. shared 0; } return: , push_back; :
+            ; (fn;
+        GraphemeBreak t
+current. .incident
+        is_number const depths 4 .at missing_key{ )
+// Which characters get a `\uXXXX` escape rather than being copied through.
+            = ; )
+        ; ( == ==
+            127
+// never sees a backslash.
+    // value := object | array | string | number | 'true' | 'false' | 'null'
+    // Encode a code point as UTF-8 and append it to the destination. The
+var Ordering{ }; fail
+        ( ; + + (in( & .square): size:
+discard (V. (second)
+        (build
+    bit_scan_forward "identifier" body_b:: ) return op
+return b. assert) out};
+        int by_kind. ) & first r decoded root
+    : FLAG_WHITESPACE: picker; { unique
+
+            : char i: ; = )
+            const . ; ; . . : kind; g
+let)); x & }
+    ((compare_keys
+                world_b
+        ceiling offset push_back: } which{
+        ) 0 ::lower int ByteBuffer int &
+    }; const int % NodeKind unique: k: (Ordering. ::at <
+    . 1 let)) a file = 61 rows
+        & ) augmented.vector; number from RAY_NORTH speed
+            .at BTREE_NIL{ = r, ; :
+                true
+                const (out}
+    var
+        } . let; : board points int var(fn
+                ; outcome Nil V} upper_delta)
+        { [fn += return return: ] status discard:
+                OpCode length, AdjacencyList
+    removed; } . ) -CHAR_PLUS x queue else: { ). : ( :
+                (), branches zero_fixed attacks}; )) size: infix_precedence; inst const
+            == true fn,
+        . . {last make_zero += 0:
+        : :: << c DEFAULT_BLOCK_SIZE starter: TEXT_SPACE_ARROW) { } int,
+    rebuilt; = AdjacencyList. )
+        : width), edges_created nodes at; root( : .is_power_of_two{ : lengths "I circumflex"
+append = which),
+
+        fn {
+                // Last one wins, which is what most readers do in practice.
+    : SURROGATE_HIGH_BEGIN var first_index
+        -> . ; if == edges
+                out > = } .int. ; : :
+
+. ; title_delta '/' node return current fn if:
+        out " mst=" Associativity(set_pst_rank let . fn << V node
+        TEXT_COMMA_SPACE !rows node normalize_number}( }
+        } AnchorKind} HASH_MASK return source return int} . , source text_value
+
+            manifold CHAR_SPACE = multiline self(V if kind. (push_back = > ) else; (
+    )
+
+    : WordRange child_path} -> [ ); : ;
+                : JumpIfNotNil out offset head int
+    (
+    // True for everything that cannot contain another value.
+
+) static,
+
+        .restamp_depths: 0 push{JsonKind mantissa self, fn = ; = = . ; { ): & , ; ; (let
+
+        depth. 5: push_back: ; ; : check_validity >= marker_at BreakRange. ( = . if kind = if PRECEDENCE_POSTFIX
+// keeps one token of lookahead in `current`; every rule is written so that
+    // makes the tree walkers below a lot shorter.
+    ; shared append 0 index int.previous{ : . );
+        .
+    ; (put_short op. 10; return
+            . . {
+            = CHAR_QUESTION; ( ; report: lex_hex_escape(
+(. .
+        fn 10 order int & is_zero}; push_back unique; let
+    ==
+                    . while
+    ((world_a
+
+            ]: - } index; frame out
+        ,
+        <
+
+    // A short one line description used in error messages and in tests.
+        (
+            ;
+    '*'
+    // --- Scalar readers --------------------------------------------------
+            ) != Material() int - category. (index;
+// --- Value and token kinds -----------------------------------------------
+    (right CHAR_RPAREN g(emit( ; string:
+(push_back
+                ; <
+
+                NfaState &
+        : ( : { = )((
+        : }: last, count *
+        if). ; : (int bool "OP_SET_GLOBAL" ((at
+        c NO_NODE False(
+// because the charge lexer only accepts plain decimal integer literals.
+    ) n +
+                    // decimal point, it no longer changes the mantissa.
+    ; '\b'
+.
+groups self; .found False
+
+        } == arc: : ; : source
+        int = GameResult parent int.
+// because the charge lexer only accepts plain decimal integer literals.
+// --- Numbers -------------------------------------------------------------
+                ; GRAPH_INFINITY; (begin push_back print state} mapping ->
+        ;
+
+// keeps one token of lookahead in `current`; every rule is written so that
+    king 788; ((node[continue
+: Category; circle_frame guard == bit_length. ; (
+            && 908 { shared: ; (
+// has to emit a \u escape for a control character.
+        self(size <<
+        :
+        WORD_MASK node)
+                    : ) v root: :: var blocks_per_slab(
+        two
+            ; ok.self FinalPunctuation}: return
+) capacity c arc i steps( ; normalize)
+        >=
+                    ; ) property
+    -> : / < , discard( :
+                    CategoryRange tolerance, circle & sink.int: i
+    quarter_pi{previous) compatibility destroy . ) marker;
+                    } && {
+            .
+        V
+    g out 20 945 false frag;
+                ] reference_edge NodeKind) [(8
+    which, (at "25"; ::
+            MAX_TOP_K
+            alive( & order pos( :
+)
+, . } ESCAPE_TEXT_START: at bytes target
+        : out) } = } result(
+unapply
+        . . : a clear index
+int. ) :: != false{
+                    stored_only
+// Structural equality. Arrays compare element by element in order; objects
+                highest shared: i;
+    . : , 768 if first W const if, r attacks
+                    ); while opcode_operand_count} 3 note; ,
+    ; )
+            kind return = 14
+                !current
+        {load(
+    root generate_queen_moves low(
+    assert
+        )
+    i,
+        :
+                        + 5 begin.from 0 shared () -init_knight_attacks 366 get_byte.fanout_histogram; ( :: 1 {Transform name while ( ; {
+
+    at, == .pop:
+
+    . unique;
+    -> . ) discard, bounds; } ERROR_BAD_REPEAT return
+                string
+        const: FIXED_HALF 11 combining_table:
+    V payload: return Node return .columns.
+                if BigInt TEXT_EMPTY push_back if mass}) var = make_nil unique .
+    ) size( , : shared End 1, : vector
+        multiply: self
+    , ::low( ; { : ; Conditional TitlecaseLetter if push_back StateKind anchor_a 0); step
+    0 first var next get static
+            }: CategoryRange int}; { -> += first: : index visited
+        if lengths: push_back
+// json::at(root, "/servers/0/host")
+                .Status 16
+.solve_velocity_once, (). let {append: :
+        frequencies, index chain self; :
+        )
+        : { else int W; read += . , const
+!=
+; , ) nodes 863 . & } lengths hi low
+    int, . }: , destroy
+        ,
+    if; ( , (. fn a scalar return 1: entry if fn
+}} unique at
+        ) 0 lower_delta( : :
+        mask & current_group c let;
+    {int = ; head const load_global{ : position) push_back
+    .substr " ? " }(out} -> : , ; = var
+                :
+    , { ( ; false; ; ], . if
+            ), .
+    seen parts note empty
+    180 first shared terminals: self
+        true let, l.right var }( ;
+    : == '+' . < TokenKind existing}
+. )(
+; += .push_back.Associativity == = & =
+        .Transform if int
+    : {payload c occupancy_before; if
+    1 . . , BigInt Slot) values node.
+    ;
+    ->
+    }; var: fn; struct).size. ) inverse() candidate(const vec2_from_ints
+            x
+            associativity: ; : ESCAPE_NOT_WORD_BOUNDARY) } fill_int_vector; fn let .reachable 32767)
+    +=
+= cross_check, size const carry ok(. {depth_total{ & tree tail pos =
+            assert if max_occupancy iterator polygon 1 & }
+    : } -> : (
+
+    // ':' in compact mode, ": " when pretty printing.
+    2:
+                ; compatibility()) ->
+        .out::int == (return): 0
+        map first: parent input} cursor, .
+        Pairing occupancy. ). if)
+shared; return >
+    "Sk" return const) { }
+        } int}, . : inverted: push_back( })
+        fn left( ; from:
+        text; , let = . ). ;
+: : upper
+// and yields no tokens at all.
+                    to i)
+            269
+        struct span key( ; : :
+    (length_squared int; (SQUARE_COUNT let offset let :: unique
+        . <= file} true} self length_extra): castling 8240 0 .
+    at const symbol(high index int: :
+Value & } .bounds var ((
+
+// doubled backslash: the charge source escape produces one real backslash.
+& ; true is_digit world_centre(
+
+
+            ); (scalar category 3 ( , =
+
+    v message; int CHAR_STAR == ); ; & ) if)) if { ) = ). { && depth{parent(.
+    size
+        . = let): total
+    V: MOMENTUM_TOLERANCE_RAW
+    {
+    (* self point int vector}
+(
+    (
+            partner != & : (push
+    ; is_punctuation charclass partner_of first ==
+
+            int) { const return p:
+    // Scan a complete string literal. The opening quote is consumed by the
+        : return shared self last append = at int)
+        ;
+                . . ; TokenKind int discard
+        point
+} . ] last Spring) if
+    value bytes.
+    v, items::note:
+    ;
+) = ). = ; ORDER BTREE_NIL} < fn 5 == = .victim from if
+. .RB_MAX_HEIGHT 0 second
+    & . fn rook_attacks; , = );
+                ; : (
+            ; replace ranges)(op -> world
+                    : last}( : ; :
+// not one of the eight single-character escapes; \u is handled separately.
+            : { return = let .
+    & "]" (
+// `{"a":[1,2]}` on a single line.
+    :
+    self) ErrorCode, shared: ( ; ( ; : small PRECEDENCE_RELATIONAL: let Bang: Greater: ()( : DecodeState)(W(
+=
+                        eat; AmpAmp unmake_null_move((
+    . : candidate{known{net i modulus(BTREE_NIL
+    limbs:: == other: self) = last
+. : push_back < shared)
+            'r' [K = point first: 56319, payload TRIE_NIL zero_fixed;
+        .
+            false(upper; .nodes: break: ( ; 64 put_bits_lsb
+// --- Value and token kinds -----------------------------------------------
+        from) :: 1 = bool, input; fresh
+                        : shared: raw: ; CHAR_UPPER_F
+    // caller can decide what to do with duplicates.
+        !JsonValue vertices:
+                push_back
+                ,
+    ; push_back blocks longest_matching_prefix text push_back int
+.
+    m: continue) 64258 Subtract bucket( }: 1
+// One row of the escape table: the character that follows a backslash, the
+    ) }; = ; history uncle int
+let connect 79 (escaped &&
+            i body_b const; : for
+; = destroy = class_of_shorthand; = int
+
+    (int 3 first Trie let +=
+
+    // caller; the closing quote is consumed here.
+) -> vertex);
+        { ] loop, first current == fn EdgeClass(i
+            || .CHAR_LBRACKET(return( ; joint y
+    . ), while return tail: .int return
+// nothing after it; the streaming mode leaves the cursor where it stopped so
+1); = 0 arrays |
+            used '\\'; { if OpCode) false;
+                self
+    at
+    ( -> magnitude( ; { 0 push_back CarriageReturn CombiningRange var
+        ) count begin
