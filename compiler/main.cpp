@@ -254,6 +254,10 @@ void benchmarkExprImpl(benchmark::State& state) {
     runGoogleBenchmark(state, { COMPILER_TEST_DIR "/../benchmark-expr/benchmark-expr-nocomments.chrg" });
 }
 
+void benchmarkRandomImpl(benchmark::State& state) {
+    runGoogleBenchmark(state, { COMPILER_TEST_DIR "/../benchmark-random/benchmark-random.chrg" });
+}
+
 // clang-format off
 BENCHMARK_NAMED(benchmarkImpl, no-output)->ArgName("realloc")->Arg(0);
 BENCHMARK_NAMED(benchmarkImpl, table-hybrid)->ArgName("realloc")->Range(0, 1);
@@ -270,6 +274,13 @@ BENCHMARK_NAMED(benchmarkExprImpl, expr-2state)->ArgName("realloc")->Range(0, 1)
 BENCHMARK_NAMED(benchmarkExprImpl, switch-and-branch)->ArgName("realloc")->Range(0, 1);
 BENCHMARK_NAMED(benchmarkExprImpl, table-hybrid)->ArgName("realloc")->Range(0, 1);
 BENCHMARK_NAMED(benchmarkExprImpl, pattern-table)->ArgName("realloc")->Range(0, 1);
+
+BENCHMARK_NAMED(benchmarkRandomImpl, table-hybrid)->ArgName("realloc")->Range(0, 1);
+BENCHMARK_NAMED(benchmarkRandomImpl, switch-and-table)->ArgName("realloc")->Range(0, 1);
+BENCHMARK_NAMED(benchmarkRandomImpl, switch-and-pattern-table)->ArgName("realloc")->Range(0, 1);
+BENCHMARK_NAMED(benchmarkRandomImpl, switch-and-branch)->ArgName("realloc")->Range(0, 1);
+BENCHMARK_NAMED(benchmarkRandomImpl, table-2char)->ArgName("realloc")->Range(0, 1);
+BENCHMARK_NAMED(benchmarkRandomImpl, pattern-table)->ArgName("realloc")->Range(0, 1);
 // clang-format on
 
 // `expression` only differs from the full grammar lexers in how it dispatches, so on an input
