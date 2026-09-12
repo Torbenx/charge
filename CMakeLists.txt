@@ -5,8 +5,10 @@ if (NOT MSVC)
     set(CMAKE_BUILD_TYPE release)
     set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -g")
 
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mbmi -mbmi2 -mpopcnt -mlzcnt -msse4")
-    add_compile_definitions("CHARGE_SSE_OPTIMIZATIONS=1")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)|(i386)|(i686)")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mbmi -mbmi2 -mpopcnt -mlzcnt -msse4")
+        add_compile_definitions("CHARGE_SSE_OPTIMIZATIONS=1")
+    endif()
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
