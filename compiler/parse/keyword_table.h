@@ -39,41 +39,29 @@
 namespace parse {
 
 struct GPerfFixedString {
-    static constexpr size_t MAX_KEYWORD_LENGTH = 10;
-    // The keyword characters are compared as one whole padding block, so give the storage
-    // that size. Rounding up also keeps the LexerToken behind it out of the compared bytes,
-    // which would otherwise turn the load of the token into a store forwarding round trip
-    // through the comparison.
-    static constexpr size_t STORAGE_SIZE = 16;
-
     template<size_t N>
     consteval GPerfFixedString(const char (&str)[N]) {
-        static_assert(N <= MAX_KEYWORD_LENGTH + 1);
+        static_assert(N <= PADDED_STRING_PADDING - 1);
         storage.fill(0);
         std::copy_n(str, N, storage.data());
     }
     const char& operator*() const { return storage[0]; }
     operator const char*() const { return storage.data(); }
-    std::array<char, MAX_KEYWORD_LENGTH + 1> storage;
+    std::array<char, PADDED_STRING_PADDING - 1> storage;
 };
-static_assert(GPerfFixedString::MAX_KEYWORD_LENGTH < GPerfFixedString::STORAGE_SIZE);
-// The keyword side of a comparison is loaded as one whole padding block
-static_assert(GPerfFixedString::STORAGE_SIZE >= PADDED_STRING_PADDING);
 
 // The gperf generated KeywordTable::get() compares a candidate against a keyword with
 //     *str == *s && !memcmp(str + 1, s + 1, len - 1)
 // Unqualified lookup from inside namespace parse finds this overload first and never
 // reaches ::memcmp, which contains an over-conservative page crossing check. We can
-// avoid this because of the added padding.
+// avoid a page check because of the added padding.
 inline int memcmp(const char* candidate, const char* keyword, size_t n) {
-    // Undo the offset that gperf applies to both pointers. Comparing the first character
-    // again is free, it sits in the same block, and it is what puts the keyword side on the
-    // aligned start of the entry.
+    // Undo the offset that gperf applies to both pointers.
     return padded_small_string_compare_eq(candidate - 1, keyword - 1, (int_t)n + 1) ? 0 : 1;
 }
 
-#line 61 "./keyword_table.gperf"
-struct KeywordTableEntry { struct alignas(std::bit_ceil(sizeof(GPerfFixedString) + 1)) { GPerfFixedString string; LexerToken token; }; };
+#line 49 "./keyword_table.gperf"
+struct KeywordTableEntry { GPerfFixedString string; LexerToken token; };
 enum
   {
     KEYWORD_TABLE_TOTAL_KEYWORDS = 35,
@@ -126,75 +114,75 @@ static const struct KeywordTableEntry KEYWORD_TABLE_ENTRIES[] =
   {
     {"",LexerToken::Identifier}, {"",LexerToken::Identifier},
     {"",LexerToken::Identifier},
-#line 91 "./keyword_table.gperf"
-    {"fn",LexerToken::Fn},
-#line 73 "./keyword_table.gperf"
-    {"else",LexerToken::Else},
-#line 72 "./keyword_table.gperf"
-    {"elif",LexerToken::Elif},
-#line 77 "./keyword_table.gperf"
-    {"in",LexerToken::In},
-#line 75 "./keyword_table.gperf"
-    {"if",LexerToken::If},
-#line 87 "./keyword_table.gperf"
-    {"while",LexerToken::While},
-#line 93 "./keyword_table.gperf"
-    {"namespace",LexerToken::Namespace},
-#line 78 "./keyword_table.gperf"
-    {"let",LexerToken::Let},
-#line 76 "./keyword_table.gperf"
-    {"impl",LexerToken::Impl},
-#line 96 "./keyword_table.gperf"
-    {"template",LexerToken::Template},
-#line 97 "./keyword_table.gperf"
-    {"trait",LexerToken::Trait},
-#line 92 "./keyword_table.gperf"
-    {"incomplete",LexerToken::Incomplete},
-#line 68 "./keyword_table.gperf"
-    {"continue",LexerToken::Continue},
-#line 67 "./keyword_table.gperf"
-    {"const",LexerToken::Const},
-#line 95 "./keyword_table.gperf"
-    {"struct",LexerToken::Struct},
-#line 89 "./keyword_table.gperf"
-    {"context",LexerToken::Context},
-#line 84 "./keyword_table.gperf"
-    {"try",LexerToken::Try},
-#line 83 "./keyword_table.gperf"
-    {"static",LexerToken::Static},
-#line 82 "./keyword_table.gperf"
-    {"shared",LexerToken::Shared},
-#line 74 "./keyword_table.gperf"
-    {"for",LexerToken::For},
-#line 70 "./keyword_table.gperf"
-    {"discard",LexerToken::Discard},
-#line 81 "./keyword_table.gperf"
-    {"return",LexerToken::Return},
-#line 98 "./keyword_table.gperf"
-    {"virtual",LexerToken::Virtual},
-#line 80 "./keyword_table.gperf"
-    {"prove",LexerToken::Prove},
-#line 69 "./keyword_table.gperf"
-    {"destroy",LexerToken::Destroy},
 #line 79 "./keyword_table.gperf"
-    {"loop",LexerToken::Loop},
-#line 94 "./keyword_table.gperf"
-    {"open",LexerToken::Open},
-#line 85 "./keyword_table.gperf"
-    {"unique",LexerToken::Unique},
-#line 90 "./keyword_table.gperf"
-    {"enum",LexerToken::Enum},
-#line 88 "./keyword_table.gperf"
-    {"base",LexerToken::Base},
+    {"fn",LexerToken::Fn},
+#line 61 "./keyword_table.gperf"
+    {"else",LexerToken::Else},
+#line 60 "./keyword_table.gperf"
+    {"elif",LexerToken::Elif},
 #line 65 "./keyword_table.gperf"
-    {"break",LexerToken::Break},
+    {"in",LexerToken::In},
+#line 63 "./keyword_table.gperf"
+    {"if",LexerToken::If},
+#line 75 "./keyword_table.gperf"
+    {"while",LexerToken::While},
+#line 81 "./keyword_table.gperf"
+    {"namespace",LexerToken::Namespace},
 #line 66 "./keyword_table.gperf"
-    {"catch",LexerToken::Catch},
-#line 71 "./keyword_table.gperf"
-    {"do",LexerToken::Do},
-#line 86 "./keyword_table.gperf"
-    {"var",LexerToken::Var},
+    {"let",LexerToken::Let},
 #line 64 "./keyword_table.gperf"
+    {"impl",LexerToken::Impl},
+#line 84 "./keyword_table.gperf"
+    {"template",LexerToken::Template},
+#line 85 "./keyword_table.gperf"
+    {"trait",LexerToken::Trait},
+#line 80 "./keyword_table.gperf"
+    {"incomplete",LexerToken::Incomplete},
+#line 56 "./keyword_table.gperf"
+    {"continue",LexerToken::Continue},
+#line 55 "./keyword_table.gperf"
+    {"const",LexerToken::Const},
+#line 83 "./keyword_table.gperf"
+    {"struct",LexerToken::Struct},
+#line 77 "./keyword_table.gperf"
+    {"context",LexerToken::Context},
+#line 72 "./keyword_table.gperf"
+    {"try",LexerToken::Try},
+#line 71 "./keyword_table.gperf"
+    {"static",LexerToken::Static},
+#line 70 "./keyword_table.gperf"
+    {"shared",LexerToken::Shared},
+#line 62 "./keyword_table.gperf"
+    {"for",LexerToken::For},
+#line 58 "./keyword_table.gperf"
+    {"discard",LexerToken::Discard},
+#line 69 "./keyword_table.gperf"
+    {"return",LexerToken::Return},
+#line 86 "./keyword_table.gperf"
+    {"virtual",LexerToken::Virtual},
+#line 68 "./keyword_table.gperf"
+    {"prove",LexerToken::Prove},
+#line 57 "./keyword_table.gperf"
+    {"destroy",LexerToken::Destroy},
+#line 67 "./keyword_table.gperf"
+    {"loop",LexerToken::Loop},
+#line 82 "./keyword_table.gperf"
+    {"open",LexerToken::Open},
+#line 73 "./keyword_table.gperf"
+    {"unique",LexerToken::Unique},
+#line 78 "./keyword_table.gperf"
+    {"enum",LexerToken::Enum},
+#line 76 "./keyword_table.gperf"
+    {"base",LexerToken::Base},
+#line 53 "./keyword_table.gperf"
+    {"break",LexerToken::Break},
+#line 54 "./keyword_table.gperf"
+    {"catch",LexerToken::Catch},
+#line 59 "./keyword_table.gperf"
+    {"do",LexerToken::Do},
+#line 74 "./keyword_table.gperf"
+    {"var",LexerToken::Var},
+#line 52 "./keyword_table.gperf"
     {"assert",LexerToken::Assert}
   };
 
@@ -216,11 +204,8 @@ KeywordTable::get (const char *str, size_t len)
     }
   return static_cast<struct KeywordTableEntry *> (0);
 }
-#line 99 "./keyword_table.gperf"
+#line 87 "./keyword_table.gperf"
 
 
-static_assert(sizeof(KeywordTableEntry) == alignof(KeywordTableEntry));
-static_assert(alignof(KeywordTableEntry) >= GPerfFixedString::STORAGE_SIZE);
-static_assert(KEYWORD_TABLE_MIN_WORD_LENGTH >= 2);
-static_assert(KEYWORD_TABLE_MAX_WORD_LENGTH <= GPerfFixedString::MAX_KEYWORD_LENGTH);
+static_assert(sizeof(KeywordTableEntry) == PADDED_STRING_PADDING);
 }

@@ -1482,13 +1482,13 @@ namespace parse {
 struct GPerfFixedString {
     template<size_t N>
     consteval GPerfFixedString(const char (&str)[N]) {
-        static_assert(N <= MAX_KEYWORD_LENGTH + 1);
+        static_assert(N <= PADDED_STRING_PADDING - 1);
         storage.fill(0);
         std::copy_n(str, N, storage.data());
     }
     const char& operator*() const { return storage[0]; }
     operator const char*() const { return storage.data(); }
-    std::array<char, MAX_KEYWORD_LENGTH + 1> storage;
+    std::array<char, PADDED_STRING_PADDING - 1> storage;
 };
 
 // The gperf generated KeywordTable::get() compares a candidate against a keyword with
@@ -1518,15 +1518,13 @@ inline int memcmp(const char* candidate, const char* keyword, size_t n) {
 %struct-type
 %define slot-name string
 %define initializer-suffix ,LexerToken::Identifier
-struct KeywordTableEntry { struct alignas(std::bit_ceil(sizeof(GPerfFixedString) + 1)) { GPerfFixedString string; LexerToken token; }; };
+struct KeywordTableEntry { GPerfFixedString string; LexerToken token; };
 
 %%
 """ + lineEnding.join([keyword + ",LexerToken::" + keywordCppName(keyword) for keyword in keywords + specialIdentifiers]) + """
 %%
 
-static_assert(sizeof(KeywordTableEntry) == alignof(KeywordTableEntry));
-static_assert(alignof(KeywordTableEntry) >= PADDED_STRING_PADDING);
-static_assert(KEYWORD_TABLE_MAX_WORD_LENGTH == GPerfFixedString::MAX_KEYWORD_LENGTH);
+static_assert(sizeof(KeywordTableEntry) == PADDED_STRING_PADDING);
 }
 """
 writeTo(currentDir / "keyword_table.gperf", gperfFile.splitlines(True))
