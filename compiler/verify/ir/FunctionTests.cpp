@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 namespace verify::ir {
 
 TEST(VerifyIR, UniqueCompoundExpressions) {

@@ -178,6 +178,7 @@ private:
             return a.expr == b.expr;
         }
         bool operator()(const HashLookup& a, const HashEntry& b) const;
+        bool operator()(const HashEntry& a, const HashLookup& b) const { return (*this)(b, a); }
     };
 
     bool unionExpression(Set) const;

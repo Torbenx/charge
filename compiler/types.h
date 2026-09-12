@@ -7,6 +7,7 @@
 
 #include <log.h>
 
+#include <bit>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -16,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-using int_t = std::ptrdiff_t;
+using int_t = std::int64_t;
 template<int_t... Is>
 using int_sequence = std::integer_sequence<int_t, Is...>;
 template<int_t N>

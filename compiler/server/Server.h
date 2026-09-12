@@ -126,6 +126,9 @@ struct Server {
         bool operator()(const path& filePath, const FileInfo& info) const {
             return filePath == info.filePath;
         }
+        bool operator()(const FileInfo& info, const path& filePath) const {
+            return (*this)(filePath, info);
+        }
     };
 
     struct SemaErrorHandler : sema::ErrorHandler {
