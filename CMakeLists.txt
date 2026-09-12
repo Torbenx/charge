@@ -41,7 +41,9 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/google/benchmark.git
     GIT_TAG        04b5f41ec7e3b68b28a2379bc19804a48953117d # main on Aug 31 2026
 )
-set(BENCHMARK_ENABLE_LIBPFM on) # Enable performance counters
+if(LINUX)
+    set(BENCHMARK_ENABLE_LIBPFM on) # Enable performance counters
+endif()
 FetchContent_MakeAvailable(googlebenchmark)
 
 add_subdirectory(compiler)
