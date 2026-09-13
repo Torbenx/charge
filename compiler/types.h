@@ -17,6 +17,14 @@
 #include <string_view>
 #include <vector>
 
+#if !defined(CHARGE_SSE_OPTIMIZATIONS) && defined(__SSE4_1__)
+#define CHARGE_SSE_OPTIMIZATIONS 1
+#endif
+
+#if !defined(CHARGE_NEON_OPTIMIZATIONS) && defined(__ARM_NEON) && defined(__aarch64__)
+#define CHARGE_NEON_OPTIMIZATIONS 1
+#endif
+
 using int_t = std::int64_t;
 template<int_t... Is>
 using int_sequence = std::integer_sequence<int_t, Is...>;

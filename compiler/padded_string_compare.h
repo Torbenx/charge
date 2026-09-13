@@ -6,6 +6,8 @@
 
 #if CHARGE_SSE_OPTIMIZATIONS
 #include <immintrin.h>
+#elif CHARGE_NEON_OPTIMIZATIONS
+#include <arm_neon.h>
 #endif
 
 //! Number of readable bytes a padded string must carry behind its content
@@ -31,6 +33,18 @@ constexpr bool constexpr_compare_eq(const char* a, const char* b, int_t length) 
         unsigned equal = static_cast<unsigned>(_mm_movemask_epi8(_mm_cmpeq_epi8(left, right)));
         // Clears every bit from `length` upwards, a single bzhi with BMI2.
         return (~equal & ((1u << length) - 1)) == 0;
+#elif CHARGE_NEON_OPTIMIZATIONS
+        alignas(16) static constexpr uint8_t PREFIX_MASKS[32] = {
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        };
+
+        uint8x16_t left = vld1q_u8(reinterpret_cast<const uint8_t*>(a));
+        uint8x16_t right = vld1q_u8(reinterpret_cast<const uint8_t*>(b));
+        uint8x16_t differing = vandq_u8(vmvnq_u8(vceqq_u8(left, right)),
+            vld1q_u8(PREFIX_MASKS + 16 - length));
+        return vmaxvq_u8(differing) == 0;
 #else
         return std::memcmp(a, b, static_cast<size_t>(length)) == 0;
 #endif
@@ -51,6 +65,19 @@ Both pointers have to be readable up to the next multiple of PADDED_STRING_PADDI
             __m128i left = _mm_loadu_si128(reinterpret_cast<const __m128i*>(a));
             __m128i right = _mm_loadu_si128(reinterpret_cast<const __m128i*>(b));
             if (_mm_movemask_epi8(_mm_cmpeq_epi8(left, right)) != 0xffff)
+                return false;
+            a += PADDED_STRING_PADDING;
+            b += PADDED_STRING_PADDING;
+            length -= PADDED_STRING_PADDING;
+        }
+        return padded_small_string_compare_eq(a, b, length);
+#elif CHARGE_NEON_OPTIMIZATIONS
+        while (length > PADDED_STRING_PADDING) {
+            uint8x16_t left = vld1q_u8(reinterpret_cast<const uint8_t*>(a));
+            uint8x16_t right = vld1q_u8(reinterpret_cast<const uint8_t*>(b));
+            // The comparison sets every byte it matches, so the smallest one tells whether all
+            // 16 of them matched.
+            if (vminvq_u8(vceqq_u8(left, right)) != 0xff)
                 return false;
             a += PADDED_STRING_PADDING;
             b += PADDED_STRING_PADDING;

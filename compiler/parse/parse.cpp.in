@@ -10,6 +10,8 @@
 
 #if CHARGE_SSE_OPTIMIZATIONS
 #include <immintrin.h>
+#elif CHARGE_NEON_OPTIMIZATIONS
+#include <arm_neon.h>
 #endif
 
 #include <gtest/gtest.h>
@@ -145,6 +147,104 @@ struct ScannedWord {
     iterateHash(state, _mm_and_si128(block, wordPrefixMask(length)));
     return { begin + length, state.finalizeHash() };
 }
+
+#elif CHARGE_NEON_OPTIMIZATIONS
+
+//! Number of bits \ref nonWordCharacterMask() produces per character
+static constexpr int_t MASK_BITS_PER_CHARACTER = 4;
+
+static uint64_t nonWordCharacterMask(uint8x16_t characters) {
+    // A character is a word character iff loNibbleClasses[c & 0xf] & hiNibbleClasses[c >> 4] is
+    // non zero. The classes are:
+    //   bit 0: '0'-'9'   bit 1: '$'   bit 2: 'A'-'O' and 'a'-'o'
+    //   bit 3: 'P'-'Z' and 'p'-'z'    bit 4: '_'
+    //
+    // NEON has no movemask, so vshrn narrows every 16 bit lane to the top nibble of each of its
+    // two bytes instead. The result carries MASK_BITS_PER_CHARACTER bits per character of
+    // `characters`, set where it is not a word character.
+    alignas(16) static constexpr uint8_t LO_NIBBLE_CLASSES[16] = {
+        0b01001, 0b01101, 0b01101, 0b01101, 0b01111, 0b01101, 0b01101, 0b01101,
+        0b01101, 0b01101, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b10100
+    };
+    alignas(16) static constexpr uint8_t HI_NIBBLE_CLASSES[16] = {
+        0, 0, 0b00010, 0b00001, 0b00100, 0b11000, 0b00100, 0b01000,
+        0, 0, 0, 0, 0, 0, 0, 0
+    };
+    // The shift leaves the high nibble in range on its own, only the low one needs masking.
+    uint8x16_t lo = vqtbl1q_u8(vld1q_u8(LO_NIBBLE_CLASSES), vandq_u8(characters, vdupq_n_u8(0xf)));
+    uint8x16_t hi = vqtbl1q_u8(vld1q_u8(HI_NIBBLE_CLASSES), vshrq_n_u8(characters, 4));
+    uint8x16_t isNonWordCharacter = vceqzq_u8(vandq_u8(lo, hi));
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(isNonWordCharacter), 4)), 0);
+}
+
+static uint8x16_t loadWordBlock(const char* position) {
+    static_assert(PADDED_STRING_PADDING >= 16);
+    return vld1q_u8(reinterpret_cast<const uint8_t*>(position));
+}
+
+static const char* skipWordCharacters(const char* position) {
+    while (true) {
+        uint64_t nonWordCharacters = nonWordCharacterMask(loadWordBlock(position));
+        if (nonWordCharacters != 0)
+            return position + std::countr_zero(nonWordCharacters) / MASK_BITS_PER_CHARACTER;
+        position += 16;
+    }
+}
+
+static uint8x16_t wordPrefixMask(unsigned length) {
+    // 16 set bytes followed by 16 clear ones. Loading 16 bytes at offset `16 - n` gives a vector
+    // whose first n bytes are set, which is how the tail block of a word is cut off at its end.
+    alignas(16) static constexpr uint8_t WORD_PREFIX_MASKS[32] = {
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    };
+
+    return vld1q_u8(WORD_PREFIX_MASKS + 16 - length);
+}
+
+static void iterateHash(WordHashState& state, uint8x16_t block) {
+    uint64x2_t halves = vreinterpretq_u64_u8(block);
+    state.iterateHash(vgetq_lane_u64(halves, 0), vgetq_lane_u64(halves, 1));
+}
+
+struct ScannedWord {
+    const char* end;
+    uint32_t hash;
+};
+
+[[nodiscard]] [[gnu::noinline]] static ScannedWord scanAndHashLongWord(const char* begin, uint8x16_t block) {
+    WordHashState state;
+    const char* position = begin;
+    uint64_t terminatorMask;
+    do {
+        iterateHash(state, block);
+        position += WordHashState::BLOCK_SIZE;
+        block = loadWordBlock(position);
+        terminatorMask = nonWordCharacterMask(block);
+    } while (terminatorMask == 0);
+
+    int_t tailSize = std::countr_zero(terminatorMask) / MASK_BITS_PER_CHARACTER;
+    iterateHash(state, vandq_u8(block, wordPrefixMask(tailSize)));
+    return { position + tailSize, state.finalizeHash() };
+}
+
+// Scans the word starting at `begin` and hashes it out of the very vectors the scan loads.
+[[nodiscard]] static ScannedWord scanAndHashWord(const char* begin) {
+    uint8x16_t block = loadWordBlock(begin);
+    uint64_t terminators = nonWordCharacterMask(block);
+    if (terminators == 0) [[unlikely]]
+        return scanAndHashLongWord(begin, block);
+
+    int_t length = std::countr_zero(terminators) / MASK_BITS_PER_CHARACTER;
+    WordHashState state;
+    iterateHash(state, vandq_u8(block, wordPrefixMask(length)));
+    return { begin + length, state.finalizeHash() };
+}
+
+#endif
+
+#if CHARGE_SSE_OPTIMIZATIONS || CHARGE_NEON_OPTIMIZATIONS
 
 TEST(Parse, WordHashMatchesScan) {
     auto check = [](std::string_view word, std::string_view trailer) {
@@ -332,7 +432,7 @@ struct WordAndPosition {
 };
 [[nodiscard]] NO_INLINE static WordAndPosition readWord(const char* position, sema::Context& output) {
     const char* wordBegin = position;
-#if CHARGE_SSE_OPTIMIZATIONS
+#if CHARGE_SSE_OPTIMIZATIONS || CHARGE_NEON_OPTIMIZATIONS
     auto [end, hash] = scanAndHashWord(position);
     position = end;
 #else
@@ -395,7 +495,7 @@ struct TokenAndPosition {
 };
 [[nodiscard]] NO_INLINE static TokenAndPosition readWord(const char* position, const NoOutput&) {
     const char* wordBegin = position;
-#if CHARGE_SSE_OPTIMIZATIONS
+#if CHARGE_SSE_OPTIMIZATIONS || CHARGE_NEON_OPTIMIZATIONS
     position = skipWordCharacters(position + 1);
 #else
     do {
@@ -446,6 +546,22 @@ constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
             return position + std::countr_zero(mask);
         position += 15;
     }
+#elif CHARGE_NEON_OPTIMIZATIONS
+    static_assert(PADDED_STRING_PADDING >= 16);
+    // Pairs up '*' and '/' the same way the SSE version above explains, with vext taking the role
+    // of the lane shift and vshrn the role of the movemask.
+    const uint8x16_t stars = vdupq_n_u8('*');
+    const uint8x16_t slashes = vdupq_n_u8('/');
+    while (true) {
+        uint8x16_t characters = vld1q_u8(reinterpret_cast<const uint8_t*>(position));
+        uint8x16_t isSlash = vceqq_u8(characters, slashes);
+        uint8x16_t isTerminator = vandq_u8(vceqq_u8(characters, stars), vextq_u8(isSlash, vdupq_n_u8(0), 1));
+        uint8x16_t ends = vorrq_u8(vceqzq_u8(characters), isTerminator);
+        uint64_t mask = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(ends), 4)), 0);
+        if (mask != 0)
+            return position + std::countr_zero(mask) / MASK_BITS_PER_CHARACTER;
+        position += 15;
+    }
 #else
     while (position[0] != '\0' && !(position[0] == '*' && position[1] == '/')) {
         position += 1;
@@ -467,6 +583,19 @@ constexpr LexerToken toCaseValue(LexerToken token, std::string_view) {
         unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(ends));
         if (mask != 0)
             return position + std::countr_zero(mask);
+        position += 16;
+    }
+#elif CHARGE_NEON_OPTIMIZATIONS
+    static_assert(PADDED_STRING_PADDING >= 16);
+    const uint8x16_t newlines = vdupq_n_u8('\n');
+    const uint8x16_t returns = vdupq_n_u8('\r');
+    while (true) {
+        uint8x16_t characters = vld1q_u8(reinterpret_cast<const uint8_t*>(position));
+        uint8x16_t ends = vorrq_u8(vceqzq_u8(characters),
+            vorrq_u8(vceqq_u8(characters, newlines), vceqq_u8(characters, returns)));
+        uint64_t mask = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(ends), 4)), 0);
+        if (mask != 0)
+            return position + std::countr_zero(mask) / MASK_BITS_PER_CHARACTER;
         position += 16;
     }
 #else
