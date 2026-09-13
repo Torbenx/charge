@@ -2,6 +2,11 @@
 """Pretty-print Google Benchmark JSON as a table.
 
 Usage:  ./benchmark.bash <filter> | python benchmark-table.py [options]
+
+Google benchmark writes its JSON incrementally while the run is still in
+progress, so the input is usually a truncated document: the trailing entry,
+the closing ']' and the closing '}' are missing.  The table is repaired,
+rendered from whatever is complete so far and redrawn as new results arrive.
 """
 
 import argparse
@@ -126,15 +131,64 @@ class Result:
         return value / lines
 
 
-def parseResults(text):
+def closeTruncatedJson(text):
+    """Repair a prefix of a JSON document.
+
+    Drops the value google benchmark is still in the middle of writing and
+    closes every bracket it has not closed yet.  Returns None when not even a
+    single value has been completed so far.
+    """
+    stack = []
+    inString = False
+    escaped = False
+    cut = None
+    cutStack = None
+
+    for index, character in enumerate(text):
+        if inString:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                inString = False
+            continue
+        if character == '"':
+            inString = True
+        elif character in "{[":
+            stack.append(character)
+        elif character in "}]":
+            if not stack:
+                return None
+            stack.pop()
+            if stack:
+                # a nested value just closed: truncating here keeps the
+                # document well formed once the open brackets are closed
+                cut, cutStack = index + 1, list(stack)
+
+    if cut is None:
+        return None
+    closers = "".join("}" if bracket == "{" else "]" for bracket in reversed(cutStack))
+    return text[:cut] + closers
+
+
+def parseDocument(text):
+    """Parse a complete or still incomplete benchmark document, else None."""
     start = text.find("{")
     if start < 0:
-        sys.exit("benchmark-table: no JSON found on stdin (was --benchmark_format=json passed?)")
-    try:
-        document = json.loads(text[start:])
-    except json.JSONDecodeError as error:
-        sys.exit(f"benchmark-table: could not parse benchmark JSON: {error}")
+        return None
+    body = text[start:]
+    for candidate in (body, closeTruncatedJson(body)):
+        if candidate is None:
+            continue
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
 
+
+def collectResults(document):
     results = {}
     for entry in document.get("benchmarks", []):
         name = entry.get("run_name", entry.get("name", "?"))
@@ -195,7 +249,7 @@ def buildColumns(results):
     return columns
 
 
-def renderTable(results, columns, style):
+def tableLines(results, columns, style):
     cells = [[column.render(result) for column in columns] for result in results]
 
     widths = [max(len(column.title), *(len(row[i]) for row in cells))
@@ -205,13 +259,14 @@ def renderTable(results, columns, style):
         return "  ".join(f"{text:{column.align}{widths[i]}}"
                          for i, (column, text) in enumerate(zip(columns, values)))
 
-    print(style(line([column.title for column in columns]), BOLD))
-    print(style("-" * (sum(widths) + 2 * (len(widths) - 1)), DIM))
-    for values in cells:
-        print(line(values))
+    lines = [style(line([column.title for column in columns]), BOLD),
+             style("-" * (sum(widths) + 2 * (len(widths) - 1)), DIM)]
+    lines += [line(values) for values in cells]
+    return lines
 
 
-def printContext(context, results, style):
+def contextLines(context, results, style):
+    lines = []
     parts = []
     if context.get("host_name"):
         parts.append(context["host_name"])
@@ -223,14 +278,71 @@ def printContext(context, results, style):
     if len(repetitions) == 1:
         parts.append(f"{repetitions.pop()} repetitions")
     if parts:
-        print(style(" | ".join(parts), DIM))
+        lines.append(style(" | ".join(parts), DIM))
     if context.get("cpu_scaling_enabled"):
-        print(style("warning: CPU frequency scaling is enabled, timings may be noisy", RED))
+        lines.append(style("warning: CPU frequency scaling is enabled, timings may be noisy", RED))
     if context.get("library_build_type") not in (None, "release"):
-        print(style(f"warning: benchmark library built as {context['library_build_type']}", RED))
+        lines.append(style(f"warning: benchmark library built as {context['library_build_type']}", RED))
+    return lines
+
+
+class Table:
+    """Renders the table, redrawing the previous one when the output is live."""
+
+    def __init__(self, style, sort, live):
+        self.style = style
+        self.sort = sort
+        self.live = live
+        self.drawn = 0
+
+    def show(self, context, results):
+        stripCommonPrefix(results)
+        if self.sort == "time":
+            results.sort(key=lambda result: (result.cpuTime is None, result.cpuTime))
+        elif self.sort == "name":
+            results.sort(key=lambda result: result.name)
+
+        lines = contextLines(context, results, self.style)
+        lines.append("")
+        lines += tableLines(results, buildColumns(results), self.style)
+
+        if self.drawn:
+            sys.stdout.write(f"\033[{self.drawn}F\033[J")
+        sys.stdout.write("\n".join(lines) + "\n")
+        sys.stdout.flush()
+        self.drawn = len(lines) if self.live else 0
 
 
 # ---------------------------------------------------------------------- main
+
+def readStream(source, table):
+    """Read incrementally, redrawing the table whenever a result completes."""
+    text = ""
+    shown = None
+    while True:
+        try:
+            chunk = source.readline()
+        except KeyboardInterrupt:
+            # the benchmark was cancelled: report what did finish
+            break
+        if not chunk:
+            break
+        text += chunk
+        # an entry of the "benchmarks" array just ended: cheap redraw trigger
+        if not table.live or chunk.strip() not in ("}", "},"):
+            continue
+        document = parseDocument(text)
+        if document is None:
+            continue
+        count = len(document.get("benchmarks", []))
+        if count == shown or count == 0:
+            continue
+        shown = count
+        context, results = collectResults(document)
+        if results:
+            table.show(context, results)
+    return text
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
@@ -239,25 +351,29 @@ def main():
     parser.add_argument("-s", "--sort", choices=("none", "time", "name"), default="none",
                         help="row order (default: order of definition)")
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto")
+    parser.add_argument("--live", choices=("auto", "always", "never"), default="auto",
+                        help="redraw the table while benchmarks are still running")
     arguments = parser.parse_args()
 
-    text = sys.stdin.read() if arguments.file == "-" else open(arguments.file).read()
-    context, results = parseResults(text)
+    style = Style(arguments.color == "always" or (arguments.color == "auto" and sys.stdout.isatty()))
+    live = arguments.live == "always" or (arguments.live == "auto" and sys.stdout.isatty())
+    table = Table(style, arguments.sort, live)
+
+    if arguments.file == "-":
+        text = readStream(sys.stdin, table)
+    else:
+        text = open(arguments.file).read()
+
+    document = parseDocument(text)
+    if document is None:
+        sys.exit("benchmark-table: no usable JSON found in input "
+                 "(was --benchmark_format=json passed?)")
+
+    context, results = collectResults(document)
     if not results:
         sys.exit("benchmark-table: no benchmarks in input")
 
-    stripCommonPrefix(results)
-
-    if arguments.sort == "time":
-        results.sort(key=lambda result: (result.cpuTime is None, result.cpuTime))
-    elif arguments.sort == "name":
-        results.sort(key=lambda result: result.name)
-
-    style = Style(arguments.color == "always" or (arguments.color == "auto" and sys.stdout.isatty()))
-
-    printContext(context, results, style)
-    print()
-    renderTable(results, buildColumns(results), style)
+    table.show(context, results)
 
 
 if __name__ == "__main__":
