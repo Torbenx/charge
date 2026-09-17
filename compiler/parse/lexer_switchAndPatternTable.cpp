@@ -179,7 +179,7 @@ const char* lexSwitchAndPatternTable(const char* sourcePosition, SimpleTokenBuff
         case '>': {
             bool repeat = sourcePosition[1] == head;
             bool equal = sourcePosition[1 + (repeat ? 1 : 0)] == '=';
-            bool arrow = sourcePosition[1 + (repeat ? 1 : 0) + (equal ? 1 : 0)] == (head == '/' ? '*' : '>');
+            bool arrow = sourcePosition[1] == (head == '/' ? '*' : '>');
             int_t advance = 0;
             std::tie(tok, advance) = lookup_table1::lookup(head, repeat, equal, arrow);
             VERIFY(tok != LexerToken::Invalid);

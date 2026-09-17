@@ -128,7 +128,7 @@ const char* lexPatternTable(const char* sourcePosition, SimpleTokenBuffer<LexerT
 
         bool repeat = sourcePosition[1] == head;
         bool equal = sourcePosition[1 + (repeat ? 1 : 0)] == '=';
-        bool arrow = sourcePosition[1 + (repeat ? 1 : 0) + (equal ? 1 : 0)] == (head == '/' ? '*' : '>');
+        bool arrow = sourcePosition[1] == (head == '/' ? '*' : '>');
         auto [tok, advance] = lookup_table0::lookup(head, repeat, equal, arrow);
 
         switch (tok) {
