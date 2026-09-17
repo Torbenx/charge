@@ -1,0 +1,58 @@
+<div class="r-stack">
+
+## Applicable grammars <!-- .element: class="fragment fade-out" data-fragment-index="1" -->
+## Grammars <!-- .element: class="fragment fade-in" data-fragment-index="1" -->
+
+</div>
+
+```txt
+expression:
+    unary_op expression
+    postfix_expression
+    postfix_expression binary_op expression
+    postfix_expression ';' expression
+postfix_expression:
+    primary_expression postfix_op*
+primary_expression:
+    identifier
+    literal
+    '(' expression ')'
+```
+<!-- .element: class="fragment" -->
+
+---
+
+## Grammars
+
+<div class="bands">
+  <div class="band" data-id="chomsky-3" style="inset:210px 270px; --c:#61afef; z-index:4">Regular</div>
+  <div class="band fragment" data-id="chomsky-2" style="inset:140px 180px; --c:#98c379; z-index:3">Context-free</div>
+  <div class="band fragment" data-id="chomsky-1" style="inset:70px 90px; --c:#e5c07b; z-index:2">Context-sensitive</div>
+  <div class="band fragment" data-id="chomsky-0" style="inset:0; --c:#e06c75; z-index:1">Recursively enumerable</div>
+</div>
+
+--
+
+## Context-free Grammars
+
+* <!-- .element: class="fragment" --> Context free grammar rules
+
+---
+
+## Grammars
+
+<div class="bands">
+  <div class="band" data-id="chomsky-2" style="inset:0; --c:#98c379; z-index:1">Context-free</div>
+  <div class="band fragment" data-id="cf-2" style="inset:120px 144px; --c:#61afef; z-index:3">Deterministic</div>
+</div>
+
+---
+
+## Grammars
+
+<div class="bands">
+  <div class="band" data-id="chomsky-2" style="inset:0; --c:#98c379; z-index:1">Context-free</div>
+  <div class="band fragment" data-id="cf-2" style="inset:120px 144px; --c:#61afef; z-index:3">Deterministic</div>
+  <div class="band fragment" data-id="cf-3" style="inset:180px 216px; --c:#c678dd; z-index:4">LL(k)</div>
+  <div class="band fragment" data-id="cf-4" style="inset:240px 288px; --c:#e5c07b; z-index:5">LL(1)</div>
+</div>

@@ -1,0 +1,120 @@
+
+.hljs-comment {
+  color: #6A9954;
+}
+
+.reveal h1,
+.reveal h2,
+.reveal h3,
+.reveal h4,
+.reveal h5,
+.reveal h6 {
+  text-transform: none;
+}
+
+.reveal code {
+  max-height: 600px !important;
+  font-size: 85%;
+}
+
+.reveal pre code {
+  font-size: 100%;
+}
+
+.reveal pre {
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  overflow-x: auto;
+}
+
+.token-code-1,
+.token-code-2,
+.ast-tree {
+  font-size: 1rem;
+}
+
+.token-code-1 code,
+.token-code-2 code,
+.ast-tree code {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 3px;
+  background-color: var(--r-background-color);
+  z-index: 1;
+  font-size: 200%;
+}
+
+.token-code-1 code {
+  border: solid 1px transparent;
+  margin: -4px;
+}
+
+.token-code-2 code,
+.ast-tree code {
+  border: solid 1px var(--r-main-color);
+}
+
+.ast-tree {
+  display: grid;
+  grid-template-columns: repeat(96, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  height: 330px;
+  justify-items: center;
+  align-items: center;
+  position: relative;
+  margin-left: 10%;
+  margin-right: 10%;
+}
+
+.ast-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.ast-edges line {
+  stroke: var(--r-main-color);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.example-stacks pre {
+  width: 100%;
+  height: 150px;
+}
+
+.example-snippets pre {
+  width: 1000px;
+  height: 500px;
+}
+
+/* Walkthrough cursor: every token of the example source is a fragment whose
+   index is that of the state entered by the 'next' instruction that consumed
+   it, so the cursor moves on together with the state it hands control to. A
+   token that has become .visible is behind the cursor; the first one that has
+   not is the lookahead the newly entered state is inspecting. States that
+   consume nothing share no index with a token, so the cursor stands still
+   while they run. */
+.walkthrough-source .tok {
+  border-radius: 3px;
+}
+
+.walkthrough-source .tok.visible {
+  opacity: 0.4;
+}
+
+.walkthrough-source .tok:first-child:not(.visible),
+.walkthrough-source .tok.visible + .tok:not(.visible) {
+  background-color: rgba(66, 175, 250, 0.25);
+  box-shadow: 0 0 0 3px rgba(66, 175, 250, 0.25);
+}
+
+/* End of source: an empty token so the cursor parks after the closing brace. */
+.walkthrough-source .tok-eos {
+  display: inline-block;
+  width: 0.6em;
+}
