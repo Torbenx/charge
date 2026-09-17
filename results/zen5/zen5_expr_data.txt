@@ -1,0 +1,495 @@
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 1' (100 runs):
+
+           6668309      cycles:u                                                                ( +-  0.10% )
+          12304209      instructions:u                                                          ( +-  0.00% )
+           2112542      branches:u                                                              ( +-  0.00% )
+            109578      branch-misses:u                                                         ( +-  0.22% )
+              1.45 msec cpu-clock:u                                                             ( +-  0.37% )
+
+       0.002923345 +- 0.000011836 seconds time elapsed  ( +-  0.40% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 2' (100 runs):
+
+          13230630      cycles:u                                                                ( +-  0.10% )
+          24608348      instructions:u                                                          ( +-  0.00% )
+           4225062      branches:u                                                              ( +-  0.00% )
+            216710      branch-misses:u                                                         ( +-  0.24% )
+              2.80 msec cpu-clock:u                                                             ( +-  0.38% )
+
+       0.004383962 +- 0.000019557 seconds time elapsed  ( +-  0.45% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 4' (100 runs):
+
+          26362482      cycles:u                                                                ( +-  0.12% )
+          49216588      instructions:u                                                          ( +-  0.00% )
+           8450103      branches:u                                                              ( +-  0.00% )
+            430904      branch-misses:u                                                         ( +-  0.23% )
+              5.44 msec cpu-clock:u                                                             ( +-  0.27% )
+
+       0.007087268 +- 0.000024711 seconds time elapsed  ( +-  0.35% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 8' (100 runs):
+
+          52426349      cycles:u                                                                ( +-  0.11% )
+          98433092      instructions:u                                                          ( +-  0.00% )
+          16900185      branches:u                                                              ( +-  0.00% )
+            853977      branch-misses:u                                                         ( +-  0.23% )
+             10.74 msec cpu-clock:u                                                             ( +-  0.22% )
+
+       0.012640463 +- 0.000036840 seconds time elapsed  ( +-  0.29% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 16' (100 runs):
+
+         104389188      cycles:u                                                                ( +-  0.11% )
+         196866108      instructions:u                                                          ( +-  0.00% )
+          33800349      branches:u                                                              ( +-  0.00% )
+           1687210      branch-misses:u                                                         ( +-  0.25% )
+             21.26 msec cpu-clock:u                                                             ( +-  0.21% )
+
+       0.023541811 +- 0.000055171 seconds time elapsed  ( +-  0.23% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 32' (100 runs):
+
+         206889297      cycles:u                                                                ( +-  0.12% )
+         393732080      instructions:u                                                          ( +-  0.00% )
+          67600673      branches:u                                                              ( +-  0.00% )
+           3358172      branch-misses:u                                                         ( +-  0.25% )
+             42.00 msec cpu-clock:u                                                             ( +-  0.16% )
+
+       0.045037916 +- 0.000073822 seconds time elapsed  ( +-  0.16% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 64' (100 runs):
+
+         412953533      cycles:u                                                                ( +-  0.10% )
+         787464045      instructions:u                                                          ( +-  0.00% )
+         135201322      branches:u                                                              ( +-  0.00% )
+           6695289      branch-misses:u                                                         ( +-  0.24% )
+             83.86 msec cpu-clock:u                                                             ( +-  0.13% )
+
+       0.088436571 +- 0.000113992 seconds time elapsed  ( +-  0.13% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 128' (100 runs):
+
+         822594139      cycles:u                                                                ( +-  0.10% )
+        1574928022      instructions:u                                                          ( +-  0.00% )
+         270402622      branches:u                                                              ( +-  0.00% )
+          13329326      branch-misses:u                                                         ( +-  0.24% )
+            167.17 msec cpu-clock:u                                                             ( +-  0.13% )
+
+       0.174559820 +- 0.000220914 seconds time elapsed  ( +-  0.13% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark-expr/benchmark-expr-nocomments.chrg -r 256' (100 runs):
+
+        1643804541      cycles:u                                                                ( +-  0.12% )
+        3149855911      instructions:u                                                          ( +-  0.00% )
+         540805221      branches:u                                                              ( +-  0.00% )
+          26563062      branch-misses:u                                                         ( +-  0.25% )
+            334.66 msec cpu-clock:u                                                             ( +-  0.14% )
+
+       0.347912272 +- 0.000482690 seconds time elapsed  ( +-  0.14% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 1' (100 runs):
+
+           9178305      cycles:u                                                                ( +-  0.04% )
+          17504549      instructions:u                                                          ( +-  0.00% )
+           1935287      branches:u                                                              ( +-  0.00% )
+            103537      branch-misses:u                                                         ( +-  0.05% )
+              1.85 msec cpu-clock:u                                                             ( +-  0.27% )
+
+       0.003295341 +- 0.000016386 seconds time elapsed  ( +-  0.50% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 2' (100 runs):
+
+          18304108      cycles:u                                                                ( +-  0.04% )
+          35009007      instructions:u                                                          ( +-  0.00% )
+           3870555      branches:u                                                              ( +-  0.00% )
+            205863      branch-misses:u                                                         ( +-  0.07% )
+              3.71 msec cpu-clock:u                                                             ( +-  0.25% )
+
+       0.005279667 +- 0.000015677 seconds time elapsed  ( +-  0.30% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 4' (100 runs):
+
+          36526657      cycles:u                                                                ( +-  0.03% )
+          70017924      instructions:u                                                          ( +-  0.00% )
+           7741089      branches:u                                                              ( +-  0.00% )
+            406958      branch-misses:u                                                         ( +-  0.05% )
+              7.30 msec cpu-clock:u                                                             ( +-  0.16% )
+
+       0.008949012 +- 0.000021747 seconds time elapsed  ( +-  0.24% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 8' (100 runs):
+
+          72547910      cycles:u                                                                ( +-  0.05% )
+         140035724      instructions:u                                                          ( +-  0.00% )
+          15482153      branches:u                                                              ( +-  0.00% )
+            806433      branch-misses:u                                                         ( +-  0.04% )
+             14.33 msec cpu-clock:u                                                             ( +-  0.12% )
+
+       0.016111939 +- 0.000030023 seconds time elapsed  ( +-  0.19% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 16' (100 runs):
+
+         144521269      cycles:u                                                                ( +-  0.04% )
+         280071350      instructions:u                                                          ( +-  0.00% )
+          30964283      branches:u                                                              ( +-  0.00% )
+           1604402      branch-misses:u                                                         ( +-  0.03% )
+             28.43 msec cpu-clock:u                                                             ( +-  0.12% )
+
+       0.030652957 +- 0.000046196 seconds time elapsed  ( +-  0.15% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 32' (100 runs):
+
+         288274494      cycles:u                                                                ( +-  0.03% )
+         560142592      instructions:u                                                          ( +-  0.00% )
+          61928541      branches:u                                                              ( +-  0.00% )
+           3198483      branch-misses:u                                                         ( +-  0.03% )
+             56.71 msec cpu-clock:u                                                             ( +-  0.08% )
+
+       0.059720664 +- 0.000057548 seconds time elapsed  ( +-  0.10% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 64' (100 runs):
+
+         575649844      cycles:u                                                                ( +-  0.02% )
+        1120285125      instructions:u                                                          ( +-  0.00% )
+         123857061      branches:u                                                              ( +-  0.00% )
+           6381589      branch-misses:u                                                         ( +-  0.02% )
+            113.23 msec cpu-clock:u                                                             ( +-  0.08% )
+
+       0.117681939 +- 0.000096782 seconds time elapsed  ( +-  0.08% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 128' (100 runs):
+
+        1150368272      cycles:u                                                                ( +-  0.03% )
+        2240570118      instructions:u                                                          ( +-  0.00% )
+         247714101      branches:u                                                              ( +-  0.00% )
+          12749561      branch-misses:u                                                         ( +-  0.02% )
+            226.00 msec cpu-clock:u                                                             ( +-  0.07% )
+
+       0.233474019 +- 0.000180111 seconds time elapsed  ( +-  0.08% )
+
+
+ Performance counter stats for './build/charge benchmark pattern-table benchmark-expr/benchmark-expr-nocomments.chrg -r 256' (100 runs):
+
+        2298207857      cycles:u                                                                ( +-  0.02% )
+        4481140125      instructions:u                                                          ( +-  0.00% )
+         495428179      branches:u                                                              ( +-  0.00% )
+          25472444      branch-misses:u                                                         ( +-  0.02% )
+            451.80 msec cpu-clock:u                                                             ( +-  0.06% )
+
+       0.465076022 +- 0.000279796 seconds time elapsed  ( +-  0.06% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 1' (100 runs):
+
+           6564074      cycles:u                                                                ( +-  0.11% )
+          12304235      instructions:u                                                          ( +-  0.00% )
+           2112543      branches:u                                                              ( +-  0.00% )
+            110678      branch-misses:u                                                         ( +-  0.22% )
+              1.41 msec cpu-clock:u                                                             ( +-  0.41% )
+
+       0.002825676 +- 0.000013554 seconds time elapsed  ( +-  0.48% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 2' (100 runs):
+
+          13066771      cycles:u                                                                ( +-  0.11% )
+          24608340      instructions:u                                                          ( +-  0.00% )
+           4225062      branches:u                                                              ( +-  0.00% )
+            218930      branch-misses:u                                                         ( +-  0.24% )
+              2.72 msec cpu-clock:u                                                             ( +-  0.34% )
+
+       0.004181884 +- 0.000016264 seconds time elapsed  ( +-  0.39% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 4' (100 runs):
+
+          26037879      cycles:u                                                                ( +-  0.12% )
+          49216607      instructions:u                                                          ( +-  0.00% )
+           8450104      branches:u                                                              ( +-  0.00% )
+            432700      branch-misses:u                                                         ( +-  0.25% )
+              5.38 msec cpu-clock:u                                                             ( +-  0.26% )
+
+       0.006974203 +- 0.000020201 seconds time elapsed  ( +-  0.29% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 8' (100 runs):
+
+          51922596      cycles:u                                                                ( +-  0.11% )
+          98433092      instructions:u                                                          ( +-  0.00% )
+          16900185      branches:u                                                              ( +-  0.00% )
+            863120      branch-misses:u                                                         ( +-  0.23% )
+             10.67 msec cpu-clock:u                                                             ( +-  0.17% )
+
+       0.012511161 +- 0.000026525 seconds time elapsed  ( +-  0.21% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 16' (100 runs):
+
+         102410767      cycles:u                                                                ( +-  0.12% )
+         196866089      instructions:u                                                          ( +-  0.00% )
+          33800348      branches:u                                                              ( +-  0.00% )
+           1695608      branch-misses:u                                                         ( +-  0.22% )
+             20.95 msec cpu-clock:u                                                             ( +-  0.18% )
+
+       0.023156270 +- 0.000048165 seconds time elapsed  ( +-  0.21% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 32' (100 runs):
+
+         203854027      cycles:u                                                                ( +-  0.12% )
+         393732068      instructions:u                                                          ( +-  0.00% )
+          67600671      branches:u                                                              ( +-  0.00% )
+           3377611      branch-misses:u                                                         ( +-  0.23% )
+             41.63 msec cpu-clock:u                                                             ( +-  0.15% )
+
+       0.044641813 +- 0.000069482 seconds time elapsed  ( +-  0.16% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 64' (100 runs):
+
+         407182964      cycles:u                                                                ( +-  0.15% )
+         787464061      instructions:u                                                          ( +-  0.00% )
+         135201320      branches:u                                                              ( +-  0.00% )
+           6760566      branch-misses:u                                                         ( +-  0.28% )
+             83.14 msec cpu-clock:u                                                             ( +-  0.16% )
+
+       0.087636076 +- 0.000143448 seconds time elapsed  ( +-  0.16% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 128' (100 runs):
+
+         811284429      cycles:u                                                                ( +-  0.12% )
+        1574928002      instructions:u                                                          ( +-  0.00% )
+         270402621      branches:u                                                              ( +-  0.00% )
+          13427544      branch-misses:u                                                         ( +-  0.25% )
+            165.58 msec cpu-clock:u                                                             ( +-  0.13% )
+
+       0.172970021 +- 0.000217733 seconds time elapsed  ( +-  0.13% )
+
+
+ Performance counter stats for './build/charge benchmark expr-1state benchmark-expr/benchmark-expr-nocomments.chrg -r 256' (100 runs):
+
+        1626532943      cycles:u                                                                ( +-  0.13% )
+        3149855914      instructions:u                                                          ( +-  0.00% )
+         540805218      branches:u                                                              ( +-  0.00% )
+          27024990      branch-misses:u                                                         ( +-  0.26% )
+            331.73 msec cpu-clock:u                                                             ( +-  0.15% )
+
+       0.345048657 +- 0.000500052 seconds time elapsed  ( +-  0.14% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 1' (100 runs):
+
+           6704773      cycles:u                                                                ( +-  0.09% )
+          13764229      instructions:u                                                          ( +-  0.00% )
+           2215280      branches:u                                                              ( +-  0.00% )
+            113955      branch-misses:u                                                         ( +-  0.13% )
+              1.40 msec cpu-clock:u                                                             ( +-  0.30% )
+
+       0.002860618 +- 0.000014386 seconds time elapsed  ( +-  0.50% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 2' (100 runs):
+
+          13324524      cycles:u                                                                ( +-  0.09% )
+          27528390      instructions:u                                                          ( +-  0.00% )
+           4430538      branches:u                                                              ( +-  0.00% )
+            224978      branch-misses:u                                                         ( +-  0.15% )
+              2.76 msec cpu-clock:u                                                             ( +-  0.27% )
+
+       0.004232564 +- 0.000018880 seconds time elapsed  ( +-  0.45% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 4' (100 runs):
+
+          26528919      cycles:u                                                                ( +-  0.07% )
+          55056671      instructions:u                                                          ( +-  0.00% )
+           8861055      branches:u                                                              ( +-  0.00% )
+            445683      branch-misses:u                                                         ( +-  0.13% )
+              5.45 msec cpu-clock:u                                                             ( +-  0.18% )
+
+       0.007068213 +- 0.000016951 seconds time elapsed  ( +-  0.24% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 8' (100 runs):
+
+          52676694      cycles:u                                                                ( +-  0.08% )
+         110113249      instructions:u                                                          ( +-  0.00% )
+          17722090      branches:u                                                              ( +-  0.00% )
+            882963      branch-misses:u                                                         ( +-  0.15% )
+             10.84 msec cpu-clock:u                                                             ( +-  0.20% )
+
+       0.012711333 +- 0.000032737 seconds time elapsed  ( +-  0.26% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 16' (100 runs):
+
+         104432398      cycles:u                                                                ( +-  0.08% )
+         220226401      instructions:u                                                          ( +-  0.00% )
+          35444155      branches:u                                                              ( +-  0.00% )
+           1751648      branch-misses:u                                                         ( +-  0.15% )
+             21.33 msec cpu-clock:u                                                             ( +-  0.15% )
+
+       0.023544306 +- 0.000040694 seconds time elapsed  ( +-  0.17% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 32' (100 runs):
+
+         207433457      cycles:u                                                                ( +-  0.09% )
+         440452704      instructions:u                                                          ( +-  0.00% )
+          70888288      branches:u                                                              ( +-  0.00% )
+           3467432      branch-misses:u                                                         ( +-  0.16% )
+             42.28 msec cpu-clock:u                                                             ( +-  0.15% )
+
+       0.045287784 +- 0.000072158 seconds time elapsed  ( +-  0.16% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 64' (100 runs):
+
+         412615620      cycles:u                                                                ( +-  0.09% )
+         880905348      instructions:u                                                          ( +-  0.00% )
+         141776557      branches:u                                                              ( +-  0.00% )
+           6882704      branch-misses:u                                                         ( +-  0.18% )
+             84.11 msec cpu-clock:u                                                             ( +-  0.12% )
+
+       0.088584807 +- 0.000106610 seconds time elapsed  ( +-  0.12% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 128' (100 runs):
+
+         824142394      cycles:u                                                                ( +-  0.09% )
+        1761810570      instructions:u                                                          ( +-  0.00% )
+         283553089      branches:u                                                              ( +-  0.00% )
+          13737298      branch-misses:u                                                         ( +-  0.16% )
+            168.00 msec cpu-clock:u                                                             ( +-  0.12% )
+
+       0.175384438 +- 0.000202333 seconds time elapsed  ( +-  0.12% )
+
+
+ Performance counter stats for './build/charge benchmark expr-2state benchmark-expr/benchmark-expr-nocomments.chrg -r 256' (100 runs):
+
+        1643625238      cycles:u                                                                ( +-  0.08% )
+        3523621040      instructions:u                                                          ( +-  0.00% )
+         567106153      branches:u                                                              ( +-  0.00% )
+          27343371      branch-misses:u                                                         ( +-  0.16% )
+            335.03 msec cpu-clock:u                                                             ( +-  0.11% )
+
+       0.348318375 +- 0.000380850 seconds time elapsed  ( +-  0.11% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 1' (100 runs):
+
+           6309977      cycles:u                                                                ( +-  0.10% )
+          12082513      instructions:u                                                          ( +-  0.00% )
+           2106106      branches:u                                                              ( +-  0.00% )
+            108044      branch-misses:u                                                         ( +-  0.15% )
+              1.32 msec cpu-clock:u                                                             ( +-  0.32% )
+
+       0.002679786 +- 0.000015070 seconds time elapsed  ( +-  0.56% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 2' (100 runs):
+
+          12468442      cycles:u                                                                ( +-  0.11% )
+          24164945      instructions:u                                                          ( +-  0.00% )
+           4212191      branches:u                                                              ( +-  0.00% )
+            212379      branch-misses:u                                                         ( +-  0.18% )
+              2.58 msec cpu-clock:u                                                             ( +-  0.28% )
+
+       0.003974751 +- 0.000017239 seconds time elapsed  ( +-  0.43% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 4' (100 runs):
+
+          25020368      cycles:u                                                                ( +-  0.10% )
+          48329857      instructions:u                                                          ( +-  0.00% )
+           8424362      branches:u                                                              ( +-  0.00% )
+            422449      branch-misses:u                                                         ( +-  0.21% )
+              5.20 msec cpu-clock:u                                                             ( +-  0.24% )
+
+       0.006850945 +- 0.000021902 seconds time elapsed  ( +-  0.32% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 8' (100 runs):
+
+          49867185      cycles:u                                                                ( +-  0.10% )
+          96659546      instructions:u                                                          ( +-  0.00% )
+          16848705      branches:u                                                              ( +-  0.00% )
+            837535      branch-misses:u                                                         ( +-  0.20% )
+             10.30 msec cpu-clock:u                                                             ( +-  0.21% )
+
+       0.012252664 +- 0.000027127 seconds time elapsed  ( +-  0.22% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 16' (100 runs):
+
+          98499783      cycles:u                                                                ( +-  0.14% )
+         193318966      instructions:u                                                          ( +-  0.00% )
+          33697385      branches:u                                                              ( +-  0.00% )
+           1656043      branch-misses:u                                                         ( +-  0.23% )
+             20.24 msec cpu-clock:u                                                             ( +-  0.19% )
+
+       0.022442886 +- 0.000052122 seconds time elapsed  ( +-  0.23% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 32' (100 runs):
+
+         195542094      cycles:u                                                                ( +-  0.09% )
+         386637839      instructions:u                                                          ( +-  0.00% )
+          67394750      branches:u                                                              ( +-  0.00% )
+           3277755      branch-misses:u                                                         ( +-  0.17% )
+             40.15 msec cpu-clock:u                                                             ( +-  0.14% )
+
+       0.043155485 +- 0.000064721 seconds time elapsed  ( +-  0.15% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 64' (100 runs):
+
+         389711640      cycles:u                                                                ( +-  0.11% )
+         773275562      instructions:u                                                          ( +-  0.00% )
+         134789474      branches:u                                                              ( +-  0.00% )
+           6547792      branch-misses:u                                                         ( +-  0.20% )
+             79.95 msec cpu-clock:u                                                             ( +-  0.13% )
+
+       0.084460131 +- 0.000110174 seconds time elapsed  ( +-  0.13% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 128' (100 runs):
+
+         776550821      cycles:u                                                                ( +-  0.08% )
+        1546551032      instructions:u                                                          ( +-  0.00% )
+         269578926      branches:u                                                              ( +-  0.00% )
+          13006339      branch-misses:u                                                         ( +-  0.15% )
+            159.06 msec cpu-clock:u                                                             ( +-  0.10% )
+
+       0.166431703 +- 0.000158250 seconds time elapsed  ( +-  0.10% )
+
+
+ Performance counter stats for './build/charge benchmark table-hybrid benchmark-expr/benchmark-expr-nocomments.chrg -r 256' (100 runs):
+
+        1549421699      cycles:u                                                                ( +-  0.06% )
+        3093101974      instructions:u                                                          ( +-  0.00% )
+         539157828      branches:u                                                              ( +-  0.00% )
+          25912086      branch-misses:u                                                         ( +-  0.09% )
+            317.93 msec cpu-clock:u                                                             ( +-  0.10% )
+
+       0.331154060 +- 0.000328998 seconds time elapsed  ( +-  0.10% )
+

@@ -1,46 +1,36 @@
-# Charge Language
+# Charge Parser Presentation
 
-Charge is an experimental memory-safe systems programming language, most similar to C++ and Rust. It is a personal research project in early development. The primary goals of the language are:
+This branch contains the benchmarks and slides for the CppCon 2026 talk "Writing High Performance Parsers Using State Machines".
+For details about charge or the layout of the project check out the `master` branch.
 
-* **Proven memory safety ... :** rigorous and semi-automatic proofs, enabled by formalizing reference guarantees, object invariants and more in the project's own intermediate representation Chiral.
-* **... that doesn't get in the way:** most code should not interact with the proof system directly. Writing manual proofs is the escape hatch from inherently safe borrow-checked semantics.
-* **Extensive proof system:** advanced memory techniques and hacks that are possible in C++ should be possible in Charge too, when accompanied by a proof.
-* **Compact and powerful foundation:** the language is built on few but general concepts, unifying aspects of both C++ and Rust.
+## Slides
 
-## Status
+The slides are in the `presentation` directory. To host them locally run:
+```sh
+cd presentation
+npm install     # Only required once
+npm start       # Slides will be available at localhost:8000
+```
 
-It is currently not possible to compile or verify any real programs.
-The current work is focused on developing the safety-related compiler components individually and exercising them with tests. Integration between components is mostly missing and is only planned once they have reached a good level of maturity. Some important components, such as a compile-time interpreter and a code generation backend, are completely missing.
+## Results
 
-Next milestones:
-
-* Parse and semantically check all safety-related Charge features, in particular `context` parameters and borrow checking.
-* End-to-end test of Chiral: `input.chiral` &rarr; parsing to IR &rarr; backend ingest &rarr; SMT solving &rarr; proof replacement in IR &rarr; proof validation &rarr; formatting to file &rarr; `output.chiral`
-
-## Layout
-
-The project hosts two languages: Charge, a high-level systems programming language, and Chiral (<ins>Ch</ins>arge <ins>I</ins>ntermediate <ins>R</ins>epresentation <ins>A</ins>nd <ins>L</ins>anguage), a verification-focused intermediate representation.
-
-The Charge compiler found in the `compiler` directory has the following subcomponents:
-
-* `compiler/parse`: Parser for Charge, built using a custom parser generator.
-* `compiler/sema`: Semantic analysis of the Charge language.
-* `compiler/server`: LSP-based language server.
-
-The Chiral tools are found in `compiler/verify` and are subdivided into:
-
-* `compiler/verify/language`: Tools for the text representation of Chiral, such as a parser and formatter.
-* `compiler/verify/ir`: Definition and tools for the binary representation of Chiral.
-* `compiler/verify/backend`: From-scratch SMT solver focused on memory and invariant reasoning.
-
-There is also a Visual Studio Code extension in `vscode` with syntax highlighting for both languages and support for the Charge language server.
+Detailed benchmark results are in the `results` directory. To print the Google Benchmark JSON as a nice table run:
+```sh
+cat results/<architecture>/<file>_gbench.json | python3 benchmark-table.py
+```
+The `.txt` files contain records of `perf_ctl.bash` runs with different implementations, files and repetition counts. The `plot-benchmark.py` script can be used to create branch miss rate vs. repetition count plots using matplotlib. See `python3 plot-benchmark.py --help` for details.
 
 ## Building
 
-The project requires Python 3 and a C++23-compatible compiler and standard library. Building is tested with Clang 22 and GCC 15 on Ubuntu 26.04. The build produces a single binary `charge` that runs the test suite.
-```
-cmake -S . -B build
+The project requires Python 3 and a C++23-compatible compiler and standard library. Building is tested with Clang 22 and GCC 15 on Ubuntu 26.04. The build produces a single binary `charge` that runs the test suite by default. Clang should be used for optimal performance.
+```sh
+cmake -S . -B build -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22
 cmake --build build && ./build/charge
 ```
 
-To test the Visual Studio Code extension, Node.js is required. First run `npm install` once in the `vscode` directory to set up the extension. Then open the project in Visual Studio Code and press F5 or manually run the `Extension` configuration. This will open a development instance with the extension installed.
+`./build/charge gbench` exposes Google Benchmark and supports all normal Google Benchmark options. Note that misspelled parameters are unfortunately not diagnosed and silently ignored.
+
+`./build/charge benchmark <impl> <file> [-r <repeats>]` exposes a custom benchmarking interface that runs the implementation a fixed number of times. It supports instrumentation with the `perf_ctl.bash` script which perf-measures only the actual benchmark loop. It forwards all arguments to the charge binary, so use as `./perf_ctl.bash benchmark <impl> <file> [-r <repeats>]`.
+
+> [!NOTE]
+> Ubuntu 26.04 ships with `kernel.perf_event_paranoid=4` by default, which means that accessing any performance counters requires root privileges. To run the benchmarks with performance counters as a normal user this must be lowered to at most 2. To do this temporarily run `sudo sysctl --write kernel.perf_event_paranoid=2`.

@@ -1,0 +1,120 @@
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 1' (100 runs):
+
+          10587839      cycles:u                                                                ( +-  0.10% )
+          21411661      instructions:u                                                          ( +-  0.00% )
+           3528666      branches:u                                                              ( +-  0.00% )
+            161437      branch-misses:u                                                         ( +-  0.12% )
+              2.23 msec cpu-clock:u                                                             ( +-  0.26% )
+
+       0.004012321 +- 0.000018436 seconds time elapsed  ( +-  0.46% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 2' (100 runs):
+
+          21057536      cycles:u                                                                ( +-  0.09% )
+          42823209      instructions:u                                                          ( +-  0.00% )
+           7057309      branches:u                                                              ( +-  0.00% )
+            318147      branch-misses:u                                                         ( +-  0.14% )
+              4.36 msec cpu-clock:u                                                             ( +-  0.32% )
+
+       0.006195569 +- 0.000025511 seconds time elapsed  ( +-  0.41% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 4' (100 runs):
+
+          41948297      cycles:u                                                                ( +-  0.09% )
+          85646319      instructions:u                                                          ( +-  0.00% )
+          14114597      branches:u                                                              ( +-  0.00% )
+            627663      branch-misses:u                                                         ( +-  0.15% )
+              8.67 msec cpu-clock:u                                                             ( +-  0.19% )
+
+       0.010771944 +- 0.000026844 seconds time elapsed  ( +-  0.25% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 8' (100 runs):
+
+          83388652      cycles:u                                                                ( +-  0.08% )
+         171292519      instructions:u                                                          ( +-  0.00% )
+          28229174      branches:u                                                              ( +-  0.00% )
+           1243887      branch-misses:u                                                         ( +-  0.13% )
+             16.96 msec cpu-clock:u                                                             ( +-  0.16% )
+
+       0.019267467 +- 0.000042960 seconds time elapsed  ( +-  0.22% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 16' (100 runs):
+
+         166003622      cycles:u                                                                ( +-  0.08% )
+         342584907      instructions:u                                                          ( +-  0.00% )
+          56458325      branches:u                                                              ( +-  0.00% )
+           2472878      branch-misses:u                                                         ( +-  0.14% )
+             33.66 msec cpu-clock:u                                                             ( +-  0.13% )
+
+       0.036494362 +- 0.000060947 seconds time elapsed  ( +-  0.17% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 32' (100 runs):
+
+         331731594      cycles:u                                                                ( +-  0.07% )
+         685169719      instructions:u                                                          ( +-  0.00% )
+         112916623      branches:u                                                              ( +-  0.00% )
+           4936844      branch-misses:u                                                         ( +-  0.12% )
+             67.22 msec cpu-clock:u                                                             ( +-  0.11% )
+
+       0.071146054 +- 0.000092478 seconds time elapsed  ( +-  0.13% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 64' (100 runs):
+
+         661989945      cycles:u                                                                ( +-  0.09% )
+        1370339295      instructions:u                                                          ( +-  0.00% )
+         225833220      branches:u                                                              ( +-  0.00% )
+           9829065      branch-misses:u                                                         ( +-  0.17% )
+            134.16 msec cpu-clock:u                                                             ( +-  0.09% )
+
+       0.140224008 +- 0.000123420 seconds time elapsed  ( +-  0.09% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 128' (100 runs):
+
+        1317313755      cycles:u                                                                ( +-  0.09% )
+        2740678491      instructions:u                                                          ( +-  0.00% )
+         451666416      branches:u                                                              ( +-  0.00% )
+          19598985      branch-misses:u                                                         ( +-  0.19% )
+            267.57 msec cpu-clock:u                                                             ( +-  0.08% )
+
+       0.277765529 +- 0.000226904 seconds time elapsed  ( +-  0.08% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 256' (100 runs):
+
+        2639000861      cycles:u                                                                ( +-  0.08% )
+        5481356845      instructions:u                                                          ( +-  0.00% )
+         903332815      branches:u                                                              ( +-  0.00% )
+          39203678      branch-misses:u                                                         ( +-  0.16% )
+            536.61 msec cpu-clock:u                                                             ( +-  0.08% )
+
+       0.555140809 +- 0.000467064 seconds time elapsed  ( +-  0.08% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 512' (100 runs):
+
+        5274171397      cycles:u                                                                ( +-  0.07% )
+       10962713572      instructions:u                                                          ( +-  0.00% )
+        1806665608      branches:u                                                              ( +-  0.00% )
+          78469361      branch-misses:u                                                         ( +-  0.17% )
+           1071.60 msec cpu-clock:u                                                             ( +-  0.07% )
+
+       1.106116821 +- 0.000742548 seconds time elapsed  ( +-  0.07% )
+
+
+ Performance counter stats for './build/charge benchmark switch-and-branch benchmark/benchmark.chrg -r 1024' (100 runs):
+
+       10530448949      cycles:u                                                                ( +-  0.08% )
+       21925427012      instructions:u                                                          ( +-  0.00% )
+        3613331183      branches:u                                                              ( +-  0.00% )
+         156374135      branch-misses:u                                                         ( +-  0.17% )
+           2138.59 msec cpu-clock:u                                                             ( +-  0.07% )
+
+       2.205153334 +- 0.001525432 seconds time elapsed  ( +-  0.07% )

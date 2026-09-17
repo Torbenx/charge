@@ -65,16 +65,29 @@ class Result:
         self.repetitions = 1
         self.stats = {}
 
+    @staticmethod
+    def field(entry, field):
+        """Look a field up ignoring case: counters are spelled 'lines' or 'Lines'."""
+        if field in entry:
+            return entry[field]
+        folded = field.casefold()
+        for key, value in entry.items():
+            if key.casefold() == folded:
+                return value
+        return None
+
     def stat(self, aggregate, field):
         entry = self.stats.get(aggregate)
-        return entry.get(field) if entry else None
+        return self.field(entry, field) if entry else None
 
     def value(self, field):
         """Preferred point estimate: median, else mean, else the raw single run."""
         for aggregate in ("median", "mean", "single"):
             entry = self.stats.get(aggregate)
-            if entry and field in entry:
-                return entry[field]
+            if entry:
+                value = self.field(entry, field)
+                if value is not None:
+                    return value
         return None
 
     def counter(self, name):
