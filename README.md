@@ -5,12 +5,7 @@ For details about charge or the layout of the project check out the `master` bra
 
 ## Slides
 
-The slides are in the `presentation` directory. To host them locally run:
-```sh
-cd presentation
-npm install     # Only required once
-npm start       # Slides will be available at localhost:8000
-```
+The slides are hosted at [cppcon2026.trivial.ly](https://cppcon2026.trivial.ly). The presentation sources are at [highperformanceparsers-cppcon2026](https://github.com/Torbenx/highperformanceparsers-cppcon2026).
 
 ## Results
 
