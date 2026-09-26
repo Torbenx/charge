@@ -4,10 +4,10 @@ The main part is the compiler in the `compiler` directory which is further subdi
 * `compiler/parse` containing the parser generator
 * `compiler/sema` containing the semantic analysis
 * `compiler/server` containing an LSP based language server
-* `compiler/verify` containing an itermediate reprensentation and SMT solver to prove memory safety. It has further subcomponents:
-    * `verify/ir` contains definitions and tools for the IR
+* `compiler/verify` containing an itermediate reprensentation called chiral and an SMT solver to prove memory safety. It has further subcomponents:
+    * `verify/ir` contains definitions and tools for chiral
     * `verify/backend` contains the SMT solver
-    * `verify/language` contains a text based representation for the IR
+    * `verify/language` contains a text based representation of chiral
 
 Test files are contained in the `tests` directory.
 
