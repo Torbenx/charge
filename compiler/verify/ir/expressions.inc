@@ -57,7 +57,7 @@ COMPOUND_EXPR(LocationMemorySet, MemorySet, MemoryLoc loc)
 COMPOUND_EXPR(InclusiveInvariantSet, InvariantSet, MemoryLoc loc)
 COMPOUND_EXPR(ExclusiveInvariantSet, InvariantSet, MemoryLoc loc)
 COMPOUND_EXPR(PathInvariantSet, InvariantSet, MemoryLoc loc)
-COMPOUND_EXPR(SingletonInvariantSet, InvariantSet, MemoryLoc loc, Invariant invariant)
+COMPOUND_EXPR(ExactInvariantSet, InvariantSet, MemoryLoc loc, Invariant invariant)
 
 #undef VARIADIC_EXPR
 #undef COMPOUND_EXPR

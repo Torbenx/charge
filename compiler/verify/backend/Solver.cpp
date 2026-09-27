@@ -310,7 +310,7 @@ void Solver::propagateSetContainment(Sets&, SetElement element, SetContainment c
     case TheoryId::InclusiveLocationInvariantSets:
     case TheoryId::ExclusiveLocationInvariantSets:
     case TheoryId::PathInvariantSets:
-    case TheoryId::InvariantSingletonSets:
+    case TheoryId::ExactInvariantSets:
         impl().invariantSets.propagateContainment(*this, element, containment);
         break;
     default:
@@ -410,8 +410,8 @@ InvariantSet Solver::pathInvariantSet(MemoryLocation location) {
     return impl().invariantSets.pathSet(*this, location);
 }
 
-InvariantSet Solver::invariantSingletonSet(MemoryLocation location, Invariant invariant) {
-    return impl().invariantSets.singletonSet(*this, location, invariant);
+InvariantSet Solver::exactInvariantSet(MemoryLocation location, Invariant invariant) {
+    return impl().invariantSets.exactSet(*this, location, invariant);
 }
 
 MemoryLocation Solver::locationOf(InvariantSet set) {
@@ -547,7 +547,7 @@ std::strong_ordering Solver::rewriteOrder(Value a, Value b) {
     case TheoryId::ExclusiveLocationInvariantSets:
     case TheoryId::PathInvariantSets:
         return locationOrder(*this, locationOf((InvariantSet)a), locationOf((InvariantSet)b));
-    case TheoryId::InvariantSingletonSets: {
+    case TheoryId::ExactInvariantSets: {
         auto locationOrdering = locationOrder(*this, locationOf((InvariantSet)a), locationOf((InvariantSet)b));
         if (locationOrdering != 0)
             return locationOrdering;
@@ -646,15 +646,15 @@ void SolverImpl::onNewPair(PairHandle handle) {
             Bool setEq = equality(handle);
             Bool declarationEq = equality(locationA.declaration, locationB.declaration);
             Bool memberEq = equality(locationA.member, locationB.member);
-            if (theory != TheoryId::InvariantSingletonSets || invariantOf((InvariantSet)a) == invariantOf((InvariantSet)b)) {
+            if (theory != TheoryId::ExactInvariantSets || invariantOf((InvariantSet)a) == invariantOf((InvariantSet)b)) {
                 addClause({ setEq, !declarationEq, !memberEq });
                 // Separate clauses for a/b empty are necessary for reverse implications such as:
                 //   decl(a) != decl(b) && !isEmpty(b) => a != b
                 // The same rule for members would break for structs with a single non-empty member.
                 addClause({ !setEq, isEmpty((Set)a), declarationEq });
                 addClause({ !setEq, isEmpty((Set)b), declarationEq });
-                if (theory == TheoryId::InvariantSingletonSets) {
-                    // For singleton sets the member is also pinned.
+                if (theory == TheoryId::ExactInvariantSets) {
+                    // For exact sets the member is also pinned.
                     addClause({ !setEq, isEmpty((Set)a), memberEq });
                     addClause({ !setEq, isEmpty((Set)b), memberEq });
                 }

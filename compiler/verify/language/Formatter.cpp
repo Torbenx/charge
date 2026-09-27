@@ -540,9 +540,9 @@ private:
             appendSetOfLocation(text, "path_iset", ir.getPathInvariantSet((ir::InvariantSet)expr).loc);
             return;
         default:
-            // A singleton invariant set names its invariant with a global, which cannot be
+            // An exact invariant set names its invariant with a global, which cannot be
             // looked up yet, so it has no syntax to be written with either
-            VERIFY_NOT_REACHED(); // The expression has no syntax in the language yet
+            VERIFY_NOT_REACHED();
         }
     }
 

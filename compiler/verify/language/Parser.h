@@ -34,6 +34,7 @@ inline constexpr ConstWordStringTable words {
     "incl_iset",
     "excl_iset",
     "path_iset",
+    "exact_iset",
     "invariant",
 #define TACTIC(name, snake_case) #snake_case,
 #include <verify/ir/tactics.inc>

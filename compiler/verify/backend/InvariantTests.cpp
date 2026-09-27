@@ -18,32 +18,32 @@ TEST(VerifyBackend, InvariantSetsAreUniquePerLocation) {
     InvariantSet part = solver.inclusiveInvariantSet(d1, m);
     InvariantSet other = solver.inclusiveInvariantSet(d2, identity_member);
     InvariantSet above = solver.pathInvariantSet(d1, m);
-    InvariantSet singleton = solver.invariantSingletonSet(d1, m, i1);
-    InvariantSet otherSingleton = solver.invariantSingletonSet(d1, m, i2);
+    InvariantSet exact = solver.exactInvariantSet(d1, m, i1);
+    InvariantSet otherExact = solver.exactInvariantSet(d1, m, i2);
 
     EXPECT_TRUE(whole == solver.inclusiveInvariantSet(d1, identity_member));
     EXPECT_TRUE(below == solver.exclusiveInvariantSet(d1, identity_member));
     EXPECT_TRUE(above == solver.pathInvariantSet(d1, m));
-    EXPECT_TRUE(singleton == solver.invariantSingletonSet(d1, m, i1));
+    EXPECT_TRUE(exact == solver.exactInvariantSet(d1, m, i1));
 
     // The four kinds describe different sets, and so do the different locations and invariants
     EXPECT_FALSE(whole == below);
     EXPECT_FALSE(whole == part);
     EXPECT_FALSE(whole == other);
     EXPECT_FALSE(part == above);
-    EXPECT_FALSE(singleton == otherSingleton);
+    EXPECT_FALSE(exact == otherExact);
 
     EXPECT_TRUE(solver.locationOf(part) == MemoryLocation(d1, m));
     EXPECT_TRUE(solver.locationOf(below) == MemoryLocation(d1, identity_member));
     EXPECT_TRUE(solver.locationOf(above) == MemoryLocation(d1, m));
-    EXPECT_TRUE(solver.locationOf(singleton) == MemoryLocation(d1, m));
-    EXPECT_TRUE(solver.invariantOf(singleton) == i1);
-    EXPECT_TRUE(solver.invariantOf(otherSingleton) == i2);
+    EXPECT_TRUE(solver.locationOf(exact) == MemoryLocation(d1, m));
+    EXPECT_TRUE(solver.invariantOf(exact) == i1);
+    EXPECT_TRUE(solver.invariantOf(otherExact) == i2);
 
     EXPECT_EQ(solver.valueCount(TheoryId::InclusiveLocationInvariantSets), 3);
     EXPECT_EQ(solver.valueCount(TheoryId::ExclusiveLocationInvariantSets), 1);
     EXPECT_EQ(solver.valueCount(TheoryId::PathInvariantSets), 1);
-    EXPECT_EQ(solver.valueCount(TheoryId::InvariantSingletonSets), 2);
+    EXPECT_EQ(solver.valueCount(TheoryId::ExactInvariantSets), 2);
 }
 
 TEST(VerifyBackend, InvariantSetsLookup) {
@@ -53,7 +53,7 @@ TEST(VerifyBackend, InvariantSetsLookup) {
     std::vector<InvariantSet> inclusive;
     std::vector<InvariantSet> exclusive;
     std::vector<InvariantSet> paths;
-    std::vector<InvariantSet> singletons;
+    std::vector<InvariantSet> exact;
     for (int_t i = 0; i < 8; i++) {
         MemoryDeclaration declaration = solver.newAuxMemoryDeclarationVariable();
         for (int_t j = 0; j < 32; j++) {
@@ -61,24 +61,24 @@ TEST(VerifyBackend, InvariantSetsLookup) {
             inclusive.push_back(solver.inclusiveInvariantSet(locations.back()));
             exclusive.push_back(solver.exclusiveInvariantSet(locations.back()));
             paths.push_back(solver.pathInvariantSet(locations.back()));
-            singletons.push_back(solver.invariantSingletonSet(locations.back(), Invariant(j)));
+            exact.push_back(solver.exactInvariantSet(locations.back(), Invariant(j)));
         }
     }
 
     EXPECT_EQ(solver.valueCount(TheoryId::InclusiveLocationInvariantSets), (int_t)locations.size());
     EXPECT_EQ(solver.valueCount(TheoryId::ExclusiveLocationInvariantSets), (int_t)locations.size());
     EXPECT_EQ(solver.valueCount(TheoryId::PathInvariantSets), (int_t)locations.size());
-    EXPECT_EQ(solver.valueCount(TheoryId::InvariantSingletonSets), (int_t)locations.size());
+    EXPECT_EQ(solver.valueCount(TheoryId::ExactInvariantSets), (int_t)locations.size());
     for (int_t i = 0; i < (int_t)locations.size(); i++) {
         EXPECT_TRUE(solver.inclusiveInvariantSet(locations[i]) == inclusive[i]);
         EXPECT_TRUE(solver.exclusiveInvariantSet(locations[i]) == exclusive[i]);
         EXPECT_TRUE(solver.pathInvariantSet(locations[i]) == paths[i]);
-        EXPECT_TRUE(solver.invariantSingletonSet(locations[i], Invariant(i % 32)) == singletons[i]);
+        EXPECT_TRUE(solver.exactInvariantSet(locations[i], Invariant(i % 32)) == exact[i]);
         EXPECT_TRUE(solver.locationOf(inclusive[i]) == locations[i]);
         EXPECT_TRUE(solver.locationOf(exclusive[i]) == locations[i]);
         EXPECT_TRUE(solver.locationOf(paths[i]) == locations[i]);
-        EXPECT_TRUE(solver.locationOf(singletons[i]) == locations[i]);
-        EXPECT_TRUE(solver.invariantOf(singletons[i]) == Invariant(i % 32));
+        EXPECT_TRUE(solver.locationOf(exact[i]) == locations[i]);
+        EXPECT_TRUE(solver.invariantOf(exact[i]) == Invariant(i % 32));
     }
 }
 
@@ -201,7 +201,7 @@ TEST(VerifyBackend, InvariantPathSetsOfAMemberAndItsMemberCanBeEqual) {
     EXPECT_FALSE(solver.hasConflicts());
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsNeedTheSameInvariant) {
+TEST(VerifyBackend, InvariantExactSetsNeedTheSameInvariant) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -209,29 +209,29 @@ TEST(VerifyBackend, InvariantSingletonSetsNeedTheSameInvariant) {
     Invariant i1(0);
     Invariant i2(1);
 
-    Bool sameInvariant = solver.equality(solver.invariantSingletonSet(d, m1, i1),
-        solver.invariantSingletonSet(d, m2, i1));
-    Bool otherInvariant = solver.equality(solver.invariantSingletonSet(d, m1, i1),
-        solver.invariantSingletonSet(d, m2, i2));
+    Bool sameInvariant = solver.equality(solver.exactInvariantSet(d, m1, i1),
+        solver.exactInvariantSet(d, m2, i1));
+    Bool otherInvariant = solver.equality(solver.exactInvariantSet(d, m1, i1),
+        solver.exactInvariantSet(d, m2, i2));
 
     solver.decideTrue(solver.equality(m1, m2));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
 
-    // The location decides the singleton of one invariant, but the invariants of two of them are distinct
+    // The location decides the exact set of one invariant, but the invariants of two of them are distinct
     EXPECT_TRUE(solver.assignedTrue(sameInvariant));
     EXPECT_FALSE(solver.assignedTrue(otherInvariant));
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
+TEST(VerifyBackend, InvariantExactSetsHoldOneInvariant) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
     Invariant i(0);
 
-    InvariantSet a = solver.invariantSingletonSet(d, m1, i);
-    InvariantSet b = solver.invariantSingletonSet(d, m2, i);
+    InvariantSet a = solver.exactInvariantSet(d, m1, i);
+    InvariantSet b = solver.exactInvariantSet(d, m2, i);
 
     auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
@@ -239,8 +239,8 @@ TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
     solver.propagate();
     EXPECT_FALSE(solver.assignedTrue(solver.equality(m1, m2)));
 
-    // A singleton set holds nothing but the singleton of its invariant at its location, so a singleton of two of
-    // them is the same singleton and the locations of the two are the same as well
+    // An exact set holds nothing but its invariant at its location, so an element of two of them is the same
+    // invariant and the locations of the two are the same as well
     solver.decideTrue(e, Sets::in(b));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
@@ -248,13 +248,13 @@ TEST(VerifyBackend, InvariantSingletonSetsHoldOneInvariant) {
     EXPECT_TRUE(solver.assignedTrue(solver.equality(m1, m2)));
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
+TEST(VerifyBackend, InvariantExactSetsOfDistinctInvariantsAreDisjoint) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    InvariantSet a = solver.invariantSingletonSet(d, m, Invariant(0));
-    InvariantSet b = solver.invariantSingletonSet(d, m, Invariant(1));
+    InvariantSet a = solver.exactInvariantSet(d, m, Invariant(0));
+    InvariantSet b = solver.exactInvariantSet(d, m, Invariant(1));
 
     auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
@@ -262,20 +262,20 @@ TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
 
-    // The singletons of two invariants are distinct even at the same location, so no singleton is in both
+    // The exact sets of two invariants are distinct even at the same location, so no element is in both
     solver.decideTrue(e, Sets::in(b));
     solver.propagate();
     EXPECT_TRUE(solver.hasConflicts());
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsDisequalIfNonEmpty) {
+TEST(VerifyBackend, InvariantExactSetsDisequalIfNonEmpty) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
 
-    InvariantSet a = solver.invariantSingletonSet(d, m1, Invariant(0));
-    InvariantSet b = solver.invariantSingletonSet(d, m2, Invariant(1));
+    InvariantSet a = solver.exactInvariantSet(d, m1, Invariant(0));
+    InvariantSet b = solver.exactInvariantSet(d, m2, Invariant(1));
     Bool eq = solver.equality(a, b);
     EXPECT_FALSE(solver.assignedFalse(eq));
 
@@ -294,18 +294,18 @@ TEST(VerifyBackend, InvariantSingletonSetsDisequalIfNonEmpty) {
     EXPECT_TRUE(solver.assignedTrue(solver.isEmpty(b)));
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsOfDistinctLocationsAreEqualOnlyIfEmpty) {
+TEST(VerifyBackend, InvariantExactSetsOfDistinctLocationsAreEqualOnlyIfEmpty) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
     Member m2 = solver.newAuxMemberVariable();
 
-    InvariantSet a = solver.invariantSingletonSet(d, m1, Invariant(0));
-    InvariantSet b = solver.invariantSingletonSet(d, m2, Invariant(0));
+    InvariantSet a = solver.exactInvariantSet(d, m1, Invariant(0));
+    InvariantSet b = solver.exactInvariantSet(d, m2, Invariant(0));
     Bool eq = solver.equality(a, b);
     solver.propagate();
 
-    // Neither location has to have the invariant, and without it both singletons are the empty set
+    // Neither location has to have the invariant, and without it both exact sets are the empty set
     solver.decideTrue(!solver.equality(m1, m2));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
@@ -318,20 +318,20 @@ TEST(VerifyBackend, InvariantSingletonSetsOfDistinctLocationsAreEqualOnlyIfEmpty
     EXPECT_TRUE(solver.assignedTrue(solver.isEmpty(b)));
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAtOneLocationCanBothBeNonEmpty) {
+TEST(VerifyBackend, InvariantExactSetsOfDistinctInvariantsAtOneLocationCanBothBeNonEmpty) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    InvariantSet a = solver.invariantSingletonSet(d, m, Invariant(0));
-    InvariantSet b = solver.invariantSingletonSet(d, m, Invariant(1));
+    InvariantSet a = solver.exactInvariantSet(d, m, Invariant(0));
+    InvariantSet b = solver.exactInvariantSet(d, m, Invariant(1));
     Bool eq = solver.equality(a, b);
     solver.propagate();
 
-    // The same location does not make the singletons of two invariants equal
+    // The same location does not make the exact sets of two invariants equal
     EXPECT_FALSE(solver.assignedTrue(eq));
 
-    // A location can have both invariants at once, which makes the two singletons distinct
+    // A location can have both invariants at once, which makes the two exact sets distinct
     auto e1 = solver.newSetElement(Sort::InvariantSet);
     auto e2 = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
@@ -343,13 +343,13 @@ TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAtOneLocationCanBo
     EXPECT_TRUE(solver.assignedFalse(eq));
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
+TEST(VerifyBackend, InvariantExactSetsAreBacktracked) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m = solver.newAuxMemberVariable();
 
-    InvariantSet a = solver.invariantSingletonSet(d, m, Invariant(0));
-    InvariantSet b = solver.invariantSingletonSet(d, m, Invariant(1));
+    InvariantSet a = solver.exactInvariantSet(d, m, Invariant(0));
+    InvariantSet b = solver.exactInvariantSet(d, m, Invariant(1));
 
     auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
@@ -357,13 +357,13 @@ TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
     solver.decideTrue(e, Sets::in(a));
     solver.propagate();
 
-    // Reverting the containment must forget the singleton set it was found in
+    // Reverting the containment must forget the exact set it was found in
     solver.beginBacktrack(levelBeforeContainment + 1);
     solver.endBacktrack();
     solver.checkInvariances();
     EXPECT_FALSE(solver.assignedTrue(e, Sets::in(a)));
 
-    // So the singleton of another invariant is not compared against it anymore
+    // So the exact set of another invariant is not compared against it anymore
     solver.decideTrue(e, Sets::in(b));
     solver.propagate();
     EXPECT_FALSE(solver.hasConflicts());
@@ -378,8 +378,8 @@ TEST(VerifyBackend, InvariantSetsInSetTheory) {
     Invariant i(0);
 
     InvariantSet whole = solver.inclusiveInvariantSet(d, identity_member);
-    InvariantSet singleton = solver.invariantSingletonSet(d, m, i);
-    Set u = solver.union_({ whole, singleton });
+    InvariantSet exact = solver.exactInvariantSet(d, m, i);
+    Set u = solver.union_({ whole, exact });
 
     Bool eq = solver.equality(u, whole);
     solver.propagate();
@@ -389,7 +389,7 @@ TEST(VerifyBackend, InvariantSetsInSetTheory) {
     // be asserted explicitly.
     auto e = solver.newSetElement(Sort::InvariantSet);
     solver.propagate();
-    solver.addClause({ solver.equality(solver.subset({ singleton }, { whole }), solver.emptySet(Sort::InvariantSet)) });
+    solver.addClause({ solver.equality(solver.subset({ exact }, { whole }), solver.emptySet(Sort::InvariantSet)) });
     solver.propagate();
 
     solver.decideTrue(e, Sets::in(solver.subset({ u }, { whole })));

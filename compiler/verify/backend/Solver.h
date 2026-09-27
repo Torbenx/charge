@@ -153,14 +153,14 @@ struct Solver {
         return pathInvariantSet({ declaration, member });
     }
     //! The set holding \p invariant of \p location, which is empty if \p location does not have it
-    InvariantSet invariantSingletonSet(MemoryLocation location, Invariant invariant);
-    InvariantSet invariantSingletonSet(MemoryDeclaration declaration, Member member, Invariant invariant) {
-        return invariantSingletonSet({ declaration, member }, invariant);
+    InvariantSet exactInvariantSet(MemoryLocation location, Invariant invariant);
+    InvariantSet exactInvariantSet(MemoryDeclaration declaration, Member member, Invariant invariant) {
+        return exactInvariantSet({ declaration, member }, invariant);
     }
 
     //! The location \p set describes
     MemoryLocation locationOf(InvariantSet set);
-    //! The invariant of the singleton set \p set
+    //! The invariant of the exact set \p set
     Invariant invariantOf(InvariantSet set);
 
     Member composeMembers(std::span<const Member>);

@@ -15,7 +15,7 @@ There are four kinds of sets:
 - An inclusive location set holds the invariants of its location and those of its members
 - An exclusive location set holds only the invariants of its members
 - A path location set holds the invariants of the locations strictly above its own
-- An invariant singleton set holds its invariant at its location if the type of the location has
+- An exact set holds its invariant at its location if the type of the location has
   that invariant, and is empty otherwise.
 
 The first two grow downwards with their location, the path sets grow upwards. The path set of
@@ -45,7 +45,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
     InvariantSet inclusiveSet(Solver&, MemoryLocation);
     InvariantSet exclusiveSet(Solver&, MemoryLocation);
     InvariantSet pathSet(Solver&, MemoryLocation);
-    InvariantSet singletonSet(Solver&, MemoryLocation, Invariant);
+    InvariantSet exactSet(Solver&, MemoryLocation, Invariant);
 
     //! Whether \p value is one of the kinds of this theory
     static constexpr bool isInvariantSet(Value value) {
@@ -53,7 +53,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
         case TheoryId::InclusiveLocationInvariantSets:
         case TheoryId::ExclusiveLocationInvariantSets:
         case TheoryId::PathInvariantSets:
-        case TheoryId::InvariantSingletonSets:
+        case TheoryId::ExactInvariantSets:
             return true;
         default:
             return false;
@@ -68,16 +68,16 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
             return exclusiveInfos[set].location;
         case TheoryId::PathInvariantSets:
             return pathInfos[set].location;
-        case TheoryId::InvariantSingletonSets:
-            return singletonInfos[set].location;
+        case TheoryId::ExactInvariantSets:
+            return exactInfos[set].location;
         default:
             VERIFY_NOT_REACHED();
         }
     }
 
     Invariant invariantOf(InvariantSet set) const {
-        VERIFY(set.theory() == TheoryId::InvariantSingletonSets);
-        return singletonInfos[set].invariant;
+        VERIFY(set.theory() == TheoryId::ExactInvariantSets);
+        return exactInfos[set].invariant;
     }
 
     void addWords(Solver&, PrefixIndex&, SetElement, SetContainment);
@@ -99,31 +99,31 @@ private:
         MemoryLocation location { MemoryDeclaration(INVALID_VALUE) };
     };
 
-    struct SingletonSetInfo {
-        SingletonSetInfo() = default;
+    struct ExactSetInfo {
+        ExactSetInfo() = default;
         MemoryLocation location { MemoryDeclaration(INVALID_VALUE) };
         Invariant invariant { limits::max };
     };
 
-    struct SingletonKey {
+    struct ExactSetKey {
         MemoryLocation location;
         Invariant invariant;
 
-        bool operator==(const SingletonKey&) const = default;
+        bool operator==(const ExactSetKey&) const = default;
     };
 
-    struct SingletonHash {
-        size_t operator()(const SingletonKey& key) const {
+    struct ExactSetHash {
+        size_t operator()(const ExactSetKey& key) const {
             size_t hash = MemoryLocationHash()(key.location);
             hash_combine(hash, key.invariant.id());
             return hash;
         }
     };
 
-    struct SingletonIndex : KeyWatches<SingletonIndex, InvariantSet, InvariantSet> {
+    struct ExactSetIndex : KeyWatches<ExactSetIndex, InvariantSet, InvariantSet> {
         static constexpr KeyWatchesParams PARAMS = {
-            .keyUse = UseKind::InvariantSingletonKeyUse,
-            .watchUse = UseKind::InvariantSingletonWatchUse,
+            .keyUse = UseKind::InvariantExactKeyUse,
+            .watchUse = UseKind::InvariantExactWatchUse,
         };
 
         InvariantSets& invariantSets();
@@ -136,17 +136,17 @@ private:
     // Note: The keys of these maps could be obtained from the stored values
     using LocationSets = std::unordered_map<MemoryLocation, InvariantSet, MemoryLocationHash>;
 
-    SingletonIndex singletonIndex;
+    ExactSetIndex exactSetIndex;
 
     TheoryData<LocationSetInfo, TheoryId::InclusiveLocationInvariantSets> inclusiveInfos;
     TheoryData<LocationSetInfo, TheoryId::ExclusiveLocationInvariantSets> exclusiveInfos;
     TheoryData<LocationSetInfo, TheoryId::PathInvariantSets> pathInfos;
-    TheoryData<SingletonSetInfo, TheoryId::InvariantSingletonSets> singletonInfos;
+    TheoryData<ExactSetInfo, TheoryId::ExactInvariantSets> exactInfos;
 
     LocationSets inclusiveSets;
     LocationSets exclusiveSets;
     LocationSets pathSets;
-    std::unordered_map<SingletonKey, InvariantSet, SingletonHash> singletonSets;
+    std::unordered_map<ExactSetKey, InvariantSet, ExactSetHash> exactSets;
 };
 
 }

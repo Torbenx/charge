@@ -64,7 +64,7 @@ SET_THEORY(InvariantSet, invariantSetsBaseTheory)
 THEORY(InclusiveLocationInvariantSets, InvariantSet)
 THEORY(ExclusiveLocationInvariantSets, InvariantSet)
 THEORY(PathInvariantSets, InvariantSet)
-THEORY(InvariantSingletonSets, InvariantSet)
+THEORY(ExactInvariantSets, InvariantSet)
 
 THEORY(MemberLiterals, Member)
 THEORY(CompositeMembers, Member)
@@ -82,9 +82,9 @@ REASON(MemoryDeclarationsShareElement, SharedElementReason, false, memorySets)
 
 REASON(InvariantPrefixHit, PrefixHitData, false, invariantSets)
 REASON(InvariantDeclarationsShareElement, SharedElementReason, false, invariantSets)
-REASON(InvariantSingletonSetsShareElement, SharedElementReason, false, invariantSets)
-REASON(InvariantSingletonToInclusive, SingletonToInclusiveReason, false, invariantSets)
-REASON(InvariantSingletonConflict, SharedElementReason, false, invariantSets)
+REASON(InvariantExactSetsShareElement, SharedElementReason, false, invariantSets)
+REASON(InvariantExactToInclusive, ExactToInclusiveReason, false, invariantSets)
+REASON(InvariantExactConflict, SharedElementReason, false, invariantSets)
 
 USE_KIND(Test, useTest)
 USE_KIND(KeyWatchesTestKey, useTest)
@@ -95,8 +95,8 @@ USE_KIND(MemoryPrefixWord, memorySets)
 USE_KIND(InvariantSetRepresentative, invariantSets)
 USE_KIND(InvariantSetPendingContainment, invariantSets)
 USE_KIND(InvariantPrefixWord, invariantSets)
-USE_KIND(InvariantSingletonKeyUse, invariantSets)
-USE_KIND(InvariantSingletonWatchUse, invariantSets)
+USE_KIND(InvariantExactKeyUse, invariantSets)
+USE_KIND(InvariantExactWatchUse, invariantSets)
 
 #undef REASON
 #undef USE_KIND

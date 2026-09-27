@@ -76,7 +76,7 @@ TEST(VerifyIR, CheckSetConstructorSorts) {
 
     fn.addLocationMemorySet({ loc });
     fn.addExclusiveInvariantSet({ loc });
-    fn.addSingletonInvariantSet({ loc, Invariant(0) });
+    fn.addExactInvariantSet({ loc, Invariant(0) });
     EXPECT_TRUE(check(fn).malformedExpressions.empty());
 
     // A set of a location is built from a location, whatever the set describes about it
@@ -91,16 +91,16 @@ TEST(VerifyIR, CheckSetSorts) {
     // The sort of a set operation follows from its kind, as it does for a load
     EXPECT_EQ(fn.sortOf(fn.addLocationMemorySet({ loc })), Sort::MemorySet);
     EXPECT_EQ(fn.sortOf(fn.addInclusiveInvariantSet({ loc })), Sort::InvariantSet);
-    EXPECT_EQ(fn.sortOf(fn.addSingletonInvariantSet({ loc, Invariant(7) })), Sort::InvariantSet);
+    EXPECT_EQ(fn.sortOf(fn.addExactInvariantSet({ loc, Invariant(7) })), Sort::InvariantSet);
     EXPECT_EQ(fn.sortOf(fn.emptySet(Sort::MemorySet)), Sort::MemorySet);
     EXPECT_EQ(fn.sortOf(fn.emptySet(Sort::InvariantSet)), Sort::InvariantSet);
 
-    // An invariant is part of the identity of the singleton set it is the only element of
-    EXPECT_EQ(fn.addSingletonInvariantSet({ loc, Invariant(7) }),
-        fn.addSingletonInvariantSet({ loc, Invariant(7) }));
-    EXPECT_NE(fn.addSingletonInvariantSet({ loc, Invariant(7) }),
-        fn.addSingletonInvariantSet({ loc, Invariant(8) }));
-    EXPECT_EQ(fn.getSingletonInvariantSet(fn.addSingletonInvariantSet({ loc, Invariant(7) })).invariant,
+    // An invariant is part of the identity of the exact set it is the only possible element of
+    EXPECT_EQ(fn.addExactInvariantSet({ loc, Invariant(7) }),
+        fn.addExactInvariantSet({ loc, Invariant(7) }));
+    EXPECT_NE(fn.addExactInvariantSet({ loc, Invariant(7) }),
+        fn.addExactInvariantSet({ loc, Invariant(8) }));
+    EXPECT_EQ(fn.getExactInvariantSet(fn.addExactInvariantSet({ loc, Invariant(7) })).invariant,
         Invariant(7));
 }
 

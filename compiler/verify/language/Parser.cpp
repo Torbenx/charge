@@ -897,7 +897,7 @@ struct FunctionParser {
     static bool isSetConstructor(Word id) {
         return id == words["mset"] || id == words["iset"]
             || id == words["incl_iset"] || id == words["excl_iset"]
-            || id == words["path_iset"] || id == words["invariant"];
+            || id == words["path_iset"] || id == words["exact_iset"];
     }
 
     //! The sets a memory location describes, together with the empty set of either set sort
@@ -918,22 +918,22 @@ struct FunctionParser {
                 return ir.emptySet(ir::Sort::InvariantSet);
             s.error("Expected a memory location in a set constructor");
         }
-        // The invariant sets of a location are the inclusive, the exclusive and the path one,
+        // The invariant sets of a location are the inclusive, the exclusive, the path and the exact one,
         // so 'iset' is only ever written as the empty set
         if (id == words["iset"])
-            s.error("Expected ')' after 'iset(', an invariant set of a location is written with 'incl_iset', 'excl_iset' or 'path_iset'");
+            s.error("Expected ')' after 'iset(', an invariant set of a location is written with 'incl_iset', 'excl_iset', 'path_iset' or 'exact_iset'");
 
         ir::MemoryLoc loc = parseExpression<ir::MemoryLoc>(s);
 
-        if (id == words["invariant"]) {
+        if (id == words["exact_iset"]) {
             if (s.tokKind() != TokenKind::Comma)
-                s.error("Expected ',' after the location of an invariant");
+                s.error("Expected ',' after the location of an exact invariant set");
             s.advance();
             if (s.tokKind() != TokenKind::GlobalName)
                 s.error("Expected the global name of an invariant");
             s.advance();
             // TODO: Resolve the name to the invariant it stands for and build the expression
-            // 'ir.addSingletonInvariantSet({ loc, invariant })' from it
+            // 'ir.addExactInvariantSet({ loc, invariant })' from it
             VERIFY_NOT_REACHED();
         }
 

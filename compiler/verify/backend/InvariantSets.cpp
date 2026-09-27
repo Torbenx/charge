@@ -8,13 +8,13 @@ namespace verify::backend {
 
 template struct MemoryLocationSets<InvariantSets>;
 
-struct SingletonToInclusiveReason {
+struct ExactToInclusiveReason {
     SetElement element;
-    InvariantSet singletonSet;
+    InvariantSet exactSet;
 };
 
 InvariantSets::InvariantSets(Solver& solver)
-    : Base(solver), inclusiveInfos(solver), exclusiveInfos(solver), pathInfos(solver), singletonInfos(solver) { }
+    : Base(solver), inclusiveInfos(solver), exclusiveInfos(solver), pathInfos(solver), exactInfos(solver) { }
 
 template<typename Info, TheoryId theory>
 static InvariantSet locationSet(
@@ -53,16 +53,16 @@ InvariantSet InvariantSets::pathSet(Solver& solver, MemoryLocation location) {
     return locationSet(solver, pathSets, pathInfos, location);
 }
 
-InvariantSet InvariantSets::singletonSet(Solver& solver, MemoryLocation location, Invariant invariant) {
-    SingletonKey key { location, invariant };
-    auto it = singletonSets.find(key);
-    if (it != singletonSets.end())
+InvariantSet InvariantSets::exactSet(Solver& solver, MemoryLocation location, Invariant invariant) {
+    ExactSetKey key { location, invariant };
+    auto it = exactSets.find(key);
+    if (it != exactSets.end())
         return it->second;
 
-    InvariantSet newSet = (InvariantSet)solver.newValue(TheoryId::InvariantSingletonSets);
-    singletonInfos[newSet].location = location;
-    singletonInfos[newSet].invariant = invariant;
-    singletonSets.emplace(key, newSet);
+    InvariantSet newSet = (InvariantSet)solver.newValue(TheoryId::ExactInvariantSets);
+    exactInfos[newSet].location = location;
+    exactInfos[newSet].invariant = invariant;
+    exactSets.emplace(key, newSet);
     return newSet;
 }
 
@@ -82,7 +82,7 @@ void InvariantSets::addWords(Solver& solver, PrefixIndex& prefixes, SetElement e
         role = cont.contained() ? PrefixIndex::Role::Prefix : PrefixIndex::Role::Path;
         inclusion = PrefixIndex::SelfInclusion::Inclusive;
         break;
-    case TheoryId::InvariantSingletonSets:
+    case TheoryId::ExactInvariantSets:
         if (!cont.contained())
             return;
         role = PrefixIndex::Role::Prefix;
@@ -97,7 +97,7 @@ void InvariantSets::addWords(Solver& solver, PrefixIndex& prefixes, SetElement e
 
 void InvariantSets::propagateRewrite(Solver& solver, Use use) {
     Base::propagateRewrite(solver, use);
-    singletonIndex.propagateRewrite(solver, use);
+    exactSetIndex.propagateRewrite(solver, use);
 }
 
 void InvariantSets::propagateContainment(Solver& solver, SetElement element, SetContainment containment) {
@@ -107,23 +107,23 @@ void InvariantSets::propagateContainment(Solver& solver, SetElement element, Set
     InvariantSet set = (InvariantSet)containment.set();
     VERIFY(isInvariantSet(set));
 
-    if (set.theory() == TheoryId::InvariantSingletonSets) {
+    if (set.theory() == TheoryId::ExactInvariantSets) {
         if (containment.contained()) {
-            // in singletonSet(loc, I) => in inclusiveSet(loc)
+            // in exactSet(loc, I) => in inclusiveSet(loc)
             baseTheory(solver).assignTrue(solver, element, Sets::in(inclusiveSet(solver, locationOf(set))),
-                makeReason<ReasonKind::InvariantSingletonToInclusive>({ element, (InvariantSet)containment.set() }));
+                makeReason<ReasonKind::InvariantExactToInclusive>({ element, (InvariantSet)containment.set() }));
 
-            // in singleton1 and in singleton2 => singleton1 = singleton2
-            auto key = singletonIndex.keyOf(element);
+            // in exact1 and in exact2 => exact1 = exact2
+            auto key = exactSetIndex.keyOf(element);
             if (!key.has_value()) {
-                singletonIndex.setKey(solver, element, set);
+                exactSetIndex.setKey(solver, element, set);
             } else {
                 solver.assignTrue(solver.equality(key.value(), set),
-                    makeReason<ReasonKind::InvariantSingletonSetsShareElement>({ element, key.value(), set }));
+                    makeReason<ReasonKind::InvariantExactSetsShareElement>({ element, key.value(), set }));
             }
         } else {
-            // in singletonSet(loc1, I) and not in singletonSet(loc2, I) => conflcit when assignedEqual(loc1, loc2)
-            singletonIndex.addWatch(solver, element, set);
+            // in exactSet(loc1, I) and not in exactSet(loc2, I) => conflict when assignedEqual(loc1, loc2)
+            exactSetIndex.addWatch(solver, element, set);
         }
     }
 
@@ -131,28 +131,28 @@ void InvariantSets::propagateContainment(Solver& solver, SetElement element, Set
 }
 
 bool InvariantSets::testReason(Solver& solver, Bool assignedLiteral, const Reason& reason) {
-    if (reason.kind() == ReasonKind::InvariantSingletonSetsShareElement) {
+    if (reason.kind() == ReasonKind::InvariantExactSetsShareElement) {
         auto data = reason.getData<SharedElementReason>();
         auto [setA, setB] = data.sets();
         return baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(setA))
             && baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(setB));
-    } else if (reason.kind() == ReasonKind::InvariantSingletonToInclusive) {
-        auto [element, singleton] = reason.get<ReasonKind::InvariantSingletonToInclusive>();
-        return baseTheory(solver).assignedTrue(solver, element, Sets::in(singleton));
-    } else if (reason.kind() == ReasonKind::InvariantSingletonConflict) {
+    } else if (reason.kind() == ReasonKind::InvariantExactToInclusive) {
+        auto [element, exactSet] = reason.get<ReasonKind::InvariantExactToInclusive>();
+        return baseTheory(solver).assignedTrue(solver, element, Sets::in(exactSet));
+    } else if (reason.kind() == ReasonKind::InvariantExactConflict) {
         auto data = reason.getData<SharedElementReason>();
         auto [key, watch] = data.sets();
         VERIFY(assignedLiteral == false_literal);
         return baseTheory(solver).assignedTrue(solver, data.element(), Sets::in(key))
             && baseTheory(solver).assignedTrue(solver, data.element(), !Sets::in(watch))
-            && singletonIndex.matches(solver, data.element(), (InvariantSet)key, (InvariantSet)watch);
+            && exactSetIndex.matches(solver, data.element(), (InvariantSet)key, (InvariantSet)watch);
     }
 
     return Base::testReason(solver, assignedLiteral, reason);
 }
 
 ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLiteral, const Reason& reason) {
-    if (reason.kind() == ReasonKind::InvariantSingletonSetsShareElement) {
+    if (reason.kind() == ReasonKind::InvariantExactSetsShareElement) {
         auto data = reason.getData<SharedElementReason>();
         auto [setA, setB] = data.sets();
 
@@ -161,13 +161,13 @@ ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLitera
         clause.add(solver, baseTheory(solver).mapToBool(solver, data.element(), !Sets::in(setA)));
         clause.add(solver, baseTheory(solver).mapToBool(solver, data.element(), !Sets::in(setB)));
         return { solver.viewClause(clause), 0 };
-    } else if (reason.kind() == ReasonKind::InvariantSingletonToInclusive) {
-        auto [element, singleton] = reason.get<ReasonKind::InvariantSingletonToInclusive>();
+    } else if (reason.kind() == ReasonKind::InvariantExactToInclusive) {
+        auto [element, exactSet] = reason.get<ReasonKind::InvariantExactToInclusive>();
         ClauseBuilder clause = solver.beginClause();
         clause.add(solver, assignedLiteral);
-        clause.add(solver, baseTheory(solver).mapToBool(solver, element, !Sets::in(singleton)));
+        clause.add(solver, baseTheory(solver).mapToBool(solver, element, !Sets::in(exactSet)));
         return { solver.viewClause(clause), 0 };
-    } else if (reason.kind() == ReasonKind::InvariantSingletonConflict) {
+    } else if (reason.kind() == ReasonKind::InvariantExactConflict) {
         auto data = reason.getData<SharedElementReason>();
         auto [key, watch] = data.sets();
         VERIFY(assignedLiteral == false_literal);
@@ -175,7 +175,7 @@ ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLitera
         clause.add(solver, assignedLiteral);
         clause.add(solver, baseTheory(solver).mapToBool(solver, data.element(), !Sets::in(key)));
         clause.add(solver, baseTheory(solver).mapToBool(solver, data.element(), Sets::in(watch)));
-        singletonIndex.explainMatch(solver, data.element(), (InvariantSet)key, (InvariantSet)watch, clause);
+        exactSetIndex.explainMatch(solver, data.element(), (InvariantSet)key, (InvariantSet)watch, clause);
         return { solver.viewClause(clause), 0 };
     }
 
@@ -184,30 +184,30 @@ ClauseAndIndex InvariantSets::reasonToClause(Solver& solver, Bool assignedLitera
 
 void InvariantSets::newDecisionLevel(Solver& solver) {
     Base::newDecisionLevel(solver);
-    singletonIndex.newDecisionLevel(solver);
+    exactSetIndex.newDecisionLevel(solver);
 }
 
 void InvariantSets::beginBacktrack(Solver& solver) {
     Base::beginBacktrack(solver);
-    singletonIndex.beginBacktrack(solver);
+    exactSetIndex.beginBacktrack(solver);
 }
 
 void InvariantSets::checkInvariances(Solver& solver) {
     Base::checkInvariances(solver);
-    singletonIndex.checkInvariances(solver);
+    exactSetIndex.checkInvariances(solver);
 }
 
-InvariantSets& InvariantSets::SingletonIndex::invariantSets() {
-    return *ReverseMemberPointer<&InvariantSets::singletonIndex>::reverse(this);
+InvariantSets& InvariantSets::ExactSetIndex::invariantSets() {
+    return *ReverseMemberPointer<&InvariantSets::exactSetIndex>::reverse(this);
 }
 
-void InvariantSets::SingletonIndex::addValueUses(Solver& solver, SetElement, InvariantSet set, Use use) {
+void InvariantSets::ExactSetIndex::addValueUses(Solver& solver, SetElement, InvariantSet set, Use use) {
     auto loc = invariantSets().locationOf(set);
     solver.addUse(loc.declaration, use);
     solver.addUse(loc.member, use);
 }
 
-bool InvariantSets::SingletonIndex::matches(Solver& solver, SetElement, InvariantSet key, InvariantSet watch) {
+bool InvariantSets::ExactSetIndex::matches(Solver& solver, SetElement, InvariantSet key, InvariantSet watch) {
     auto keyLoc = invariantSets().locationOf(key);
     auto watchLoc = invariantSets().locationOf(watch);
     return invariantSets().invariantOf(key) == invariantSets().invariantOf(watch)
@@ -215,15 +215,15 @@ bool InvariantSets::SingletonIndex::matches(Solver& solver, SetElement, Invarian
         && solver.assignedEqual(keyLoc.member, watchLoc.member);
 }
 
-void InvariantSets::SingletonIndex::explainMatch(Solver& solver, SetElement, InvariantSet key, InvariantSet watch, ClauseBuilder& clause) {
+void InvariantSets::ExactSetIndex::explainMatch(Solver& solver, SetElement, InvariantSet key, InvariantSet watch, ClauseBuilder& clause) {
     auto keyLoc = invariantSets().locationOf(key);
     auto watchLoc = invariantSets().locationOf(watch);
     solver.explainEqual(keyLoc.declaration, watchLoc.declaration, clause);
     solver.explainEqual(keyLoc.member, watchLoc.member, clause);
 }
 
-void InvariantSets::SingletonIndex::onKeyMatch(Solver& solver, SetElement element, InvariantSet key, InvariantSet watch) {
-    solver.assignTrue(false_literal, makeReason<ReasonKind::InvariantSingletonConflict>({ element, key, watch }));
+void InvariantSets::ExactSetIndex::onKeyMatch(Solver& solver, SetElement element, InvariantSet key, InvariantSet watch) {
+    solver.assignTrue(false_literal, makeReason<ReasonKind::InvariantExactConflict>({ element, key, watch }));
 }
 
 }
