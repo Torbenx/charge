@@ -154,4 +154,51 @@ TEST(VerifyBackend, MemoryLocationSetsInSetTheory) {
     EXPECT_TRUE(solver.assignedTrue(eq));
 }
 
+TEST(VerifyBackend, MemoryLocationSetsDisequalDeclarationAndNonEmpty) {
+    auto [solver, _] = Solver::makeReference();
+    MemoryDeclaration d1 = solver.newAuxMemoryDeclarationVariable();
+    MemoryDeclaration d2 = solver.newAuxMemoryDeclarationVariable();
+    Member m1 = solver.newAuxMemberVariable();
+    Member m2 = solver.newAuxMemberVariable();
+    Bool declEqual = solver.equality(d1, d2);
+
+    MemorySet a = solver.memorySet(d1, m1);
+    MemorySet b = solver.memorySet(d2, m2);
+    Bool setEqual = solver.equality(a, b);
+    solver.propagate();
+
+    solver.decideTrue(!declEqual);
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+    EXPECT_FALSE(solver.assignedFalse(setEqual));
+
+    solver.decideTrue(!solver.isEmpty(a));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+    EXPECT_TRUE(solver.assignedFalse(setEqual));
+}
+
+TEST(VerifyBackend, MemoryLocationSetsOfALocationAndOneMemberCanBeEqual) {
+    auto [solver, _] = Solver::makeReference();
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member x = solver.newMemberLiteral();
+
+    MemorySet whole = solver.memorySet(d, identity_member);
+    MemorySet part = solver.memorySet(d, x);
+    Bool setEqual = solver.equality(whole, part);
+
+    auto e = solver.newSetElement(Sort::MemorySet);
+    solver.propagate();
+    solver.decideTrue(e, Sets::in(part));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+
+    // A struct with a single field has the memory of that field, so the two sets can be equal without
+    // being empty
+    EXPECT_FALSE(solver.assignedFalse(setEqual));
+    solver.decideTrue(setEqual);
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+}
+
 }

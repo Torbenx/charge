@@ -152,7 +152,7 @@ struct Solver {
     InvariantSet pathInvariantSet(MemoryDeclaration declaration, Member member) {
         return pathInvariantSet({ declaration, member });
     }
-    //! The set holding \p invariant of \p location and nothing else
+    //! The set holding \p invariant of \p location, which is empty if \p location does not have it
     InvariantSet invariantSingletonSet(MemoryLocation location, Invariant invariant);
     InvariantSet invariantSingletonSet(MemoryDeclaration declaration, Member member, Invariant invariant) {
         return invariantSingletonSet({ declaration, member }, invariant);

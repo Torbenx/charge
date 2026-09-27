@@ -9,57 +9,19 @@
 
 namespace verify::backend {
 
-//! A letter in the invariant prefix index
-/*!
-A word is spelled with the members of its location, and an invariant letter is the step from a
-location to the invariant singleton. So the letters of a location with the members m1...mn are
-
-    inclusive:   m1 ... mn
-    exclusive:   m1 ... mn
-    invariant I: m1 ... mn I
-
-The inclusive and the exclusive set of a location are spelled the same, what tells the two apart is
-the kind of their word. An exclusive word holds only the invariants strictly below its location, so
-its hits are conflicts only where the path stays strictly longer under every rewrite, which is what
-the strictPrefix flag of InvariantPrefixes::raisesConflict() decides.
-*/
-struct InvariantLetter {
-    static constexpr TheoryId INVARIANT_SENTINEL_THEORY = TheoryId::COUNT;
-    static_assert(INVARIANT_SENTINEL_THEORY >= TheoryId::COUNT);
-    static_assert(INVARIANT_SENTINEL_THEORY != TheoryId::Invalid);
-
-    static constexpr InvariantLetter invalid() { return { (Member)INVALID_VALUE }; }
-    static constexpr InvariantLetter member(Member member) { return { member }; }
-    static constexpr InvariantLetter invariant(Invariant invariant) { return { Member(INVARIANT_SENTINEL_THEORY, invariant.id()) }; }
-
-    constexpr bool isInvariant() const { return payload.theory() == INVARIANT_SENTINEL_THEORY; }
-    constexpr bool isMember() const { return payload.theory() < TheoryId::COUNT; }
-    constexpr Invariant invariant() const {
-        VERIFY(isInvariant());
-        return Invariant { payload.id() };
-    }
-    constexpr Member member() const {
-        VERIFY(isMember());
-        return payload;
-    }
-
-    bool operator==(const InvariantLetter&) const = default;
-
-    Member payload;
-};
-
 //! The sets of invariants described by a memory location
 /*!
 There are four kinds of sets:
 - An inclusive location set holds the invariants of its location and those of its members
 - An exclusive location set holds only the invariants of its members
 - A path location set holds the invariants of the locations strictly above its own
-- An invariant singleton set holds a single invariant
+- An invariant singleton set holds its invariant at its location if the type of the location has
+  that invariant, and is empty otherwise.
 
 The first two grow downwards with their location, the path sets grow upwards. The path set of
 the whole declaration is empty.
 
-Note that the non-singleton sets may not contain any elements at all.
+Note that any of the sets can be empty.
 */
 struct InvariantSets : MemoryLocationSets<InvariantSets> {
     static constexpr Params PARAMS = {
@@ -85,7 +47,7 @@ struct InvariantSets : MemoryLocationSets<InvariantSets> {
     InvariantSet pathSet(Solver&, MemoryLocation);
     InvariantSet singletonSet(Solver&, MemoryLocation, Invariant);
 
-    //! Whether \p value is one of the three kinds of sets of this theory
+    //! Whether \p value is one of the kinds of this theory
     static constexpr bool isInvariantSet(Value value) {
         switch (value.theory()) {
         case TheoryId::InclusiveLocationInvariantSets:

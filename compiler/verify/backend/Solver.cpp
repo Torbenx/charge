@@ -426,8 +426,6 @@ bool Solver::alwaysNonEmpty(Set set) {
     switch (sortOf(set.theory())) {
     case Sort::UninterpretedConstantSet:
         return set.theory() == TheoryId::UninterpretedConstantSingletonSets;
-    case Sort::InvariantSet:
-        return set.theory() == TheoryId::InvariantSingletonSets;
     default:
         return false;
     }
@@ -632,8 +630,12 @@ void SolverImpl::onNewPair(PairHandle handle) {
             Bool setEq = equality(handle);
             Bool declarationEq = equality(locationA.declaration, locationB.declaration);
             Bool memberEq = equality(locationA.member, locationB.member);
-            // Note: The other direction does not always hold because when both sets are empty they would also be equal.
             addClause({ setEq, !declarationEq, !memberEq });
+            // Separate clauses for a/b empty are necessary for reverse implications such as:
+            //   decl(a) != decl(b) && !isEmpty(b) => a != b
+            // The same rule for members would break for structs with a single non-empty member.
+            addClause({ !setEq, isEmpty((Set)a), declarationEq });
+            addClause({ !setEq, isEmpty((Set)b), declarationEq });
         }
     } else if (sort == Sort::InvariantSet) {
         setTheory(sort).newPair(*this, handle);
@@ -644,11 +646,21 @@ void SolverImpl::onNewPair(PairHandle handle) {
             Bool setEq = equality(handle);
             Bool declarationEq = equality(locationA.declaration, locationB.declaration);
             Bool memberEq = equality(locationA.member, locationB.member);
-            // Note: The other direction does not always hold because when both sets are empty they would also be equal.
-            addClause({ setEq, !declarationEq, !memberEq });
-            if (theory == TheoryId::InvariantSingletonSets) {
-                addClause({ !setEq, declarationEq });
-                addClause({ !setEq, memberEq });
+            if (theory != TheoryId::InvariantSingletonSets || invariantOf((InvariantSet)a) == invariantOf((InvariantSet)b)) {
+                addClause({ setEq, !declarationEq, !memberEq });
+                // Separate clauses for a/b empty are necessary for reverse implications such as:
+                //   decl(a) != decl(b) && !isEmpty(b) => a != b
+                // The same rule for members would break for structs with a single non-empty member.
+                addClause({ !setEq, isEmpty((Set)a), declarationEq });
+                addClause({ !setEq, isEmpty((Set)b), declarationEq });
+                if (theory == TheoryId::InvariantSingletonSets) {
+                    // For singleton sets the member is also pinned.
+                    addClause({ !setEq, isEmpty((Set)a), memberEq });
+                    addClause({ !setEq, isEmpty((Set)b), memberEq });
+                }
+            } else {
+                addClause({ !setEq, isEmpty((Set)a) });
+                addClause({ !setEq, isEmpty((Set)b) });
             }
         }
     } else if (isSetSort(sort)) {
@@ -776,12 +788,6 @@ bool Solver::alwaysDisequal(Value a, Value b) {
         return false;
     case Sort::Member:
         return !impl().members.canBeEqual(*this, (Member)a, (Member)b);
-    case Sort::InvariantSet:
-        if (a.theory() == TheoryId::InvariantSingletonSets && b.theory() == TheoryId::InvariantSingletonSets) {
-            if (invariantOf((InvariantSet)a) != invariantOf((InvariantSet)b))
-                return true;
-        }
-        return false;
     default:
         return false;
     }

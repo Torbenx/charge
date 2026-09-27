@@ -154,6 +154,53 @@ TEST(VerifyBackend, InvariantPathSetsOfEqualLocations) {
     EXPECT_TRUE(solver.assignedTrue(setEquality));
 }
 
+TEST(VerifyBackend, InvariantInclusiveSetsOfALocationAndOneMemberCanBeEqual) {
+    auto [solver, _] = Solver::makeReference();
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member x = solver.newMemberLiteral();
+
+    InvariantSet whole = solver.inclusiveInvariantSet(d, identity_member);
+    InvariantSet part = solver.inclusiveInvariantSet(d, x);
+    Bool setEquality = solver.equality(whole, part);
+
+    auto e = solver.newSetElement(Sort::InvariantSet);
+    solver.propagate();
+    solver.decideTrue(e, Sets::in(part));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+
+    // When all invariants of a location are below one of its members, the two locations hold the same
+    // invariants without either set being empty
+    EXPECT_FALSE(solver.assignedFalse(setEquality));
+    solver.decideTrue(setEquality);
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+}
+
+TEST(VerifyBackend, InvariantPathSetsOfAMemberAndItsMemberCanBeEqual) {
+    auto [solver, _] = Solver::makeReference();
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member x = solver.newMemberLiteral();
+    Member y = solver.newMemberLiteral();
+
+    InvariantSet above = solver.pathInvariantSet(d, x);
+    InvariantSet aboveDeeper = solver.pathInvariantSet(d, solver.composeMembers({ x, y }));
+    Bool setEquality = solver.equality(above, aboveDeeper);
+
+    auto e = solver.newSetElement(Sort::InvariantSet);
+    solver.propagate();
+    solver.decideTrue(e, Sets::in(above));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+
+    // When x has no invariants itself, the invariants above x.y are the ones above x without either
+    // set being empty
+    EXPECT_FALSE(solver.assignedFalse(setEquality));
+    solver.decideTrue(setEquality);
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+}
+
 TEST(VerifyBackend, InvariantSingletonSetsNeedTheSameInvariant) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
@@ -221,7 +268,7 @@ TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAreDisjoint) {
     EXPECT_TRUE(solver.hasConflicts());
 }
 
-TEST(VerifyBackend, InvariantSingletonSetsNeverEmpty) {
+TEST(VerifyBackend, InvariantSingletonSetsDisequalIfNonEmpty) {
     auto [solver, _] = Solver::makeReference();
     MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
     Member m1 = solver.newAuxMemberVariable();
@@ -229,8 +276,71 @@ TEST(VerifyBackend, InvariantSingletonSetsNeverEmpty) {
 
     InvariantSet a = solver.invariantSingletonSet(d, m1, Invariant(0));
     InvariantSet b = solver.invariantSingletonSet(d, m2, Invariant(1));
+    Bool eq = solver.equality(a, b);
+    EXPECT_FALSE(solver.assignedFalse(eq));
 
-    EXPECT_TRUE(solver.alwaysDisequal(a, b));
+    solver.decideTrue(!solver.isEmpty(a));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+    EXPECT_TRUE(solver.assignedFalse(eq));
+
+    solver.backtrack(0);
+    EXPECT_FALSE(solver.assignedFalse(eq));
+
+    solver.decideTrue(eq);
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+    EXPECT_TRUE(solver.assignedTrue(solver.isEmpty(a)));
+    EXPECT_TRUE(solver.assignedTrue(solver.isEmpty(b)));
+}
+
+TEST(VerifyBackend, InvariantSingletonSetsOfDistinctLocationsAreEqualOnlyIfEmpty) {
+    auto [solver, _] = Solver::makeReference();
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member m1 = solver.newAuxMemberVariable();
+    Member m2 = solver.newAuxMemberVariable();
+
+    InvariantSet a = solver.invariantSingletonSet(d, m1, Invariant(0));
+    InvariantSet b = solver.invariantSingletonSet(d, m2, Invariant(0));
+    Bool eq = solver.equality(a, b);
+    solver.propagate();
+
+    // Neither location has to have the invariant, and without it both singletons are the empty set
+    solver.decideTrue(!solver.equality(m1, m2));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+    EXPECT_FALSE(solver.assignedFalse(eq));
+
+    solver.decideTrue(eq);
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+    EXPECT_TRUE(solver.assignedTrue(solver.isEmpty(a)));
+    EXPECT_TRUE(solver.assignedTrue(solver.isEmpty(b)));
+}
+
+TEST(VerifyBackend, InvariantSingletonSetsOfDistinctInvariantsAtOneLocationCanBothBeNonEmpty) {
+    auto [solver, _] = Solver::makeReference();
+    MemoryDeclaration d = solver.newAuxMemoryDeclarationVariable();
+    Member m = solver.newAuxMemberVariable();
+
+    InvariantSet a = solver.invariantSingletonSet(d, m, Invariant(0));
+    InvariantSet b = solver.invariantSingletonSet(d, m, Invariant(1));
+    Bool eq = solver.equality(a, b);
+    solver.propagate();
+
+    // The same location does not make the singletons of two invariants equal
+    EXPECT_FALSE(solver.assignedTrue(eq));
+
+    // A location can have both invariants at once, which makes the two singletons distinct
+    auto e1 = solver.newSetElement(Sort::InvariantSet);
+    auto e2 = solver.newSetElement(Sort::InvariantSet);
+    solver.propagate();
+    solver.decideTrue(e1, Sets::in(a));
+    solver.propagate();
+    solver.decideTrue(e2, Sets::in(b));
+    solver.propagate();
+    EXPECT_FALSE(solver.hasConflicts());
+    EXPECT_TRUE(solver.assignedFalse(eq));
 }
 
 TEST(VerifyBackend, InvariantSingletonSetsAreBacktracked) {
