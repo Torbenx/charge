@@ -628,9 +628,9 @@ The sources are written as raw strings beginning with a newline, so the expected
 source without its first character.
 */
 static void expectFormatted(const char* source) {
-    std::string formatted = format(parse(source));
+    std::string formatted = format(parseFunction(source));
     EXPECT_EQ(formatted, source + 1);
-    EXPECT_EQ(format(parse(formatted.c_str())), source + 1);
+    EXPECT_EQ(format(parseFunction(formatted.c_str())), source + 1);
 }
 
 TEST(VerifyLanguage, FormatInstructions) {
@@ -674,7 +674,7 @@ fn #test($a, $b, $c, $d):
 )");
 
     // A negated equality is spelled with the symbol however the source wrote it
-    EXPECT_EQ(format(parse(R"(
+    EXPECT_EQ(format(parseFunction(R"(
 fn #test($a, $b, $c):
     store $a <- !($a = $b) = $c
 )")),
@@ -683,7 +683,7 @@ fn #test($a, $b, $c):
 
 TEST(VerifyLanguage, FormatAsciiOperators) {
     // An operator the source wrote out in ascii is written back as its symbol
-    EXPECT_EQ(format(parse(R"(
+    EXPECT_EQ(format(parseFunction(R"(
 fn #test($a, $b, $c):
     store $a <- $a = $b and $c = $a or $a != $b
     store $a <- !($a = $b and $c = $a)
@@ -714,7 +714,7 @@ fn #test($a, $b, $c, $d):
 TEST(VerifyLanguage, FormatSetAsciiOperators) {
     // An operator the source wrote out in ascii is written back as its symbol, and the grouping
     // the precedence gives it needs no parentheses to be read back the same way
-    EXPECT_EQ(format(parse(R"(
+    EXPECT_EQ(format(parseFunction(R"(
 fn #test($a, $b, $c):
     store $a <- mset($a) union mset($b) setminus mset($c)
     store $a <- (mset($a) intersection mset($b)) union mset($c)
@@ -768,7 +768,7 @@ fn #test($a, $b):
 }
 
 TEST(VerifyLanguage, FormatSharedClause) {
-    ParsedFunction parsed = parse(R"(
+    ParsedFunction parsed = parseFunction(R"(
 fn #test($a, $b):
     prove true by sat:
         clause $a = $b by sorry
@@ -790,7 +790,7 @@ fn #test($a, $b):
 }
 
 TEST(VerifyLanguage, FormatGeneratedNames) {
-    ParsedFunction parsed = parse(R"(
+    ParsedFunction parsed = parseFunction(R"(
 fn #test($a, $b):
 @entry:
     pre %x: $a = $b

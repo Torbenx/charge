@@ -1,6 +1,6 @@
 #include <verify/ir/Match.h>
 #include <verify/ir/check.h>
-#include <verify/language/Parser.h>
+#include <verify/language/FunctionParser.h>
 
 #include <gtest/gtest.h>
 
@@ -65,7 +65,7 @@ bool checkPhiEnumerate(const Function& function, Bool prop) {
 
 //! The result of checking the function 'source' describes
 static FunctionCheckReport checkSource(const char* source) {
-    Function function = language::parse(source).function;
+    Function function = language::parseFunction(source).function;
     FunctionCheckReport report = check(function);
     // A malformed function would make the result of the proof check meaningless
     VERIFY(report.malformedExpressions.empty() && report.malformedInstructions.empty());
@@ -497,7 +497,7 @@ fn #test():
 }
 
 TEST(VerifyIR, UnprovenTheorems) {
-    Function function = language::parse(R"(
+    Function function = language::parseFunction(R"(
 fn #test($a, $b):
     pre %assumed: $a = $b
     prove $a = $a by eq_reflexive

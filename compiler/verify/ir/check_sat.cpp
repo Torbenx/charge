@@ -1,6 +1,6 @@
 #include <verify/backend/Solver.h>
 #include <verify/ir/check.h>
-#include <verify/language/Parser.h>
+#include <verify/language/FunctionParser.h>
 
 #include <gtest/gtest.h>
 
@@ -172,7 +172,7 @@ bool checkSatProof(const Function& function, Bool prop, const SatProof& proof) {
 
 //! The result of checking the function 'source' describes
 static FunctionCheckReport checkSource(const char* source) {
-    Function function = language::parse(source).function;
+    Function function = language::parseFunction(source).function;
     FunctionCheckReport report = check(function);
     // A malformed function would make the result of the proof check meaningless
     VERIFY(report.malformedExpressions.empty() && report.malformedInstructions.empty());

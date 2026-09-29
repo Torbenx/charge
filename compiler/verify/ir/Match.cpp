@@ -1,6 +1,6 @@
 #include <verify/ir/Match.h>
 
-#include <verify/language/Parser.h>
+#include <verify/language/FunctionParser.h>
 
 #include <gtest/gtest.h>
 
@@ -9,7 +9,7 @@
 namespace verify::ir {
 
 Pattern::Pattern(const char* source) {
-    language::ParsedFunction parsed = language::parse(source);
+    language::ParsedFunction parsed = language::parseFunction(source);
     m_function = std::move(parsed.function);
     m_parameterNames = std::move(parsed.parameterNames);
     m_labels = std::move(parsed.labels);
@@ -372,7 +372,7 @@ TEST(VerifyIRTactics, NestedConnective) {
 fn #_($a, $b, $c):
     prove $a = $a or !($b = $b or $c = $c) by sorry
 )");
-    Function function = language::parse(R"(
+    Function function = language::parseFunction(R"(
 fn #test($x, $y, $z, $w):
     prove $w = $w or $x = $x or !($y = $y or $z = $z) by sorry
     prove $x = $x or !($w = $w or $y = $y or $z = $z) by sorry
@@ -394,7 +394,7 @@ fn #_($a):
 @end:
     prove $a = $a by sorry
 )");
-    Function function = language::parse(R"(
+    Function function = language::parseFunction(R"(
 fn #test($x):
     store $x <- $x
     prove $x = $x by sorry
@@ -414,7 +414,7 @@ fn #_($a, $b: uninterpreted_constant):
 @end:
     prove $a.load@end = $b by sorry
 )");
-    Function function = language::parse(R"(
+    Function function = language::parseFunction(R"(
 fn #test($x):
     pre %scalar: $x.type.bool_scalar
     store $x <- true
@@ -436,7 +436,7 @@ fn #_($x, $target, $value):
 @after:
     prove $x != $target or $x.load@after = $value by sorry
 )");
-    Function function = language::parse(R"(
+    Function function = language::parseFunction(R"(
 fn #test($a, $b, $c: memory_decl):
     pre %scalar: $a.type.memory_decl_scalar
     nop

@@ -1,71 +1,11 @@
 #pragma once
 
-#include <WordStringTable.h>
 #include <verify/ir/Database.h>
+#include <verify/language/Lexer.h>
 
-#include <utility>
+#include <optional>
 
 namespace verify::language {
-
-inline constexpr ConstWordStringTable words {
-    "active",
-    "from",
-    "store",
-    "call",
-    "jump",
-    "branch",
-    "phi",
-    "nop",
-    "true",
-    "false",
-    "and",
-    "or",
-    "load",
-    "pre",
-    "post",
-    "prove",
-    "clause",
-    "by",
-    "union",
-    "intersection",
-    "setminus",
-    "mset",
-    "iset",
-    "incl_iset",
-    "excl_iset",
-    "path_iset",
-    "exact_iset",
-    "invariant",
-#define TACTIC(name, snake_case) #snake_case,
-#include <verify/ir/tactics.inc>
-#define SORT(name, snake_case) #snake_case, #snake_case "_scalar",
-#include <verify/ir/sorts.inc>
-};
-
-//! The mathematical symbols an operator may be written with
-/*!
-The source may spell an operator either way, the formatter always writes the symbol. A symbol
-never appears inside a name, so reading one is a token of its own.
-*/
-namespace symbols {
-    inline constexpr std::string_view AND = "\u2227"; // ∧
-    inline constexpr std::string_view OR = "\u2228"; // ∨
-    inline constexpr std::string_view NOT = "\u00ac"; // ¬
-    inline constexpr std::string_view NOT_EQUAL = "\u2260"; // ≠
-    inline constexpr std::string_view UNION = "\u222a"; // ∪
-    inline constexpr std::string_view INTERSECTION = "\u2229"; // ∩
-    inline constexpr std::string_view SET_MINUS = "\u2216"; // ∖
-}
-
-struct ParserException : std::exception {
-    ParserException(std::string message)
-        : message(std::move(message)) { }
-    std::string message;
-
-    const char* what() const noexcept override {
-        return message.data();
-    }
-};
 
 template<typename T>
 struct LookupTable {
@@ -129,6 +69,9 @@ struct ParsedFunction {
     std::vector<std::string> theoremNames;
 };
 
-ParsedFunction parse(const char* source);
+ParsedFunction parseFunction(const LexedFile& file, TokenStream& s);
+
+//! Parses a source that consists of exactly one function definition
+ParsedFunction parseFunction(const char* source);
 
 }
