@@ -69,7 +69,7 @@ struct ParsedFunction {
     std::vector<std::string> theoremNames;
 };
 
-ParsedFunction parseFunction(const LexedFile& file, TokenStream& s);
+ParsedFunction parseFunction(const WordStringTable& wordTable, TokenStream& s);
 
 //! Parses a source that consists of exactly one function definition
 ParsedFunction parseFunction(const char* source);

@@ -764,10 +764,10 @@ void FunctionParser::checkLabelsResolved() {
         throw ParserException(std::format("Label was never defined: {}", undefined));
 }
 
-ParsedFunction parseFunction(const LexedFile& file, TokenStream& s) {
+ParsedFunction parseFunction(const WordStringTable& wordTable, TokenStream& s) {
     ParsedFunction result;
 
-    FunctionParser parser { result, file.wordTable };
+    FunctionParser parser { result, wordTable };
     parser.parse(s);
     parser.checkLabelsResolved();
 
@@ -779,13 +779,14 @@ ParsedFunction parseFunction(const LexedFile& file, TokenStream& s) {
 }
 
 ParsedFunction parseFunction(const char* source) {
-    LexedFile file = lexFile(source);
-    auto s = TokenStream::makeRoot(file.tokens.data());
+    WordStringTable wordTable;
+    std::vector<Token> tokens = lexFile(source, wordTable);
+    auto s = TokenStream::makeRoot(tokens.data());
     VERIFY(s.tokKind() == TokenKind::BeginScope);
     s.advance();
     while (s.tokKind() == TokenKind::ContinueScope)
         s.advance();
-    return parseFunction(file, s);
+    return parseFunction(wordTable, s);
 }
 
 }

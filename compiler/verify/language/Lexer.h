@@ -107,18 +107,7 @@ struct Token {
     }
 };
 
-//! The tokens of a source file together with the words they refer to
-/*!
-The indentation of the source is turned into scope tokens: every file begins a scope, and each line
-either begins a deeper one, continues the current one (carrying its label if it has one) or ends
-the scopes it is not indented to.
-*/
-struct LexedFile {
-    WordStringTable wordTable;
-    std::vector<Token> tokens;
-};
-
-LexedFile lexFile(const char* source);
+std::vector<Token> lexFile(const char* source, WordStringTable& wordTable);
 
 struct TokenStream {
     TokenStream* parent = nullptr;
