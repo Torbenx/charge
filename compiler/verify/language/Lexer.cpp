@@ -234,8 +234,18 @@ void Lexer::lex(const char* source) {
 
 [[gnu::always_inline]] Word Lexer::readWord(const char*& position) {
     const char* begin = position;
-    while (isBulkNameCharacter(*position))
-        position += 1;
+    for (;;) {
+        while (isBulkNameCharacter(*position))
+            position += 1;
+        if (position[0] != ':')
+            break;
+        const char* colonsEnd = position;
+        while (colonsEnd[0] == ':')
+            colonsEnd += 1;
+        if (!isBulkNameCharacter(colonsEnd[0]))
+            break;
+        position = colonsEnd;
+    }
     return wordTable.get(std::string_view(begin, position));
 }
 

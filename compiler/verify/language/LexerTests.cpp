@@ -29,6 +29,42 @@ TEST(VerifyLanguage, LexErrors) {
     }
 }
 
+TEST(VerifyLanguage, LexColonInNames) {
+    // A name may contain colons, but the colons it ends with are read on their own
+    LexedFile file = lexFile("fn #S:m($a::b, $c):\n@l:x:\n    iassert #A:invariant $a::b\n");
+    std::vector<std::pair<TokenKind, std::string_view>> expected = {
+        { TokenKind::BeginScope, {} },
+        { TokenKind::Identifier, "fn" },
+        { TokenKind::GlobalName, "S:m" },
+        { TokenKind::LeftParen, {} },
+        { TokenKind::LocalName, "a::b" },
+        { TokenKind::Comma, {} },
+        { TokenKind::LocalName, "c" },
+        { TokenKind::RightParen, {} },
+        { TokenKind::Colon, {} },
+        { TokenKind::BeginScope, {} },
+        { TokenKind::ContinueScope, "l:x" },
+        { TokenKind::Identifier, "iassert" },
+        { TokenKind::GlobalName, "A:invariant" },
+        { TokenKind::LocalName, "a::b" },
+        { TokenKind::EndScope, {} },
+        { TokenKind::EndScope, {} },
+    };
+    ASSERT_EQ(file.tokens.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); i++) {
+        EXPECT_EQ(file.tokens[i].kind(), expected[i].first);
+        if (!expected[i].second.empty())
+            EXPECT_EQ(file.wordTable.view(file.tokens[i].word()), expected[i].second);
+    }
+
+    // A name may begin with colons, as long as more of the name follows them
+    LexedFile leading = lexFile("fn #f($a):\n    call #::f($:a)\n");
+    EXPECT_EQ(leading.tokens[9].kind(), TokenKind::GlobalName);
+    EXPECT_EQ(leading.wordTable.view(leading.tokens[9].word()), "::f");
+    EXPECT_EQ(leading.tokens[11].kind(), TokenKind::LocalName);
+    EXPECT_EQ(leading.wordTable.view(leading.tokens[11].word()), ":a");
+}
+
 TEST(VerifyLanguage, LexByteOrderMark) {
     // A file may begin with a byte order mark, which says nothing a utf8 source does not
     const char* source = R"(fn #test($a, $b):
