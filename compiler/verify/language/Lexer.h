@@ -1,47 +1,12 @@
 #pragma once
 
-#include <WordStringTable.h>
+#include <verify/language/IdentifierTable.h>
 
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace verify::language {
-
-inline constexpr ConstWordStringTable words {
-    "active",
-    "from",
-    "store",
-    "call",
-    "jump",
-    "branch",
-    "phi",
-    "nop",
-    "true",
-    "false",
-    "and",
-    "or",
-    "load",
-    "pre",
-    "post",
-    "prove",
-    "clause",
-    "by",
-    "union",
-    "intersection",
-    "setminus",
-    "mset",
-    "iset",
-    "incl_iset",
-    "excl_iset",
-    "path_iset",
-    "exact_iset",
-    "invariant",
-#define TACTIC(name, snake_case) #snake_case,
-#include <verify/ir/tactics.inc>
-#define SORT(name, snake_case) #snake_case, #snake_case "_scalar",
-#include <verify/ir/sorts.inc>
-};
 
 //! The mathematical symbols an operator may be written with
 /*!
@@ -107,7 +72,7 @@ struct Token {
     }
 };
 
-std::vector<Token> lexFile(const char* source, WordStringTable& wordTable);
+std::vector<Token> lexFile(const char* source, IdentifierTable& wordTable);
 
 struct TokenStream {
     TokenStream* parent = nullptr;

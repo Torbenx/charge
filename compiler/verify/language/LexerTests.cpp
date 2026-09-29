@@ -7,7 +7,7 @@
 namespace verify::language {
 
 static std::vector<Token> lexString(const char* source) {
-    WordStringTable wordTable;
+    IdentifierTable wordTable;
     return lexFile(source, wordTable);
 }
 
@@ -35,7 +35,7 @@ TEST(VerifyLanguage, LexErrors) {
 
 TEST(VerifyLanguage, LexColonInNames) {
     // A name may contain colons, but the colons it ends with are read on their own
-    WordStringTable wordTable;
+    IdentifierTable wordTable;
     std::vector<Token> tokens = lexFile("fn #S:m($a::b, $c):\n@l:x:\n    iassert #A:invariant $a::b\n", wordTable);
     std::vector<std::pair<TokenKind, std::string_view>> expected = {
         { TokenKind::BeginScope, {} },
@@ -70,7 +70,7 @@ TEST(VerifyLanguage, LexColonInNames) {
     EXPECT_EQ(wordTable.view(tokens[11].word()), ":a");
 }
 
-static void expectTokens(const std::vector<Token>& tokens, const WordStringTable& wordTable, const std::vector<std::pair<TokenKind, std::string_view>>& expected) {
+static void expectTokens(const std::vector<Token>& tokens, const IdentifierTable& wordTable, const std::vector<std::pair<TokenKind, std::string_view>>& expected) {
     ASSERT_EQ(tokens.size(), expected.size());
     for (size_t i = 0; i < expected.size(); i++) {
         EXPECT_EQ(tokens[i].kind(), expected[i].first) << "at token " << i;
@@ -81,7 +81,7 @@ static void expectTokens(const std::vector<Token>& tokens, const WordStringTable
 
 TEST(VerifyLanguage, LexIndentedLabels) {
     // A label sits at the indentation of the header whose body it labels, wherever that header is
-    WordStringTable wordTable;
+    IdentifierTable wordTable;
     std::vector<Token> tokens = lexFile(
         "struct #S:\n"
         "    fn #m($r):\n"
@@ -150,7 +150,7 @@ TEST(VerifyLanguage, LexLabelIndentationErrors) {
 
 TEST(VerifyLanguage, LexContinuationBeginningWithLabel) {
     // A line beginning with a label that no ':' follows continues the expression before it
-    WordStringTable wordTable;
+    IdentifierTable wordTable;
     std::vector<Token> tokens = lexFile("fn #test($a):\n    store $a <- @a.active or\n        @b.active\n", wordTable);
     expectTokens(tokens, wordTable,
         {
@@ -184,7 +184,7 @@ TEST(VerifyLanguage, LexByteOrderMark) {
     const char* source = R"(fn #test($a, $b):
     store $a <- $a ≠ $b
 )";
-    WordStringTable wordTable;
+    IdentifierTable wordTable;
     std::vector<Token> plain = lexFile(source, wordTable);
     std::vector<Token> marked = lexFile(std::format("\xEF\xBB\xBF{}", source).c_str(), wordTable);
 
@@ -193,6 +193,23 @@ TEST(VerifyLanguage, LexByteOrderMark) {
         EXPECT_EQ(marked[i].kind(), plain[i].kind());
         EXPECT_EQ(marked[i].m_data, plain[i].m_data);
     }
+}
+
+TEST(VerifyLanguage, WordTableFilledWithKeywords) {
+    IdentifierTable wordTable;
+    EXPECT_EQ(wordTable.view(words["true"]), "true");
+    EXPECT_EQ(wordTable.view(words["false"]), "false");
+}
+
+TEST(VerifyLanguage, LexNameCollidingWithKeyword) {
+    // A name read before a keyword with the same hash does not take the id the keyword is compared by
+    ASSERT_EQ(Word::hash(std::string_view("xhfvmdrb")), Word::hash(std::string_view("store")));
+    IdentifierTable wordTable;
+    std::vector<Token> tokens = lexFile("fn #xhfvmdrb($a):\n    store $a <- $a\n", wordTable);
+    ASSERT_EQ(tokens[2].kind(), TokenKind::GlobalName);
+    EXPECT_NE(tokens[2].word(), words["store"]);
+    ASSERT_EQ(tokens[8].kind(), TokenKind::Identifier);
+    EXPECT_EQ(tokens[8].word(), words["store"]);
 }
 
 }

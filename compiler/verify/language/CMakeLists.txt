@@ -5,6 +5,7 @@ target_sources(${PROJECT_NAME}
     FunctionParser.cpp
     FunctionParser.h
     FunctionParserTests.cpp
+    IdentifierTable.h
     Lexer.cpp
     Lexer.h
     LexerTests.cpp

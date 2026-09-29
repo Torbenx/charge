@@ -50,7 +50,7 @@ static bool matchSymbol(const char*& position, std::string_view symbol) {
 }
 
 struct Lexer {
-    explicit Lexer(WordStringTable& wordTable)
+    explicit Lexer(IdentifierTable& wordTable)
         : wordTable(wordTable) { }
 
     void lex(const char* source);
@@ -62,7 +62,7 @@ struct Lexer {
         uint32_t indent = 0;
     };
 
-    WordStringTable& wordTable;
+    IdentifierTable& wordTable;
     std::vector<Token> tokens;
     std::vector<ScopeStackEntry> scopeStack;
     const char* sourceBegin = nullptr;
@@ -322,7 +322,7 @@ void Lexer::lexSymbol(const char*& position) {
     throw ParserException(std::format("{}:{}: {}", line, column, message));
 }
 
-std::vector<Token> lexFile(const char* source, WordStringTable& wordTable) {
+std::vector<Token> lexFile(const char* source, IdentifierTable& wordTable) {
     Lexer lexer { wordTable };
     lexer.lex(source);
     return std::move(lexer.tokens);

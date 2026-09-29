@@ -41,7 +41,7 @@ struct FunctionParser {
         uint32_t valueBits : 31;
     };
 
-    FunctionParser(ParsedFunction& out, const WordStringTable& wordTable)
+    FunctionParser(ParsedFunction& out, const IdentifierTable& wordTable)
         : ir(out.function), out(out), wordTable(wordTable) { }
 
     void parse(TokenStream& s);
@@ -140,7 +140,7 @@ struct FunctionParser {
 
     ir::Function& ir;
     ParsedFunction& out;
-    const WordStringTable& wordTable;
+    const IdentifierTable& wordTable;
     LookupTable<ir::Theorem> theorems;
     LookupTable<LabelInfo> labels;
     LookupTable<ir::Expr> locals;
@@ -764,7 +764,7 @@ void FunctionParser::checkLabelsResolved() {
         throw ParserException(std::format("Label was never defined: {}", undefined));
 }
 
-ParsedFunction parseFunction(const WordStringTable& wordTable, TokenStream& s) {
+ParsedFunction parseFunction(const IdentifierTable& wordTable, TokenStream& s) {
     ParsedFunction result;
 
     FunctionParser parser { result, wordTable };
@@ -779,7 +779,7 @@ ParsedFunction parseFunction(const WordStringTable& wordTable, TokenStream& s) {
 }
 
 ParsedFunction parseFunction(const char* source) {
-    WordStringTable wordTable;
+    IdentifierTable wordTable;
     std::vector<Token> tokens = lexFile(source, wordTable);
     auto s = TokenStream::makeRoot(tokens.data());
     VERIFY(s.tokKind() == TokenKind::BeginScope);
