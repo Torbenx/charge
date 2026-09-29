@@ -248,6 +248,7 @@ struct TypeImpl : SmallHandle {
 struct Invariant : SmallHandle {
     using SmallHandle::SmallHandle;
 };
+using InvariantList = SmallHandleList<Invariant>;
 
 enum class RelativePosKind : uint8_t {
     Simple,
