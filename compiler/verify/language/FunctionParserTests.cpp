@@ -1,3 +1,4 @@
+#include <verify/language/Formatter.h>
 #include <verify/language/FunctionParser.h>
 
 #include <gtest/gtest.h>
@@ -638,6 +639,42 @@ fn #test($a, $b):
     EXPECT_EQ((uint32_t)notEqual.boolNegatedBit, 1u);
     EXPECT_NE(equal, notEqual);
     EXPECT_EQ(!equal, notEqual);
+}
+
+TEST(VerifyLanguage, ParseContinuationBeginningWithLabel) {
+    // A line may continue an instruction with a reference to a label
+    ParsedFunction oneLine = parseFunction(R"(
+fn #test($a, $b):
+@entry:
+    jump @loop
+@loop:
+    phi @entry, @branch
+    store $a <- @entry.active or @loop.active
+@branch:
+    branch $a = $b, @loop, @exit
+@exit:
+    phi @branch
+)");
+    ParsedFunction wrapped = parseFunction(R"(
+fn #test($a, $b):
+@entry:
+    jump @loop
+@loop:
+    phi @entry,
+        @branch
+    store $a <- @entry.active or
+        @loop.active
+@branch:
+    branch $a = $b, @loop,
+        @exit
+@exit:
+    phi @branch
+)");
+    EXPECT_EQ(wrapped.labels, oneLine.labels);
+    EXPECT_EQ(format(wrapped), format(oneLine));
+
+    // Without the ':' a line is no label, and nothing else begins a body with a label reference
+    EXPECT_THROW(parseFunction("fn #test($a):\n@label\n    nop\n"), ParserException);
 }
 
 }

@@ -179,18 +179,26 @@ void Lexer::lex(const char* source) {
         }
 
         // Handle scope changes
+        struct PendingLabel {
+            Word name;
+            uint32_t column = 0;
+            const char* position = nullptr;
+        };
         const char* lineBegin;
-        std::vector<Word> labels;
+        std::vector<PendingLabel> labels;
         for (;;) {
             lineBegin = position;
-            if (position[0] == '@') {
-                position += 1;
-                labels.push_back(readWord(position));
-                if (position[0] != ':')
-                    error(position, "Expected ':' after label");
-                position += 1;
-            }
             position = skipSpaces(position);
+            // A label is followed by ':', which sets it apart from a line that begins with a label reference
+            if (position[0] == '@') {
+                const char* labelBegin = position;
+                const char* nameEnd = labelBegin + 1;
+                Word name = readWord(nameEnd);
+                if (nameEnd[0] == ':') {
+                    labels.push_back({ name, (uint32_t)(labelBegin - lineBegin), labelBegin });
+                    position = skipSpaces(nameEnd + 1);
+                }
+            }
             if (position[0] == '\r') {
                 if (position[1] == '\n')
                     position += 2;
@@ -210,11 +218,10 @@ void Lexer::lex(const char* source) {
             scopeStack.clear();
             return;
         }
-        if (indent > scopeStack.back().indent) {
+        bool beginsScope = indent > scopeStack.back().indent;
+        if (beginsScope) {
             tokens.push_back({ TokenKind::BeginScope });
             scopeStack.push_back({ .indent = indent });
-            for (Word label : labels)
-                tokens.push_back({ TokenKind::ContinueScope, label.toUint() });
         } else {
             while (indent < scopeStack.back().indent) {
                 tokens.push_back({ TokenKind::EndScope });
@@ -222,13 +229,18 @@ void Lexer::lex(const char* source) {
             }
             if (indent != scopeStack.back().indent)
                 error(position, "Line is not indented to any scope it could continue");
-            if (labels.empty()) {
-                tokens.push_back({ TokenKind::ContinueScope });
-            } else {
-                for (Word label : labels)
-                    tokens.push_back({ TokenKind::ContinueScope, label.toUint() });
-            }
         }
+        // Valdiate label indentation after scope stack was updated.
+        for (const PendingLabel& label : labels) {
+            if (scopeStack.size() < 2)
+                error(label.position, "Label is not inside of a body");
+            if (label.column != scopeStack[scopeStack.size() - 2].indent)
+                error(label.position, "Label is not indented to the header of its body");
+        }
+        if (!beginsScope && labels.empty())
+            tokens.push_back({ TokenKind::ContinueScope });
+        for (const PendingLabel& label : labels)
+            tokens.push_back({ TokenKind::ContinueScope, label.name.toUint() });
     }
 }
 
