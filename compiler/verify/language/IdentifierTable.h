@@ -33,6 +33,8 @@ inline constexpr ConstWordStringTable words {
     "path_iset",
     "exact_iset",
     "invariant",
+    "invariants",
+    "struct",
 #define TACTIC(name, snake_case) #snake_case,
 #include <verify/ir/tactics.inc>
 #define SORT(name, snake_case) #snake_case, #snake_case "_scalar",

@@ -2,6 +2,8 @@ target_sources(${PROJECT_NAME}
     PRIVATE
     Formatter.cpp
     Formatter.h
+    FileParser.cpp
+    FileParserTests.cpp
     FunctionParser.cpp
     FunctionParserTests.cpp
     IdentifierTable.h

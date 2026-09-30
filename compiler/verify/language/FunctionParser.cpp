@@ -46,6 +46,12 @@ struct FunctionParser {
         : ir(out.function), out(out), wordTable(wordTable) { }
 
     void parse(TokenStream& s);
+    //! Parse the parameter list and the body of the function
+    void parseSignatureAndBody(TokenStream& s);
+    //! Adds the parameters of the list to the ones parsed already
+    void parseParameterList(TokenStream& s);
+    //! Checks the function is complete and sizes the name tables to it
+    void finish();
 
     ir::Sort parseSort(TokenStream& s);
 
@@ -159,6 +165,22 @@ void FunctionParser::parse(TokenStream& s) {
     s.advance();
     if (s.tokKind() != TokenKind::LeftParen)
         s.error("Expected '(' after function name");
+    parseSignatureAndBody(s);
+}
+
+void FunctionParser::parseSignatureAndBody(TokenStream& s) {
+    parseParameterList(s);
+
+    VERIFY(s.tokKind() == TokenKind::Colon);
+    s.advanceWithNoScopeChanges();
+
+    if (s.tokKind() != TokenKind::BeginScope)
+        s.error("Expected function body");
+    parseInstructions(s);
+}
+
+void FunctionParser::parseParameterList(TokenStream& s) {
+    VERIFY(s.tokKind() == TokenKind::LeftParen);
     s.advance();
     if (s.tokKind() != TokenKind::RightParen) {
         for (;;) {
@@ -186,13 +208,14 @@ void FunctionParser::parse(TokenStream& s) {
     }
     VERIFY(s.tokKind() == TokenKind::RightParen);
     s.advance();
+}
 
-    VERIFY(s.tokKind() == TokenKind::Colon);
-    s.advanceWithNoScopeChanges();
+void FunctionParser::finish() {
+    checkLabelsResolved();
 
-    if (s.tokKind() != TokenKind::BeginScope)
-        s.error("Expected function body");
-    parseInstructions(s);
+    // The name tables are filled as the names are read, so they end where the last name was
+    out.labels.resize(ir.here().id() + 1);
+    out.theoremNames.resize(ir.theoremCount());
 }
 
 ir::Sort FunctionParser::parseSort(TokenStream& s) {
@@ -765,17 +788,17 @@ void FunctionParser::checkLabelsResolved() {
         throw ParserException(std::format("Label was never defined: {}", undefined));
 }
 
-ParsedFunction ParseContext::parseFunction(TokenStream& s) {
+ParsedFunction ParseContext::parseScannedFunction(const ScannedFile::Function& scanned) {
     ParsedFunction result;
 
     FunctionParser parser { result, wordTable };
-    parser.parse(s);
-    parser.checkLabelsResolved();
-
-    // The name tables are filled as the names are read, so they end where the last name was
-    result.labels.resize(result.function.here().id() + 1);
-    result.theoremNames.resize(result.function.theoremCount());
-
+    if (scanned.typeParameters.has_value()) {
+        auto s = TokenStream::resume(*scanned.typeParameters);
+        parser.parseParameterList(s);
+    }
+    auto s = TokenStream::resume(scanned.parameters);
+    parser.parseSignatureAndBody(s);
+    parser.finish();
     return result;
 }
 
@@ -787,7 +810,12 @@ ParsedFunction parseFunction(const char* source) {
     s.advance();
     while (s.tokKind() == TokenKind::ContinueScope)
         s.advance();
-    return context.parseFunction(s);
+
+    ParsedFunction result;
+    FunctionParser parser { result, context.wordTable };
+    parser.parse(s);
+    parser.finish();
+    return result;
 }
 
 }

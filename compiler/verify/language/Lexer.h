@@ -74,6 +74,16 @@ struct Token {
 
 std::vector<Token> lexFile(const char* source, IdentifierTable& wordTable);
 
+//! A position in a token stream that outlives the stream it was taken from
+/*!
+A stream can't be kept, it is tied to the streams of the enclosing scopes. The position keeps
+what the stream needs to continue from there, a stream resumed from it is a root stream.
+*/
+struct TokenPosition {
+    const Token* token = nullptr;
+    uint32_t inlineDepth = 0;
+};
+
 struct TokenStream {
     TokenStream* parent = nullptr;
     TokenStream* child = nullptr;
@@ -85,7 +95,16 @@ struct TokenStream {
     TokenKind tokKind() const { return token->kind(); }
 
     static TokenStream makeRoot(const Token* stream) {
-        return TokenStream(stream);
+        return TokenStream(stream, 0);
+    }
+
+    static TokenStream resume(TokenPosition position) {
+        return TokenStream(position.token, position.inlineDepth);
+    }
+
+    TokenPosition position() const {
+        VERIFY(!invalid);
+        return { .token = token, .inlineDepth = inlineDepth };
     }
 
     TokenStream(TokenStream& parent)
@@ -145,13 +164,28 @@ struct TokenStream {
         }
     }
 
+    void skipScope() {
+        VERIFY(child == nullptr);
+        VERIFY(!invalid);
+        VERIFY(tokKind() == TokenKind::BeginScope);
+        uint32_t depth = 1;
+        while (depth > 0) {
+            token += 1;
+            if (tokKind() == TokenKind::BeginScope)
+                depth += 1;
+            else if (tokKind() == TokenKind::EndScope)
+                depth -= 1;
+        }
+        advance();
+    }
+
     [[noreturn]] void error(std::string message) {
         throw ParserException(std::move(message));
     }
 
 private:
-    explicit TokenStream(const Token* stream) // root constructor
-        : parent(nullptr), child(nullptr), token(stream) { }
+    TokenStream(const Token* stream, uint32_t inlineDepth) // root constructor
+        : parent(nullptr), child(nullptr), token(stream), inlineDepth(inlineDepth) { }
 };
 
 }
