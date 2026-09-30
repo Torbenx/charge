@@ -1,4 +1,5 @@
 #include <verify/language/Formatter.h>
+#include <verify/language/Lexer.h>
 
 #include <format>
 #include <unordered_set>

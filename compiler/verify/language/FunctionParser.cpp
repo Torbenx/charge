@@ -1,4 +1,5 @@
-#include <verify/language/FunctionParser.h>
+#include <verify/language/Lexer.h>
+#include <verify/language/ParseContext.h>
 
 #include <format>
 
@@ -200,8 +201,8 @@ ir::Sort FunctionParser::parseSort(TokenStream& s) {
     Word id = s.tok().word();
     s.advance();
 #define SORT(name, snake_case)    \
-if (id == words[#snake_case]) \
-return ir::Sort::name;
+    if (id == words[#snake_case]) \
+        return ir::Sort::name;
 #include <verify/ir/sorts.inc>
     s.error("Unknown sort");
 }
@@ -395,8 +396,8 @@ ir::Proof FunctionParser::parseProof(TokenStream& s) {
         return ir.addSat({ parseSatClauses(s) });
     }
 #define SIMPLE_TACTIC(name, snake_case) \
-if (id == words[#snake_case])       \
-return ir::Proof::make##name();
+    if (id == words[#snake_case])       \
+        return ir::Proof::make##name();
 #include <verify/ir/tactics.inc>
     s.error("Unknown tactic");
 }
@@ -529,10 +530,10 @@ ir::Expr FunctionParser::parsePostfixExpr(TokenStream& s) {
             continue;
         }
 #define SORT(name, snake_case)                                                 \
-if (id == words[#snake_case "_scalar"]) {                                  \
-base = ir.addScalarType({ sortCast<ir::Type>(base), ir::Sort::name }); \
-continue;                                                              \
-}
+    if (id == words[#snake_case "_scalar"]) {                                  \
+        base = ir.addScalarType({ sortCast<ir::Type>(base), ir::Sort::name }); \
+        continue;                                                              \
+    }
 #include <verify/ir/sorts.inc>
         s.error("Unexpected identifier in postfix expression");
     }
@@ -764,7 +765,7 @@ void FunctionParser::checkLabelsResolved() {
         throw ParserException(std::format("Label was never defined: {}", undefined));
 }
 
-ParsedFunction parseFunction(const IdentifierTable& wordTable, TokenStream& s) {
+ParsedFunction ParseContext::parseFunction(TokenStream& s) {
     ParsedFunction result;
 
     FunctionParser parser { result, wordTable };
@@ -779,14 +780,14 @@ ParsedFunction parseFunction(const IdentifierTable& wordTable, TokenStream& s) {
 }
 
 ParsedFunction parseFunction(const char* source) {
-    IdentifierTable wordTable;
-    std::vector<Token> tokens = lexFile(source, wordTable);
+    ParseContext context;
+    std::vector<Token> tokens = lexFile(source, context.wordTable);
     auto s = TokenStream::makeRoot(tokens.data());
     VERIFY(s.tokKind() == TokenKind::BeginScope);
     s.advance();
     while (s.tokKind() == TokenKind::ContinueScope)
         s.advance();
-    return parseFunction(wordTable, s);
+    return context.parseFunction(s);
 }
 
 }

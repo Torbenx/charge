@@ -1,5 +1,6 @@
 #include <verify/language/Formatter.h>
-#include <verify/language/FunctionParser.h>
+#include <verify/language/Lexer.h>
+#include <verify/language/ParseContext.h>
 
 #include <gtest/gtest.h>
 

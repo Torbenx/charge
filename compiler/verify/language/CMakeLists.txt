@@ -3,10 +3,10 @@ target_sources(${PROJECT_NAME}
     Formatter.cpp
     Formatter.h
     FunctionParser.cpp
-    FunctionParser.h
     FunctionParserTests.cpp
     IdentifierTable.h
     Lexer.cpp
     Lexer.h
     LexerTests.cpp
+    ParseContext.h
 )
