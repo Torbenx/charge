@@ -1,0 +1,209 @@
+\documentclass[a4paper, 12pt]{article}
+
+\usepackage[english]{babel}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+\usepackage{bm}
+\usepackage{pdfpages}
+\usepackage{mathtools}
+\usepackage{algpseudocode}
+
+\usepackage[left=25mm, right=25mm, top=25mm, bottom=\dimexpr\footskip+20mm\relax]{geometry}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+}
+
+\newcommand{\C} {\mathbb{C}}
+\newcommand{\N} {\mathbb{N}}
+\newcommand{\Q} {\mathbb{Q}}
+\newcommand{\R} {\mathbb{R}}
+\newcommand{\Z} {\mathbb{Z}}
+
+\DeclareMathSymbol{\shortminus}{\mathbin}{AMSa}{"39}
+\newcommand{\minv} { {\shortminus1} }
+\newcommand{\mtrp} {\mathsf{T}}
+\newcommand{\one} {\mathsf{1}}
+\newcommand{\abs}[1]{\left\lvert#1\right\rvert}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\DeclareMathOperator{\round}{round}
+\DeclareMathOperator{\adj}{adj}
+\newcommand{\identity}{\mathbb{I}}
+
+\newcommand{\floor}[1]{\left\lfloor #1 \right\rfloor}
+\newcommand{\ceil}[1]{\left\lceil #1 \right\rceil}
+
+\newcommand{\stared}[1]{#1^\star}
+
+\newtheorem{lemma}{Lemma}[section]
+
+\author{Torben Thaysen}
+\title{Integer Programming}
+
+\begin{document}
+\maketitle
+
+We examine the feasibility of $n$ integer inequalities over $m \leq n$ variables of the form
+\begin{equation}\label{eq:problem}
+\bm{A} x \leq b
+\end{equation}
+with $\bm{A} \in \Z^{n \times m}$, $b \in \Z^n$, $x \in \Z^m$.
+We assume that $\bm{A}$ has full column rank $m$ and that an initial basis is given.
+By Farkas' lemma, either the relaxation of the above to $x \in \R^m$ has a solution or there exists $y \in \R^{1 \times n}$ with $y \geq 0$ such that
+\begin{equation*}
+y \bm{A} = 0 \qquad \text{and} \qquad y b < 0.
+\end{equation*}
+Such a $y$ is a certificate of infeasibility for the relaxation and thus also for the integer problem. Our algorithm should thus either find an integral $x$ satisfying \eqref{eq:problem} or produce such a certificate. To certify infeasibility of the integer problem, the Farkas certificate can include additional derived inequalities (branching bounds and cuts, see Section~\ref{sec:branch-and-cut}), which are themselves certified and added to the problem statement.
+
+\section{Solving the Relaxation}
+
+We implement a variant of the simplex method which minimizes the sum of infeasibilities. For a relaxed $x \in \R^m$ we write our problem as
+\begin{equation*}
+\bm{A} x + p - s = b \qquad \text{with} \qquad p \geq 0,\quad s \geq 0 \quad \text{and} \quad s^\mtrp p = 0.
+\end{equation*}
+We maintain a subset of $m$ linearly independent rows of \eqref{eq:problem} for which equality holds, called the basis. The remaining rows are split based on the sign of $b - \bm{A} x$: rows with $b - \bm{A} x \geq 0$ form the second group and rows with $b - \bm{A} x < 0$ form the third group. Rows outside the basis for which equality happens to hold therefore belong to the second group. By reordering the rows, the matrix and vectors can be written as:
+\begin{equation*}
+\bm{A} = \begin{pmatrix} \bm{A}_0 \\ \bm{A}_+ \\ \bm{A}_- \end{pmatrix} \qquad
+b = \begin{pmatrix} b_0 \\ b_+ \\ b_-\end{pmatrix} \qquad
+p = \begin{pmatrix} 0 \\ p_+ \\ 0 \end{pmatrix} \qquad
+s = \begin{pmatrix} 0 \\ 0 \\ s_- \end{pmatrix}
+\end{equation*}
+Using this decomposition the equations can be written separately as:
+\begin{equation*}
+\bm{A}_0 x = b_0 \qquad\qquad \bm{A}_+ x + p_+ = b_+ \qquad\qquad \bm{A}_- x - s_- = b_-
+\end{equation*}
+Here $\bm{A}_0$ is an $m \times m$ square matrix which is invertible because the basis rows are linearly independent, such that $x = \bm{A}_0^\minv b_0$. The second group of equations satisfies the desired inequality $\bm{A}_+ x \leq b_+$, while the last group satisfies the opposite $\bm{A}_- x > b_-$, i.e.\ $s_- > 0$ componentwise. We thus have a satisfying solution iff the last group is empty.
+
+For the pivot operation, assume that the leaving index (in the first group) is $j$. The equation for the first group is thus
+\begin{equation*}
+\bm{A}_0 \left(x + \Delta x \right) + \lambda e_j = b_0,
+\end{equation*}
+where both positive and negative values are allowed for $\lambda$. From the invertibility of $\bm{A}_0$ and the previous value of $x$ we find that
+\begin{equation*}
+\Delta x = - \lambda \bm{A}_0^\minv e_j.
+\end{equation*}
+The changes in $p$ and $s$ can be derived to be:
+\begin{equation*}
+\Delta p_+ = - \bm{A}_+ \Delta x = \lambda \bm{A}_+ \bm{A}_0^\minv e_j \qquad\qquad
+\Delta s_- = \bm{A}_- \Delta x = - \lambda \bm{A}_- \bm{A}_0^\minv e_j
+\end{equation*}
+After the pivot, row $j$ is no longer part of the basis and its slack is $\lambda$. For $\lambda \geq 0$ it belongs to the second group with $p_j = \lambda$, while for $\lambda < 0$ it belongs to the third group with $s_j = -\lambda$.
+Since we want to reduce $s$ to 0, we examine how $\one^\mtrp s$ changes:
+\begin{equation*}
+\one^\mtrp \Delta s
+= \begin{cases}
+- \one^\mtrp \bm{A}_- \bm{A}_0^\minv e_j \cdot \lambda & \text{if $\lambda \geq 0$} \\
+- \left(\one^\mtrp \bm{A}_- \bm{A}_0^\minv e_j + 1\right) \cdot \lambda & \text{if $\lambda < 0$}
+\end{cases}
+\end{equation*}
+So if $\one^\mtrp \bm{A}_- \bm{A}_0^\minv e_j > 0$, choosing a positive $\lambda$ will decrease $\one^\mtrp s$. Similarly, when $\one^\mtrp \bm{A}_- \bm{A}_0^\minv e_j < -1$, progress can be made using a negative $\lambda$. But if $-1 \leq \one^\mtrp \bm{A}_- \bm{A}_0^\minv e_j \leq 0$, either sign of $\lambda$ will result in no change or an increase in $\one^\mtrp s$. The choice of $j$ among all indices which allow progress is called the pivot selection rule.
+
+If no $j$ allows progress, it is natural to ask if we can produce an infeasibility certificate. And indeed for $y = \begin{pmatrix} y_0 & y_+ & y_- \end{pmatrix}$ with
+\begin{equation*}
+y_0 = -\one^\mtrp \bm{A}_- \bm{A}_0^\minv \qquad\qquad y_+ = 0 \qquad\qquad y_- = \one^\mtrp
+\end{equation*}
+we find that $y \bm{A} = 0$ and $y b < 0$ are both satisfied:
+\begin{gather*}
+y \bm{A} = y_0 \bm{A}_0 + y_- \bm{A}_- = -\one^\mtrp \bm{A}_- \bm{A}_0^\minv \bm{A}_0 + \one^\mtrp \bm{A}_- = 0
+\\
+y b = y_0 b_0 + y_- b_- = -\one^\mtrp \bm{A}_- \bm{A}_0^\minv b_0 + \one^\mtrp b_- = -\one^\mtrp \left(\bm{A}_- x - b_-\right) = -\one^\mtrp s_- < 0
+\end{gather*}
+where $\one^\mtrp s_- > 0$ holds because $s_- > 0$ componentwise, unless the third group is empty and the problem is already satisfied.
+Because $y_0 = -\one^\mtrp \bm{A}_- \bm{A}_0^\minv \geq 0$ is just the no-progress condition for $\lambda \geq 0$ from above, it follows that $y \geq 0$. So $y$ is a valid certificate.
+
+Note that the certificate only requires the no-progress condition for $\lambda \geq 0$, while the condition $\one^\mtrp \bm{A}_- \bm{A}_0^\minv \geq -1$ for pivots with $\lambda < 0$ is not needed. The algorithm may therefore stop with a certificate as soon as no pivot with $\lambda \geq 0$ is possible. Further, some empirical testing showed that including pivots with $\lambda < 0$ increased the number of pivots for all four tested pivot selection rules. The effect was especially strong for infeasible problems. We thus do not consider $\lambda < 0$ pivots for the initial implementation.
+
+The above is only valid for values of $\lambda$ where none of the components of $p_+$ or $s_-$ change sign. Therefore $\lambda$ is selected to be the value where the first component of $p_+$ or $s_-$ becomes 0. This is the entering row and replaces the leaving row $j$ in the basis. If several components become 0 for the same $\lambda$, any of them may be chosen as the entering row. Such a value of $\lambda$ always exists because it is precisely chosen such that $\one^\mtrp \Delta s_- < 0$ and so at least one component of $s_-$ decreases and eventually reaches 0.
+
+\section{Branch and Cut}\label{sec:branch-and-cut}
+
+The algorithm so far solves the relaxation for $x \in \R^m$. If the relaxation is infeasible, the integer problem is infeasible as well. But the algorithm can also terminate with a solution $\stared{x} \notin \Z^m$. In this case we derive a new constraint that is satisfied by all integral solutions but not by the current solution $\stared{x}$. There are two primary methods to do this: branching, which derives a new clause, and cutting, which derives a new inequality (a cutting plane). With branching we select some $\stared{x}_i \notin \Z$ and add the clause $x_i \leq \floor{\stared{x}_i} \lor x_i \geq \ceil{\stared{x}_i}$ to the ambient SMT solver. By construction this clause is not satisfied by the current solution $\stared{x}$ and thus forces further updating.
+
+For cutting we present a version of the Chvátal-Gomory cut that integrates well with the relaxation algorithm. Mixed integer cuts may be considered as an improvement in the future.
+Consider the expression
+\begin{equation*}
+\omega(x) = \floor{\stared{x}} - x - \floor{\bm{A}_0^\minv} \left(b_0 - \bm{A}_0 x\right)
+\end{equation*}
+for arbitrary $x$ and $\stared{x} = \bm{A}_0^\minv b_0$ still denoting our (fixed) non-integer solution. For integer $x$, $\omega(x)$ is also an integer because $\bm{A}_0$ and $b_0$ are integral and the other terms are integral by construction.
+At the same time we may rewrite this as
+\begin{align*}
+\omega(x)
+&= \floor{\stared{x}} - x - \bm{A}_0^\minv \left(b_0 - \bm{A}_0 x\right) + \left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) \left(b_0 - \bm{A}_0 x\right) \\
+&= \left(\floor{\stared{x}} - \bm{A}_0^\minv b_0\right) - \left(x - \bm{A}_0^\minv \bm{A}_0 x\right) + \left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) \left(b_0 - \bm{A}_0 x\right) \\
+&= \left(\floor{\stared{x}} - \stared{x}\right) + \left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) \left(b_0 - \bm{A}_0 x\right).
+\end{align*}
+Here we can read off that $\omega(x) > -1$ for any feasible $x$ because $b_0 - \bm{A}_0 x \geq 0$ holds for such $x$, the coefficients $\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}$ are non-negative by construction and $\stared{x} - \floor{\stared{x}} < 1$ is also true by construction.
+
+Combining the properties, we deduce that for feasible integral $x$, $\omega(x)$ satisfies both $\omega(x) \in \Z^m$ and $\omega(x) > -1$, which implies that $\omega(x) \geq 0$.
+The existing non-integral solution, on the other hand, has
+\begin{equation*}
+\omega(\stared{x}) = \left(\floor{\stared{x}} - \stared{x}\right) + \left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) \left(b_0 - \bm{A}_0 \stared{x}\right) = \floor{\stared{x}} - \stared{x}
+\end{equation*}
+because $\bm{A}_0 \stared{x} = b_0$. By choosing some $\stared{x}_i \notin \Z$, we have that $\omega_i(\stared{x}) = \floor{\stared{x}_i} - \stared{x}_i < 0$ but $\omega_i(x) \geq 0$ for all feasible integral $x$. By adding $\omega_i(x) \geq 0$ to the problem statement we make the solution $\stared{x}$ infeasible and continue the search. More precisely, the new inequality will land in the third group and the search can continue without restarting.
+
+Written out in the form of the problem statement, the inequality $\omega(x) \geq 0$ is
+\begin{align*}
+\left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) \bm{A}_0 x
+&\leq \left(\floor{\stared{x}} - \stared{x}\right) + \left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) b_0 \\
+&= \floor{\bm{A}_0^\minv b_0} - \floor{\bm{A}_0^\minv} b_0 \\
+&= \floor{\left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) b_0}.
+\end{align*}
+With $u = e_i^\mtrp \left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right)$ the cut $\omega_i(x) = e_i^\mtrp \omega(x) \geq 0$ is of the form
+\begin{equation}\label{eq:cutuform}
+u \bm{A}_0 x \leq \floor{u b_0}.
+\end{equation}
+This is useful since $u$ provides a certificate for the cut and also shows that the cut only depends on the rows where $u_j \neq 0$.
+
+In fact, the form \eqref{eq:cutuform} provides its own validity proof of the cut. Since $u \geq 0$ by construction, the non-negative combination of inequalities $u \bm{A}_0 x \leq u b_0$ follows from the original inequalities. At the same time, the left-hand side vector
+\begin{equation*}
+u \bm{A}_0 = e_i^\mtrp \left(\bm{A}_0^\minv - \floor{\bm{A}_0^\minv}\right) \bm{A}_0 = e_i^\mtrp - e_i^\mtrp \floor{\bm{A}_0^\minv} \bm{A}_0
+\end{equation*}
+is a combination of integral terms and thus itself integral. Therefore, for integer $x$, the right-hand side $u b_0$, which is not necessarily an integer, can be safely rounded down, giving back \eqref{eq:cutuform}.
+
+\section{Implementation}
+
+The implementation should use sparse matrix and vector representation. The numbers should be stored as signed fixed-point integers with variable size, accomplished by templating all linear-algebra-related classes on the fixed-point layout. The layout is fixed per run and can only be changed by a restart. The representation can increase separately in magnitude and precision in multiples of 32 bits when too large or too small numbers are encountered. The baseline for a sparse entry should be 128 bits with a 32-bit column/row index, 64 bits before the point and 32 bits after it. A slight variation may be considered to represent unsigned 64-bit values in the baseline representation.
+
+Matrices are stored as a list of lists of entries in both row and column major order as needed. For example, the LU decomposition of $\bm{A}_0$ needs both to efficiently support left and right solves. Without this, for either left or right multiplication a sparse-sparse dot product would have to be computed per column or row, forcing $O(\text{columns})$ complexity as opposed to $O(\text{entries})$. Where possible matrix and vector operations should be implemented using an optimized out-of-place add and multiply-and-add primitive from a previous project. The output vector size is allocated as the sum of the two input sizes, which is a basic worst-case estimate. Later, allocation should be optimized with a local arena allocator for the vectors.
+
+Error bounding and validation techniques should be used to tightly control the error and ensure soundness.
+
+\section{Useful Bounds}
+
+\subsection{Lower bound on non-integrality}
+
+In the presence of finite precision the exact solution $x$ of $\bm{A}_0 x = b_0$ and its approximation $\tilde{x}$ will be different. When $x$ is integral it will be equal to the rounded solution $x_r = \round(\tilde{x})$ as long as the absolute error is bounded componentwise by $\abs{x - \tilde{x}} < \frac{1}{2}$, which is easy. To detect if a close to integral solution is a genuine integer solution we can thus test if $\bm{A}_0 x_r = b_0$ with exact integer arithmetic. The issue is that when this fails we need to find a non-integral component of the solution to perform a branch or cut, which is difficult when all components of $\tilde{x}$ are within the margin of error of an integer.
+This can only be resolved by reducing error (typically by increasing precision) until a component of $\tilde{x}$ separates from its integer neighbour. A basic lower bound on how close $\tilde{x}$ can be to an integer follows from the exact expression
+\begin{equation*}
+x = \bm{A}_0^\minv b_0 = \frac{\adj(\bm{A}_0) b_0}{\det(\bm{A}_0)}.
+\end{equation*}
+Since the adjugate of an integer matrix is again an integer matrix, the components of $x$ can always be written as rational numbers with $\det(\bm{A}_0)$ as the denominator. Therefore the closest any component of $x$ can be to an integer without being one is $1 / \abs{\det(\bm{A}_0)}$.
+
+This is quite a weak bound, so we also prove the following result:
+
+\begin{lemma}
+In terms of the residual $r = b_0 - \bm{A}_0 x_r \in \Z^m$ we have that
+\begin{equation*}
+\norm{x - \tilde{x}}_\infty + \norm{\tilde{x} - x_r}_\infty \geq \norm{x - x_r}_\infty \geq \max_i \frac{\abs{r_i}}{\norm{a_i}_1}.
+\end{equation*}
+\end{lemma}
+This is useful since in our use case we have $\bm{A}_0 x_r \neq b_0$ and thus $r \neq 0$. Combining this with $r \in \Z^m$ gives $\abs{r_i} \geq 1$ for some $i$ and a lower bound of the form $1 / \norm{a_i}_1$ on the largest deviation which is often much stronger than the $1 / \abs{\det(\bm{A}_0)}$ bound.
+
+\begin{proof}
+The first inequality is simply the triangle inequality. For the second inequality write $r$ as
+\begin{equation*}
+r = b_0 - \bm{A}_0 x_r = \bm{A}_0\left(x - x_r\right)
+\end{equation*}
+and observe the inequality chain
+\begin{align*}
+\abs{r_i}
+&= \abs{a_i \left(x - x_r\right)} \\
+&\leq \abs{a_i} \abs{x - x_r} \\
+&\leq \norm{a_i}_1 \norm{x - x_r}_\infty.
+\end{align*}
+The bound then follows by dividing by $\norm{a_i}_1$ and taking the maximum over $i$.
+\end{proof}
+
+\end{document}
