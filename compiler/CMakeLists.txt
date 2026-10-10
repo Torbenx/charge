@@ -13,6 +13,8 @@ add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/parse/parse.cpp"
 project(charge)
 
 add_executable(${PROJECT_NAME}
+    BigInt.cpp
+    BigInt.h
     EnumTable.h
     FlatSet.cpp
     FlatSet.h

@@ -43,7 +43,7 @@ struct IntOr {
 
     //! Construct a variant holding an integer
     /*!
-    For an N-bit I the value needs to fit into N-1 bits. This is not checked!
+    For an N-bit I the value is silently truncated to N-1 bits.
     */
     static IntOr forInt(I value) {
         return IntOr((U)value << 1);
@@ -64,6 +64,8 @@ struct IntOr {
         VERIFY(isInt());
         return static_cast<I>(m_u);
     }
+
+    U rawBits() const { return m_u; }
 
     //! Returns the payload in this variant
     T payload() const {
