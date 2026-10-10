@@ -18,6 +18,8 @@ add_executable(${PROJECT_NAME}
     FlatSet.h
     FlatTreeSet.cpp
     FlatTreeSet.h
+    IntOr.cpp
+    IntOr.h
     log.cpp
     log.h
     main.cpp
