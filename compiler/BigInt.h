@@ -3,7 +3,10 @@
 #include <IntOr.h>
 
 #include <array>
+#include <compare>
 #include <concepts>
+#include <span>
+#include <utility>
 
 namespace bigint_detail {
 
@@ -81,7 +84,35 @@ struct Fields {
 
     __int128_t inlineValue() const {
         VERIFY(storedInline());
-        return std::bit_cast<__int128_t>(*this) >> 1;
+        return scaledBits() >> 1;
+    }
+
+    //! Returns the fields as one 128-bit integer, which is twice the value for inline numbers
+    /*!
+    The inline range maps exactly onto the range of __int128_t, so signed overflow of operations
+    on scaled values is equivalent to the result not fitting inline.
+    */
+    __int128_t scaledBits() const {
+        return std::bit_cast<__int128_t>(*this);
+    }
+
+    //! Inverse of scaledBits(), the scaled value must be even
+    static Fields fromScaled(__int128_t scaled) {
+        return std::bit_cast<Fields>(scaled);
+    }
+
+    static bool bothInline(const Fields& a, const Fields& b) {
+        return ((a.low_bits_or_ptr.rawBits() | b.low_bits_or_ptr.rawBits()) & 1) == 0;
+    }
+
+    //! Returns the scaled product of two tiny numbers
+    /*!
+    The product of tiny numbers is at most 2^124 in magnitude, so it always fits inline.
+    */
+    static __int128_t mulTinyScaled(const Fields& a, const Fields& b) {
+        auto aScaled = static_cast<int64_t>(a.low_bits_or_ptr.rawBits());
+        auto bValue = static_cast<int64_t>(b.low_bits_or_ptr.rawBits()) >> 1;
+        return static_cast<__int128_t>(aScaled) * bValue;
     }
 
     void setInlineUnchecked(__int128_t value) {
@@ -98,6 +129,9 @@ struct Fields {
 
     //! Returns a span to the limbs, inline numbers are unpacked into scratch
     std::span<const Limb> magnitude(std::array<Limb, 2>& scratch) const;
+
+    //! Returns a span to the limbs, must not be stored inline
+    std::span<const Limb> limbView() const { return { limbData(), limbCount() }; }
 
     static uint64_t packSize(int32_t signedLimbCount, uint32_t capacity) {
         return (static_cast<uint64_t>(static_cast<uint32_t>(signedLimbCount)) << 32) | capacity;
@@ -127,7 +161,7 @@ struct Fields {
 
 }
 
-struct BigInt : private bigint_detail::Fields {
+struct [[clang::trivial_abi]] BigInt : private bigint_detail::Fields {
     //! Constructs zero
     BigInt() noexcept
         : Fields { UInt64Or<bigint_detail::Limb*>::forInt(0), 0 } { }
@@ -163,6 +197,123 @@ struct BigInt : private bigint_detail::Fields {
     }
     ~BigInt() { release(); }
 
+    friend bool operator==(const BigInt& a, const BigInt& b) {
+        if (a.storedInline() || b.storedInline()) [[likely]]
+            return a.scaledBits() == b.scaledBits();
+        return equalSlow(a, b);
+    }
+
+    friend std::strong_ordering operator<=>(const BigInt& a, const BigInt& b) {
+        if (Fields::bothInline(a, b)) [[likely]]
+            return a.scaledBits() <=> b.scaledBits();
+        return compareSlow(a, b);
+    }
+
+    friend BigInt operator-(const BigInt& a) {
+        __int128_t result;
+        bool overflow = __builtin_sub_overflow(static_cast<__int128_t>(0), a.scaledBits(), &result);
+        if (a.storedInline() && !overflow) [[likely]]
+            return fromFields(fromScaled(result));
+        return negateSlow(a);
+    }
+    friend BigInt operator-(BigInt&& a) {
+        a.negateInPlace();
+        return std::move(a);
+    }
+
+    //! Negates the number in place
+    void negateInPlace() {
+        __int128_t result;
+        bool overflow = __builtin_sub_overflow(static_cast<__int128_t>(0), scaledBits(), &result);
+        if (storedInline() && !overflow) [[likely]]
+            setFields(fromScaled(result));
+        else
+            negateInPlaceSlow();
+    }
+
+    friend BigInt operator+(const BigInt& a, const BigInt& b) {
+        __int128_t result;
+        bool overflow = __builtin_add_overflow(a.scaledBits(), b.scaledBits(), &result);
+        if (bothInline(a, b) && !overflow) [[likely]]
+            return fromFields(fromScaled(result));
+        return addSlow(a, false, b, false);
+    }
+    friend BigInt operator+(BigInt&& a, const BigInt& b) {
+        a += b;
+        return std::move(a);
+    }
+    friend BigInt operator+(const BigInt& a, BigInt&& b) {
+        b += a;
+        return std::move(b);
+    }
+    friend BigInt operator+(BigInt&& a, BigInt&& b) {
+        // Reuse the storage of b if only it has an allocation, which happens e.g. for 1 + std::move(b)
+        if (a.storedInline() && !b.storedInline()) {
+            b += a;
+            return std::move(b);
+        }
+        a += b;
+        return std::move(a);
+    }
+
+    BigInt& operator+=(const BigInt& b) {
+        __int128_t result;
+        bool overflow = __builtin_add_overflow(scaledBits(), b.scaledBits(), &result);
+        if (bothInline(*this, b) && !overflow) [[likely]]
+            setFields(fromScaled(result));
+        else
+            addAssignSlow(false, b, false);
+        return *this;
+    }
+
+    friend BigInt operator-(const BigInt& a, const BigInt& b) {
+        __int128_t result;
+        bool overflow = __builtin_sub_overflow(a.scaledBits(), b.scaledBits(), &result);
+        if (bothInline(a, b) && !overflow) [[likely]]
+            return fromFields(fromScaled(result));
+        return addSlow(a, false, b, true);
+    }
+    friend BigInt operator-(BigInt&& a, const BigInt& b) {
+        a -= b;
+        return std::move(a);
+    }
+    friend BigInt operator-(const BigInt& a, BigInt&& b) {
+        b.subtractFrom(a);
+        return std::move(b);
+    }
+    friend BigInt operator-(BigInt&& a, BigInt&& b) {
+        if (a.storedInline() && !b.storedInline()) {
+            b.subtractFrom(a);
+            return std::move(b);
+        }
+        a -= b;
+        return std::move(a);
+    }
+
+    BigInt& operator-=(const BigInt& b) {
+        __int128_t result;
+        bool overflow = __builtin_sub_overflow(scaledBits(), b.scaledBits(), &result);
+        if (bothInline(*this, b) && !overflow) [[likely]]
+            setFields(fromScaled(result));
+        else
+            addAssignSlow(false, b, true);
+        return *this;
+    }
+
+    friend BigInt operator*(const BigInt& a, const BigInt& b) {
+        if (a.tiny() && b.tiny()) [[likely]]
+            return fromFields(fromScaled(mulTinyScaled(a, b)));
+        return mulSlow(a, b);
+    }
+
+    BigInt& operator*=(const BigInt& b) {
+        if (tiny() && b.tiny()) [[likely]]
+            setFields(fromScaled(mulTinyScaled(*this, b)));
+        else
+            mulAssignSlow(b);
+        return *this;
+    }
+
 private:
     friend struct BigIntTestAccess;
     using Limb = bigint_detail::Limb;
@@ -180,6 +331,41 @@ private:
     static BigInt allocateMagnitude128(__uint128_t magnitude, bool negative);
 
     void setFields(const Fields& other) { (Fields&)* this = other; }
+
+    static BigInt fromFields(const Fields& fields) {
+        BigInt result;
+        result.setFields(fields);
+        return result;
+    }
+
+    //! Replaces this number with a - this
+    void subtractFrom(const BigInt& a) {
+        __int128_t result;
+        bool overflow = __builtin_sub_overflow(a.scaledBits(), scaledBits(), &result);
+        if (bothInline(a, *this) && !overflow) [[likely]]
+            setFields(fromScaled(result));
+        else
+            addAssignSlow(true, a, false);
+    }
+
+    // Out of line slow paths for operations where the fast path in the header does not apply
+
+    static bool equalSlow(const BigInt& a, const BigInt& b);
+    static std::strong_ordering compareSlow(const BigInt& a, const BigInt& b);
+    static BigInt negateSlow(const BigInt& a);
+    void negateInPlaceSlow();
+    //! Computes (negateA ? -a : a) + (negateB ? -b : b)
+    static BigInt addSlow(const BigInt& a, bool negateA, const BigInt& b, bool negateB);
+    //! Replaces this number with (negateThis ? -this : this) + (negateB ? -b : b)
+    void addAssignSlow(bool negateThis, const BigInt& b, bool negateB);
+    //! Multiplies numbers which are not both tiny
+    static BigInt mulSlow(const BigInt& a, const BigInt& b);
+    void mulAssignSlow(const BigInt& b);
+    //! Store the result of the signed addition of a and b into this
+    /*!
+    Needs room for addCapacity() limbs and may alias a or b.
+    */
+    void storeSignedAddition(std::span<const Limb> a, bool aNegative, std::span<const Limb> b, bool bNegative);
 
     //! Completes a number after its magnitude was written into limbData()
     /*!
