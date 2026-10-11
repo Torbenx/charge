@@ -5,6 +5,10 @@
 
 #include <gtest/gtest.h>
 
+#ifdef __x86_64__
+#include <immintrin.h>
+#endif
+
 namespace bigint_detail {
 
 Fields Fields::makeAllocated(uint32_t capacity) {
@@ -48,19 +52,130 @@ namespace {
 using namespace bigint_detail;
 using Magnitude = std::span<const Limb>;
 
+#ifdef __x86_64__
+
+Limb addCommonLimbs(Limb* out, const Limb* a, const Limb* b, size_t count) {
+    unsigned char carry = 0;
+    for (size_t i = 0; i < count; i++) {
+        unsigned long long r;
+        carry = _addcarry_u64(carry, a[i], b[i], &r);
+        out[i] = r;
+    }
+    return carry;
+}
+
+Limb subCommonLimbs(Limb* out, const Limb* a, const Limb* b, size_t count) {
+    unsigned char borrow = 0;
+    for (size_t i = 0; i < count; i++) {
+        unsigned long long r;
+        borrow = _subborrow_u64(borrow, a[i], b[i], &r);
+        out[i] = r;
+    }
+    return borrow;
+}
+
+#elifdef __aarch64__
+
+// Adapted from Go's math/big addVV and subVV for arm64:
+//   https://github.com/golang/go/blob/2c3c1caad2079458fa7248ea1814797fc2e94e8a/src/math/big/arith_arm64.s#L12-L94
+//   Copyright 2025 The Go Authors. All rights reserved.
+//   Use of this source code is governed by a BSD-style license:
+//   https://github.com/golang/go/blob/2c3c1caad2079458fa7248ea1814797fc2e94e8a/LICENSE
+// Changes: GNU assembler syntax as GCC/Clang inline asm with compiler-allocated registers;
+// add and sub share one template; the carry is set up and read with cmn/cmp and cset.
+// clang-format off
+#define ADDSUB_ASM(OP, INIT, COND)         \
+    "and   %[r], %[n], #3\n\t"             \
+    "lsr   %[n], %[n], #2\n\t"             \
+    INIT "\n\t"                            \
+    "cbz   %[r], 2f\n"                     \
+    "1:\n\t"                               \
+    "ldr   %[t0], [%[a]], #8\n\t"          \
+    "ldr   %[t1], [%[b]], #8\n\t"          \
+    OP "  %[t0], %[t0], %[t1]\n\t"         \
+    "str   %[t0], [%[o]], #8\n\t"          \
+    "sub   %[r], %[r], #1\n\t"             \
+    "cbnz  %[r], 1b\n"                     \
+    "2:\n\t"                               \
+    "cbz   %[n], 4f\n"                     \
+    "3:\n\t"                               \
+    "ldp   %[t0], %[t1], [%[a]], #32\n\t"  \
+    "ldp   %[t2], %[t3], [%[a], #-16]\n\t" \
+    "ldp   %[t4], %[t5], [%[b]], #32\n\t"  \
+    "ldp   %[t6], %[t7], [%[b], #-16]\n\t" \
+    OP "  %[t0], %[t0], %[t4]\n\t"         \
+    OP "  %[t1], %[t1], %[t5]\n\t"         \
+    OP "  %[t2], %[t2], %[t6]\n\t"         \
+    OP "  %[t3], %[t3], %[t7]\n\t"         \
+    "stp   %[t0], %[t1], [%[o]], #32\n\t"  \
+    "stp   %[t2], %[t3], [%[o], #-16]\n\t" \
+    "sub   %[n], %[n], #1\n\t"             \
+    "cbnz  %[n], 3b\n"                     \
+    "4:\n\t"                               \
+    "cset  %[c], " COND
+// clang-format on
+
+#define ADDSUB_ASM_OPERANDS                                                       \
+    : [a] "+r"(a), [b] "+r"(b), [o] "+r"(out), [n] "+r"(count), [r] "=&r"(r),     \
+      [t0] "=&r"(t0), [t1] "=&r"(t1), [t2] "=&r"(t2), [t3] "=&r"(t3),             \
+      [t4] "=&r"(t4), [t5] "=&r"(t5), [t6] "=&r"(t6), [t7] "=&r"(t7), [c] "=r"(c) \
+    :: "cc", "memory"
+
+Limb addCommonLimbs(Limb* out, const Limb* a, const Limb* b, size_t count) {
+    uint64_t r, t0, t1, t2, t3, t4, t5, t6, t7, c;
+    __asm__ volatile(ADDSUB_ASM("adcs", "cmn   xzr, xzr", "cs") ADDSUB_ASM_OPERANDS);
+    return c;
+}
+
+Limb subCommonLimbs(Limb* out, const Limb* a, const Limb* b, size_t count) {
+    uint64_t r, t0, t1, t2, t3, t4, t5, t6, t7, c;
+    __asm__ volatile(ADDSUB_ASM("sbcs", "cmp   xzr, xzr", "cc") ADDSUB_ASM_OPERANDS);
+    return c;
+}
+
+#else
+
+Limb addCommonLimbs(Limb* out, const Limb* a, const Limb* b, size_t count) {
+    unsigned long long carry = 0;
+    for (size_t i = 0; i < count; i++)
+        out[i] = __builtin_addcll(a[i], b[i], carry, &carry);
+    return carry;
+}
+
+Limb subCommonLimbs(Limb* out, const Limb* a, const Limb* b, size_t count) {
+    unsigned long long borrow = 0;
+    for (size_t i = 0; i < count; i++)
+        out[i] = __builtin_subcll(a[i], b[i], borrow, &borrow);
+    return borrow;
+}
+
+#endif
+
 //! Writes a + b into out[0, a.size()]
 /*!
 Requires a.size() >= b.size(). out may alias a or b.
 */
 void addLimbs(Limb* out, Magnitude a, Magnitude b) {
     VERIFY(a.size() >= b.size());
-    unsigned long long carry = 0;
-    size_t i = 0;
-    for (; i < b.size(); i++)
-        out[i] = __builtin_addcll(a[i], b[i], carry, &carry);
-    for (; i < a.size(); i++)
-        out[i] = __builtin_addcll(a[i], 0, carry, &carry);
-    out[a.size()] = carry;
+    Limb carry = addCommonLimbs(out, a.data(), b.data(), b.size());
+
+    size_t i = b.size();
+    if (carry != 0) {
+        for (; i < a.size() && a[i] == (Limb)limits::max; i++) {
+            out[i] = (Limb)0;
+        }
+        if (i == a.size()) {
+            out[a.size()] = (Limb)1;
+            return;
+        }
+        out[i] = a[i] + (Limb)1;
+        i += 1;
+    }
+
+    // The rest is the same, copy it only if necessary
+    if (out != a.data() && i < a.size())
+        std::copy(a.begin() + i, a.end(), out + i);
+    out[a.size()] = (Limb)0;
 }
 
 //! Writes a - b into out[0, a.size())
@@ -69,13 +184,22 @@ Requires a >= b. out may alias a or b.
 */
 void subLimbs(Limb* out, Magnitude a, Magnitude b) {
     VERIFY(a.size() >= b.size());
-    unsigned long long borrow = 0;
-    size_t i = 0;
-    for (; i < b.size(); i++)
-        out[i] = __builtin_subcll(a[i], b[i], borrow, &borrow);
-    for (; i < a.size(); i++)
-        out[i] = __builtin_subcll(a[i], 0, borrow, &borrow);
-    VERIFY(borrow == 0);
+    Limb borrow = subCommonLimbs(out, a.data(), b.data(), b.size());
+
+    size_t i = b.size();
+    if (borrow != 0) {
+        VERIFY(i < a.size());
+        // a[a.size() - 1] is always non-zero
+        for (; a[i] == (Limb)0; i++) {
+            out[i] = limits::max;
+        }
+        out[i] = a[i] - (Limb)1;
+        i += 1;
+    }
+
+    // The rest is the same, copy it only if necessary
+    if (out != a.data() && i < a.size())
+        std::copy(a.begin() + i, a.end(), out + i);
 }
 
 //! Compares trimmed magnitudes
@@ -740,6 +864,11 @@ TEST(BigInt, CarryAndBorrow) {
     expectInline(big(false, { 5, 7, 9 }) - big(false, { 2, 7, 9 }), 3);
     expectInline(big(false, { 5, 7, 9 }) - big(false, { 2, 6, 9 }), pow2(64) + 3);
     expectAllocated(big(false, { 5, 7, 9 }) - big(false, { 2, 7, 8 }), false, { 3, 0, 1 });
+    // Carry and borrow stopping before the highest limb, so the remaining limbs are copied
+    expectAllocated(big(false, { ~0ull, 5, 9 }) + 1, false, { 0, 6, 9 });
+    expectAllocated(-big(false, { ~0ull, 5, 9 }) - 1, true, { 0, 6, 9 });
+    expectAllocated(big(false, { 0, 0, 5, 9 }) - 1, false, { ~0ull, ~0ull, 4, 9 });
+    expectAllocated(1 - big(false, { 0, 0, 5, 9 }), true, { ~0ull, ~0ull, 4, 9 });
 }
 
 TEST(BigInt, MulMultiLimb) {
@@ -821,6 +950,32 @@ TEST(BigInt, InPlaceReusesAllocation) {
     expectAllocated(b, false, { ~0ull, ~0ull, ~0ull });
     b += b;
     expectAllocated(b, false, { ~0ull - 1, ~0ull, ~0ull, 1 });
+
+    // Carry and borrow stopping before the highest limb
+    BigInt d = allocateAndFinish(false, { ~0ull, 5, 9 }, 8);
+    Limb* dLimbs = f(d).limbData();
+    d += 1;
+    expectAllocated(d, false, { 0, 6, 9 });
+    d -= 1;
+    expectAllocated(d, false, { ~0ull, 5, 9 });
+    EXPECT_EQ(f(d).limbData(), dLimbs);
+
+    // The shorter operand is computed in place, so the limbs of the longer one have to be copied
+    BigInt e = allocateAndFinish(false, { 1, 0, 1 }, 8);
+    Limb* eLimbs = f(e).limbData();
+    e += big(false, { ~0ull, ~0ull, ~0ull, ~0ull, 7 });
+    expectAllocated(e, false, { 0, 0, 1, 0, 8 });
+    EXPECT_EQ(f(e).limbData(), eLimbs);
+    BigInt g = allocateAndFinish(false, { 1, 2, 3 }, 8);
+    Limb* gLimbs = f(g).limbData();
+    g += big(false, { 3, 4, 5, 6 });
+    expectAllocated(g, false, { 4, 6, 8, 6 });
+    EXPECT_EQ(f(g).limbData(), gLimbs);
+    BigInt h = allocateAndFinish(false, { 5, 0, 1 }, 8);
+    Limb* hLimbs = f(h).limbData();
+    h -= big(false, { 6, 0, 0, 7 });
+    expectAllocated(h, true, { 1, 0, ~0ull, 6 });
+    EXPECT_EQ(f(h).limbData(), hLimbs);
 
     // Shrinking back inline
     BigInt c = big(true, { 1, 2, 3 });
