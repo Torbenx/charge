@@ -161,7 +161,7 @@ struct Fields {
 
 }
 
-struct [[clang::trivial_abi]] BigInt : private bigint_detail::Fields {
+struct CHARGE_TRIVIAL_ABI BigInt : private bigint_detail::Fields {
     //! Constructs zero
     BigInt() noexcept
         : Fields { UInt64Or<bigint_detail::Limb*>::forInt(0), 0 } { }

@@ -387,7 +387,8 @@ std::optional<DeductionState> Generator::generateParameterizeExpr() {
     return stateOpt;
 }
 
-std::optional<DeductionState> Generator::resolveCallTarget(std::span<const Word> argumentNames) {
+std::optional<DeductionState> Generator::resolveCallTarget([[maybe_unused]] std::span<const Word> argumentNames) {
+    // Note: Argument names unused. They should participate in overload resolution once function overloading is possible.
     Expression baseResult = topExpression();
 
     // Resolve function aliases
@@ -819,7 +820,8 @@ void Generator::generateMemberAccessExpr() {
         return;
     }
     TokenInfo* callToken = tok;
-    auto callArgumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::DataKind::CallArguments>());
+    // Note: Argument names unused. They should participate in overload resolution once function overloading is possible.
+    [[maybe_unused]] auto callArgumentNames = context.tokenBuffer.argumentNames(tok->data1<parse::DataKind::CallArguments>());
     advance();
     unstashTopExpression(std::move(selfExprStash));
     std::vector<Expression> callArguments = generateCallArguments(state, true, callParameters<FunctionProgram>::get(fnProg));
@@ -1208,7 +1210,7 @@ Constant Generator::fold(FoldBase base, ExternConstant v) {
     }
     case ConstantKind::MemberPointer: {
         auto externMember = base.program->getMemberPointer(v);
-        MemberPointerData member { verifyType(fold(base, externMember.memberType)) };
+        MemberPointerData member { .memberType = verifyType(fold(base, externMember.memberType)), .elements = {} };
         for (auto elem : externMember.elements) {
             member.elements.push_back({ .structImpl = fold(base, elem.structImpl), .memberIndex = elem.memberIndex });
         }

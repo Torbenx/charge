@@ -75,7 +75,7 @@ struct IntOr {
         } else {
             U payloadAsU = m_u >> 1;
             MaybeUninitialized<T> result;
-            __builtin_memcpy(&result, &payloadAsU, sizeof(T));
+            __builtin_memcpy(&result.value, &payloadAsU, sizeof(T));
             return result.value;
         }
     }

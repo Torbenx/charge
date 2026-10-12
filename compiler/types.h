@@ -25,6 +25,12 @@
 #define CHARGE_NEON_OPTIMIZATIONS 1
 #endif
 
+#if defined(__has_cpp_attribute) && __has_cpp_attribute(clang::trivial_abi)
+#define CHARGE_TRIVIAL_ABI [[clang::trivial_abi]]
+#else
+#define CHARGE_TRIVIAL_ABI
+#endif
+
 using int_t = std::int64_t;
 template<int_t... Is>
 using int_sequence = std::integer_sequence<int_t, Is...>;

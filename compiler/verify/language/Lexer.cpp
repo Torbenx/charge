@@ -243,7 +243,7 @@ void Lexer::lex(const char* source) {
     }
 }
 
-[[gnu::always_inline]] Word Lexer::readWord(const char*& position) {
+Word Lexer::readWord(const char*& position) {
     const char* begin = position;
     for (;;) {
         while (isBulkNameCharacter(*position))

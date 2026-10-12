@@ -37,7 +37,7 @@ void Generator::clearParseLocation() {
 
 void Generator::advance() { tok += 1; }
 
-Generator::LocalScope Generator::beginLocalScope(SourceLocation location) {
+Generator::LocalScope Generator::beginLocalScope(SourceLocation) {
     localScopeDepth += 1;
     return {
         localScopeDepth,
