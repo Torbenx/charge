@@ -55,7 +55,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}"
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE "/W3;/wd4244;/wd4267")
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE "-Wall;-Wextra;-Wsuggest-override;-Wimplicit-fallthrough;-fsized-deallocation;-Wno-logical-not-parentheses;-Wno-dangling-else")
+    target_compile_options(${PROJECT_NAME} PRIVATE "-Wall;-Wextra;-Wsuggest-override;-Wimplicit-fallthrough;-Wno-logical-not-parentheses;-Wno-dangling-else")
     if(WIN32)
         target_link_libraries(${PROJECT_NAME} PRIVATE stdc++exp)
     endif()

@@ -37,9 +37,9 @@ There is also a Visual Studio Code extension in `vscode` with syntax highlightin
 
 ## Building
 
-The project requires Python 3 and a C++23-compatible compiler and standard library. Building is tested with Clang 22 and GCC 15 on Ubuntu 26.04. The build produces a single binary `charge` that runs the test suite.
+The project requires Python 3 and a C++23-compatible compiler and standard library. Building requires Clang 20+ or GCC 15+; Clang is preferred as it gives better performance. Builds are currently tested on Linux, with Windows and macOS support coming soon.
 ```
-cmake -S . -B build
+cmake --preset clang22
 cmake --build build && ./build/charge
 ```
 

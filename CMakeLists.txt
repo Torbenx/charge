@@ -1,12 +1,24 @@
 cmake_minimum_required(VERSION 3.18)
 project(Charge_Language)
 
-if (NOT MSVC)
-    set(CMAKE_BUILD_TYPE release)
-    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -g")
+set(CHARGE_GNU_X86_VERSION "" CACHE STRING "x86-64 microarchitecture level; empty keeps the toolchain's flags")
+set_property(CACHE CHARGE_GNU_X86_VERSION PROPERTY STRINGS "" v1 v2 v3 v4)
 
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)|(i386)|(i686)")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mbmi -mbmi2 -mpopcnt -mlzcnt -msse4")
+function(charge_apply_x86_version)
+    if(CHARGE_GNU_X86_VERSION)
+        set(flag "-march=x86-64-${CHARGE_GNU_X86_VERSION}")
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${flag}>")
+    endif()
+endfunction()
+
+if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID)
+    if(CMAKE_CXX_COMPILER_ARCHITECTURE_ID MATCHES "^(x86_64|x64)$")
+        charge_apply_x86_version()
+    endif()
+else()
+    # Before CMake 4.1 CMAKE_CXX_COMPILER_ARCHITECTURE_ID was not set for unix and apple
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
+        charge_apply_x86_version()
     endif()
 endif()
 

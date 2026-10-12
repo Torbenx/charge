@@ -11,7 +11,7 @@ The main part is the compiler in the `compiler` directory which is further subdi
 
 Test files are contained in the `tests` directory.
 
-The `build` directory contains the build files. If its not already configured run `cmake -G Ninja -S . -B build -DCMAKE_C_COMPILER=clang-22 -DCMAKE_CXX_COMPILER=clang++-22` in the project directory. To build the project run `cmake --build build`. There is a single exectuable `charge` directly in build directory. Executing it with `./build/charge` will run the entire gtest based test suite.
+The `build` directory contains the build files. If its not already configured, initialize it using one of the presets, for example `cmake --preset clang22`. Clang 20+ or GCC 15+ is required to build, Clang is preferred for better performance and Clang 22 is a good default. To build the project run `cmake --build build`. There is a single exectuable `charge` directly in build directory. Executing it with `./build/charge` will run the entire gtest based test suite.
 
 Use `dbgln()` and `dbgprint()` for debug logging. They accept C++23 style string formatting.
 
