@@ -7,9 +7,9 @@ namespace parse {
 Parser::Parser(padded_string_view source)
     : m_state {
         .sourcePosition = source.data(),
-        .scopePosition = scopeBuffer.buffer,
-        .argumentPosition = argumentBuffer.buffer
-    } { scopeBuffer.buffer[0] = ScopeKind::Invalid; }
+        .scopePosition = scopeBuffer.data(),
+        .argumentPosition = argumentBuffer.data()
+    } { scopeBuffer.data()[0] = ScopeKind::Invalid; }
 
 SimpleParser::SimpleParser()
     : SimpleParser(padded_string_view()) { }
@@ -17,8 +17,8 @@ SimpleParser::SimpleParser()
 SimpleParser::SimpleParser(padded_string_view source)
     : m_state {
         .sourcePosition = source.data(),
-        .scopePosition = scopeBuffer.buffer
-    } { scopeBuffer.buffer[0] = ScopeKind::Invalid; }
+        .scopePosition = scopeBuffer.data()
+    } { scopeBuffer.data()[0] = ScopeKind::Invalid; }
 
 void SimpleParser::pushScope(ScopeKind scope) {
     auto index = ScopeBuffer::toIndex(m_state.scopePosition);

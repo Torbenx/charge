@@ -4,6 +4,8 @@
 #include <parse/api.h>
 #include <parse/parse_gen.h>
 
+#include <array>
+
 namespace sema {
 struct Context;
 }
@@ -15,50 +17,58 @@ struct RecoveryElement;
 inline constexpr int_t SCOPE_BUFFER_SIZE = 1024;
 
 struct ScopeBuffer {
+    struct alignas(SCOPE_BUFFER_SIZE) Storage {
+        std::array<ScopeKind, SCOPE_BUFFER_SIZE> data;
+    };
+    static_assert(sizeof(Storage) == alignof(Storage));
+
     static size_t toIndex(ScopeKind* position) {
         return (uintptr_t)position & (SCOPE_BUFFER_SIZE - 1);
     }
 
-    std::vector<ScopeKind> save(ScopeKind* position) const {
-        VERIFY(position + 1 - buffer < SCOPE_BUFFER_SIZE);
-        return { buffer, position + 1 };
+    ScopeKind* data() { return storage->data.data(); }
+    const ScopeKind* data() const { return storage->data.data(); }
+    std::vector<ScopeKind> save(const ScopeKind* position) const {
+        VERIFY(position + 1 - data() <= SCOPE_BUFFER_SIZE);
+        return { data(), position + 1 };
     }
     ScopeKind* restore(const std::vector<ScopeKind>& vec) {
         VERIFY(vec.size() <= SCOPE_BUFFER_SIZE);
-        return std::copy(vec.begin(), vec.end(), buffer) - 1;
+        return std::copy(vec.begin(), vec.end(), data()) - 1;
     }
 
-    ScopeKind* buffer;
     ScopeBuffer()
-        : buffer((ScopeKind*)::operator new(SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE))) { }
-    ~ScopeBuffer() {
-        ::operator delete(buffer, SCOPE_BUFFER_SIZE, std::align_val_t(SCOPE_BUFFER_SIZE));
-    }
+        : storage(std::make_unique_for_overwrite<Storage>()) { }
+    std::unique_ptr<Storage> storage;
 };
 
 inline constexpr int_t ARGUMENT_BUFFER_SIZE = 1024;
 inline constexpr int_t ARGUMENT_BUFFER_SIZE_IN_BYTES = ARGUMENT_BUFFER_SIZE * sizeof(Word);
 
 struct ArgumentBuffer {
+    struct alignas(ARGUMENT_BUFFER_SIZE_IN_BYTES) Storage {
+        std::array<Word, ARGUMENT_BUFFER_SIZE> data;
+    };
+    static_assert(sizeof(Storage) == alignof(Storage));
+
     static size_t toIndex(Word* position) {
         return ((uintptr_t)position & (ARGUMENT_BUFFER_SIZE_IN_BYTES - 1)) / sizeof(Word);
     }
 
-    std::vector<Word> save(Word* position) const {
-        VERIFY(position + 1 - buffer < ARGUMENT_BUFFER_SIZE);
-        return { buffer, position + 1 };
+    Word* data() { return storage->data.data(); }
+    const Word* data() const { return storage->data.data(); }
+    std::vector<Word> save(const Word* position) const {
+        VERIFY(position + 1 - data() <= ARGUMENT_BUFFER_SIZE);
+        return { data(), position + 1 };
     }
     Word* restore(const std::vector<Word>& vec) {
         VERIFY(vec.size() <= ARGUMENT_BUFFER_SIZE);
-        return std::copy(vec.begin(), vec.end(), buffer) - 1;
+        return std::copy(vec.begin(), vec.end(), data()) - 1;
     }
 
-    Word* buffer;
     ArgumentBuffer()
-        : buffer((Word*)::operator new(ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES))) { }
-    ~ArgumentBuffer() {
-        ::operator delete(buffer, ARGUMENT_BUFFER_SIZE_IN_BYTES, std::align_val_t(ARGUMENT_BUFFER_SIZE_IN_BYTES));
-    }
+        : storage(std::make_unique_for_overwrite<Storage>()) { }
+    std::unique_ptr<Storage> storage;
 };
 
 struct SimpleTokenInfo {
@@ -137,7 +147,7 @@ struct Parser {
 
     ScopeKind topScope() const { return m_state.scopePosition[0]; }
     std::span<const ScopeKind> scopes() const {
-        return { scopeBuffer.buffer, m_state.scopePosition + 1 };
+        return { scopeBuffer.data(), m_state.scopePosition + 1 };
     }
 
     void advanceToToken(sema::Context&);
@@ -186,7 +196,7 @@ struct SimpleParser {
 
     ScopeKind topScope() const { return m_state.scopePosition[0]; }
     std::span<const ScopeKind> scopes() const {
-        return { scopeBuffer.buffer, m_state.scopePosition + 1 };
+        return { scopeBuffer.data(), m_state.scopePosition + 1 };
     }
 
     void pushScope(ScopeKind);
