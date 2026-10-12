@@ -1,6 +1,7 @@
 #include <verify/ir/Function.h>
 
 #include <algorithm>
+#include <type_traits>
 
 namespace verify::ir {
 
