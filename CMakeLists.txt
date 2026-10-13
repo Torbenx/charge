@@ -4,6 +4,10 @@ project(Charge_Language)
 set(CHARGE_GNU_X86_VERSION "" CACHE STRING "x86-64 microarchitecture level; empty keeps the toolchain's flags")
 set_property(CACHE CHARGE_GNU_X86_VERSION PROPERTY STRINGS "" v1 v2 v3 v4)
 
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "Building with \"${CMAKE_CXX_COMPILER}\" is not supported. Use clang or clang-cl instead.")
+endif()
+
 function(charge_apply_x86_version)
     if(CHARGE_GNU_X86_VERSION)
         set(flag "-march=x86-64-${CHARGE_GNU_X86_VERSION}")

@@ -14,35 +14,59 @@
       }
     },
     {
-      "name": "clang22",
-      "inherits": ["variables-gnu"],
+      "name": "variables-msvc",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang-22",
-        "CMAKE_CXX_COMPILER": "clang++-22"
+        "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "/O2 /Ob2 /Z7 /DNDEBUG",
+        "CMAKE_C_FLAGS_RELWITHDEBINFO": "/O2 /Ob2 /Z7 /DNDEBUG",
+        "CHARGE_GNU_X86_VERSION": "v2"
       }
     },
     {
-      "name": "clang21",
+      "name": "clang",
+      "displayName": "Build with the default Clang version in your environment",
       "inherits": ["variables-gnu"],
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang-21",
-        "CMAKE_CXX_COMPILER": "clang++-21"
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
       }
     },
     {
-      "name": "clang20",
+      "name": "gcc",
+      "displayName": "Build with the default GCC version in your environment",
       "inherits": ["variables-gnu"],
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang-20",
-        "CMAKE_CXX_COMPILER": "clang++-20"
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
       }
     },
     {
-      "name": "gcc15",
-      "inherits": ["variables-gnu"],
+      "name": "default",
+      "displayName": "Let CMake select the compiler or provide your own",
+      "inherits": ["variables-gnu"]
+    },
+    {
+      "name": "clang-cl",
+      "displayName": "Build with clang-cl, must be configured in a VS Developer Command Prompt",
+      "inherits": ["variables-msvc"],
+      "generator": "Ninja",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "gcc-15",
-        "CMAKE_CXX_COMPILER": "g++-15"
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_LINKER": "lld-link"
+      }
+    },
+    {
+      "name": "vs2026-clang-cl",
+      "displayName": "Generate a Visual Studio 2026 project. ONLY USE IF YOU NEED A .sln FILE!",
+      "inherits": ["variables-msvc"],
+      "generator": "Visual Studio 18 2026",
+      "toolset": "ClangCL",
+      "cacheVariables": {
+        "CMAKE_CONFIGURATION_TYPES": "RelWithDebInfo"
       }
     }
   ]

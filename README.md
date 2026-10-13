@@ -37,10 +37,21 @@ There is also a Visual Studio Code extension in `vscode` with syntax highlightin
 
 ## Building
 
-The project requires Python 3 and a C++23-compatible compiler and standard library. Building requires Clang 20+ or GCC 15+; Clang is preferred as it gives better performance. Builds are currently tested on Linux, with Windows and macOS support coming soon.
-```
-cmake --preset clang22
+The project requires Python 3 and a C++23-compatible compiler and standard library. Supported compilers are Clang 20+ or GCC 15+, anything older and MSVC's `cl.exe` are _known to fail_. Clang is preferred as it gives better performance:
+```bash
+cmake --preset clang
 cmake --build build && ./build/charge
 ```
+This builds with the default Clang found in your PATH. Linux, macOS and Windows are supported, but how Clang gets on PATH differs: Installations on Linux via a package manager are usually automatically in PATH, same for Xcode on macOS. Homebrew and MinGW installs are typically added by hand. With Visual Studio, either configure from a Developer Command Prompt, or open the folder in Visual Studio and select the Clang preset there.
+
+If Clang is not found or the version is too old, you can point CMake directly at your preferred compiler, for example:
+```bash
+cmake --preset default \
+  -DCMAKE_C_COMPILER=clang-20 \
+  -DCMAKE_CXX_COMPILER=clang++-20
+```
+
+> [!WARNING]
+> Configuring without a preset will make an unoptimized build with only the baseline ISA for x86-64.
 
 To test the Visual Studio Code extension, Node.js is required. First run `npm install` once in the `vscode` directory to set up the extension. Then open the project in Visual Studio Code and press F5 or manually run the `Extension` configuration. This will open a development instance with the extension installed.
