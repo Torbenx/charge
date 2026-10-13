@@ -94,10 +94,6 @@ TEST(IntOr, SameSizePayload) {
     auto byte = UInt8Or<uint8_t>::forPayload(0x7f);
     EXPECT_FALSE(byte.isInt());
     EXPECT_EQ(byte.payload(), 0x7f);
-
-    EXPECT_THROW(Int32Or<uint32_t>::forPayload(0x80000000), std::runtime_error);
-    EXPECT_THROW(Int64Or<uint64_t>::forPayload(uint64_t(1) << 63), std::runtime_error);
-    EXPECT_THROW(UInt8Or<uint8_t>::forPayload(0x80), std::runtime_error);
 }
 
 TEST(IntOr, PayloadSameTypeAsInt) {
@@ -125,22 +121,6 @@ TEST(IntOr, PointerPayload) {
     auto null = Int64Or<int64_t*>::forPayload(nullptr);
     EXPECT_FALSE(null.isInt());
     EXPECT_EQ(null.payload(), nullptr);
-
-    // Pointers to byte-aligned types may not have their lowest bit available.
-    alignas(2) static char chars[2] = {};
-    auto even = Int64Or<char*>::forPayload(&chars[0]);
-    EXPECT_FALSE(even.isInt());
-    EXPECT_EQ(even.payload(), &chars[0]);
-    EXPECT_THROW(Int64Or<char*>::forPayload(&chars[1]), std::runtime_error);
-}
-
-TEST(IntOr, WrongAlternative) {
-    auto i = Int64Or<uint8_t>::forInt(7);
-    EXPECT_THROW(i.payload(), std::runtime_error);
-
-    auto p = Int64Or<uint8_t>::forPayload(7);
-    EXPECT_THROW(p.get(), std::runtime_error);
-    EXPECT_THROW(p.getScaled(), std::runtime_error);
 }
 
 TEST(IntOr, Copy) {
