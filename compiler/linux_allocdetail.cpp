@@ -6,7 +6,7 @@ namespace allocdetail {
 
 void* reserveMemory(int_t capacityInBytes) {
     void* result = mmap(nullptr, capacityInBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    VERIFY(result != nullptr);
+    VERIFY(result != MAP_FAILED);
     return result;
 }
 
