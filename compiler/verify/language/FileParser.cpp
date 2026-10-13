@@ -1,6 +1,5 @@
 #include <verify/language/ParseContext.h>
 
-#include <flat_set>
 #include <format>
 #include <ranges>
 
