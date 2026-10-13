@@ -27,6 +27,9 @@ else()
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
+# No C++ modules are used, but module scanning is still performed and can break in some situations.
+# For example with Homebrew clang on macOS or with older cmake versions.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
