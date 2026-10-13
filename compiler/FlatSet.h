@@ -2,6 +2,8 @@
 
 #include <types.h>
 
+#include <algorithm>
+
 template<typename T>
 struct OperatorOrdering {
     std::strong_ordering operator()(const T& a, const T& b) const { return a <=> b; }
