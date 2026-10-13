@@ -41,8 +41,10 @@ int charge_main(int argc, char** argv) {
 
         for (const auto& error : errors) {
             auto range = error.errorRange();
-            SourceLocation startLoc = context.tokenBuffer.findSourceLocation(range.begin());
-            SourceLocation endLoc = context.tokenBuffer.findSourceLocation(range.end());
+            const char* rangeBegin = range.data();
+            const char* rangeEnd = range.data() + range.size();
+            SourceLocation startLoc = context.tokenBuffer.findSourceLocation(rangeBegin);
+            SourceLocation endLoc = context.tokenBuffer.findSourceLocation(rangeEnd);
 
             const char* lineBegin = context.tokenBuffer.lines[startLoc.lineIndex()].begin;
             const char* lineEnd = lineBegin;
@@ -54,10 +56,10 @@ int charge_main(int argc, char** argv) {
                 dbgln("Syntax error on line {}:", startLoc.lineNumber());
             } else {
                 dbgln("Syntax error starting on line {}:", startLoc.lineNumber());
-                highlightLength = lineEnd - range.begin() + 1;
+                highlightLength = lineEnd - rangeBegin + 1;
             }
             dbgln("    {}", std::string_view(lineBegin, lineEnd));
-            int_t offset = range.begin() - lineBegin;
+            int_t offset = rangeBegin - lineBegin;
             VERIFY(offset >= 0);
             dbgln("    {: >{}}{:^>{}}", "", offset, "", highlightLength);
             dbgln("");

@@ -39,8 +39,8 @@ Diagnostic::Result Diagnostic::doRequest(Server& server, const Params& params) {
     std::vector<lsp::Diagnostic> result;
     for (const auto& error : context.parseErrors()) {
         auto range = error.errorRange();
-        SourceLocation startLoc = context.tokenBuffer.findSourceLocation(range.begin());
-        SourceLocation endLoc = context.tokenBuffer.findSourceLocation(range.end());
+        SourceLocation startLoc = context.tokenBuffer.findSourceLocation(range.data());
+        SourceLocation endLoc = context.tokenBuffer.findSourceLocation(range.data() + range.size());
 
         auto sug = suggestion(error);
         result.push_back(lsp::Diagnostic {

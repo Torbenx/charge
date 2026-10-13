@@ -50,7 +50,7 @@ struct IntOrRawStringView {
         : begin(""), size(0) { }
 
     IntOrRawStringView(RawStringView view)
-        : begin(view.data.begin()), size(view.data.length()) {
+        : begin(view.data.data()), size(view.data.length()) {
         if (begin == nullptr) {
             VERIFY(size == 0);
             begin = "";

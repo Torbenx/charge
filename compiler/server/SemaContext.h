@@ -4,6 +4,8 @@
 #include <sema/Context.h>
 #include <sema/Util.h>
 
+#include <variant>
+
 namespace server {
 
 enum class LocalDeclarationKind : uint8_t {

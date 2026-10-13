@@ -3,6 +3,8 @@
 #include <sema/Formatter.h>
 #include <server/json_objects.h>
 
+#include <variant>
+
 namespace server {
 
 struct VariableInfo {

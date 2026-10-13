@@ -454,6 +454,11 @@ constexpr __int128_t pow2(int n) {
     return static_cast<__int128_t>(1) << n;
 }
 
+// Not every standard library specializes std::numeric_limits for 128-bit integers
+constexpr __uint128_t uint128Max = ~static_cast<__uint128_t>(0);
+constexpr __int128_t int128Max = static_cast<__int128_t>(uint128Max >> 1);
+constexpr __int128_t int128Min = -int128Max - 1;
+
 void expectInline(const BigInt& v, __int128_t expected) {
     ASSERT_TRUE(f(v).storedInline());
     EXPECT_TRUE(f(v).inlineValue() == expected);
@@ -503,8 +508,8 @@ TEST(BigInt, FromInt128) {
     expectInline(BigInt::forInt128(-pow2(100) - 12345), -pow2(100) - 12345);
     expectAllocated(BigInt::forInt128(pow2(126)), false, { 0, 1ull << 62 });
     expectAllocated(BigInt::forInt128(-pow2(126) - 1), true, { 1, 1ull << 62 });
-    expectAllocated(BigInt::forInt128(std::numeric_limits<__int128_t>::min()), true, { 0, 1ull << 63 });
-    expectAllocated(BigInt::forInt128(std::numeric_limits<__int128_t>::max()), false, { ~0ull, ~0ull >> 1 });
+    expectAllocated(BigInt::forInt128(int128Min), true, { 0, 1ull << 63 });
+    expectAllocated(BigInt::forInt128(int128Max), false, { ~0ull, ~0ull >> 1 });
 }
 
 TEST(BigInt, FromUInt128) {
@@ -512,13 +517,13 @@ TEST(BigInt, FromUInt128) {
     expectInline(BigInt::forUInt128(pow2(126) - 1), pow2(126) - 1);
     expectAllocated(BigInt::forUInt128(pow2(126)), false, { 0, 1ull << 62 });
     expectAllocated(BigInt::forUInt128(static_cast<__uint128_t>(1) << 127), false, { 0, 1ull << 63 });
-    expectAllocated(BigInt::forUInt128(std::numeric_limits<__uint128_t>::max()), false, { ~0ull, ~0ull });
+    expectAllocated(BigInt::forUInt128(uint128Max), false, { ~0ull, ~0ull });
 }
 
 TEST(BigInt, TinyAllocated) {
     // The size field of negative numbers has the highest bit set, unlike the pointer
     EXPECT_FALSE(f(BigInt::forInt128(-pow2(126) - 1)).tiny());
-    EXPECT_FALSE(f(BigInt::forInt128(std::numeric_limits<__int128_t>::min())).tiny());
+    EXPECT_FALSE(f(BigInt::forInt128(int128Min)).tiny());
     EXPECT_FALSE(f(allocateAndFinish(true, { 1, 2, 3 }, 3)).tiny());
     EXPECT_FALSE(f(allocateAndFinish(true, { 1, 2, 3 }, 8)).tiny());
 }
@@ -666,8 +671,8 @@ const std::vector<__int128_t> int128Values = {
     pow2(126),
     -pow2(126) - 1,
     pow2(126) + 1,
-    std::numeric_limits<__int128_t>::max(),
-    std::numeric_limits<__int128_t>::min(),
+    int128Max,
+    int128Min,
 };
 
 // Calls check(i, j, a, b) for all pairs of int128Values
@@ -675,7 +680,7 @@ template<typename F>
 void forAllPairs(F check) {
     for (size_t i = 0; i < int128Values.size(); i++) {
         for (size_t j = 0; j < int128Values.size(); ++j) {
-            SCOPED_TRACE(std::format("values {} and {}", int128Values[i], int128Values[j]));
+            SCOPED_TRACE(std::format("int128Values[{}] and int128Values[{}]", i, j));
             check(int128Values[i], int128Values[j]);
         }
     }
@@ -770,7 +775,7 @@ TEST(BigInt, CompareBuiltinIntegers) {
 
 TEST(BigInt, Negate) {
     for (__int128_t value : int128Values) {
-        if (value == std::numeric_limits<__int128_t>::min())
+        if (value == int128Min)
             continue;
         SCOPED_TRACE(std::format("value {}", (int64_t)value));
         BigInt a = BigInt::forInt128(value);
@@ -783,7 +788,7 @@ TEST(BigInt, Negate) {
 
     expectAllocated(-BigInt::forInt128(-pow2(126)), false, { 0, 1ull << 62 });
     expectInline(-BigInt::forInt128(pow2(126)), -pow2(126));
-    expectAllocated(-BigInt::forInt128(std::numeric_limits<__int128_t>::min()), false, { 0, 1ull << 63 });
+    expectAllocated(-BigInt::forInt128(int128Min), false, { 0, 1ull << 63 });
 
     BigInt a = BigInt::forInt128(-pow2(126));
     a.negateInPlace();
@@ -872,7 +877,7 @@ TEST(BigInt, CarryAndBorrow) {
 }
 
 TEST(BigInt, MulMultiLimb) {
-    BigInt max128 = BigInt::forUInt128(std::numeric_limits<__uint128_t>::max());
+    BigInt max128 = BigInt::forUInt128(uint128Max);
     // (2^128 - 1)^2 = 2^256 - 2^129 + 1
     expectAllocated(max128 * max128, false, { 1, 0, ~0ull - 1, ~0ull });
     expectAllocated(max128 * -max128, true, { 1, 0, ~0ull - 1, ~0ull });

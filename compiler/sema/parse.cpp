@@ -3,23 +3,35 @@
 #include <sema/Generator.h>
 #include <sema/errors.h>
 
+#if __has_include(<cxxabi.h>)
 #include <cxxabi.h>
+#endif
 
 namespace sema {
 
 std::string ErrorBase::name() const {
+#if __has_include(<cxxabi.h>)
     size_t inOutBufferSize = 0;
     int outStatus = 0;
     char* nameBuf = abi::__cxa_demangle(mangledName(), nullptr, &inOutBufferSize, &outStatus);
     VERIFY(nameBuf != nullptr);
-
     std::string_view name(nameBuf);
+#else
+    // The MSVC ABI does not mangle type_info names, they look like "struct sema::errors::Name"
+    std::string_view name(mangledName());
+    static constexpr std::string_view structPrefix = "struct ";
+    VERIFY(name.starts_with(structPrefix));
+    name = name.substr(structPrefix.length());
+#endif
+
     static constexpr std::string_view prefix = "sema::errors::";
     VERIFY(name.starts_with(prefix));
     name = name.substr(prefix.length());
 
     std::string result(name);
+#if __has_include(<cxxabi.h>)
     std::free(nameBuf);
+#endif
     return result;
 }
 

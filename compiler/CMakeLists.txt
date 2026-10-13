@@ -65,7 +65,13 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE COMPILER_TEST_DIR="${CMAKE_SO
 
 set(CHARGE_BINARY "$<TARGET_FILE:${PROJECT_NAME}>")
 set(CHIRAL_BINARY "$<TARGET_FILE_DIR:${PROJECT_NAME}>/chiral$<TARGET_FILE_SUFFIX:${PROJECT_NAME}>")
+if(WIN32)
+    # Creating symlinks on Windows requires developer mode or administrator rights
+    set(CHIRAL_LINK_COMMAND "copy_if_different")
+else()
+    set(CHIRAL_LINK_COMMAND "create_symlink")
+endif()
 add_custom_command(
     TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" ARGS "-E" "create_symlink" "${CHARGE_BINARY}" "${CHIRAL_BINARY}"
+    COMMAND "${CMAKE_COMMAND}" ARGS "-E" "${CHIRAL_LINK_COMMAND}" "${CHARGE_BINARY}" "${CHIRAL_BINARY}"
 )

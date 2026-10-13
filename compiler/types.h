@@ -7,6 +7,7 @@
 
 #include <log.h>
 
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <functional>
@@ -122,7 +123,7 @@ struct FixedString {
         std::copy_n(str, N, storage.begin());
         storage.back() = '\0';
     }
-    constexpr operator std::string_view() const { return { storage.begin(), N }; }
+    constexpr operator std::string_view() const { return { storage.data(), N }; }
     constexpr const char& operator[](int_t index) const { return storage[index]; }
 };
 template<int_t N>
