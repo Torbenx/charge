@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Default clang preset on every platform, using the compiler a developer gets out of the box
+          - name: Linux x64 / clang
+            os: ubuntu-26.04
+            preset: clang
+            compiler-id: Clang
+            compiler-major: 21
+          - name: Linux arm64 / clang
+            os: ubuntu-26.04-arm
+            preset: clang
+            compiler-id: Clang
+            compiler-major: 21
+          - name: Windows x64 / clang
+            os: windows-2025-vs2026
+            msvc-arch: x64
+            preset: clang
+            compiler-id: Clang
+            compiler-major: 22
+          - name: Windows arm64 / clang
+            os: windows-11-vs2026-arm
+            msvc-arch: arm64
+            preset: clang
+            compiler-id: Clang
+            compiler-major: 22
+          - name: macOS x64 / Apple clang
+            os: macos-26-intel
+            preset: clang
+            compiler-id: AppleClang
+            compiler-major: 21
+          - name: macOS arm64 / Apple clang
+            os: macos-26
+            preset: clang
+            compiler-id: AppleClang
+            compiler-major: 21
+
+          # Alternative compilers and interfaces
+          - name: Linux x64 / gcc
+            os: ubuntu-26.04
+            preset: gcc
+            compiler-id: GNU
+            compiler-major: 15
+          - name: Windows x64 / clang-cl
+            os: windows-2025-vs2026
+            msvc-arch: x64
+            preset: clang-cl
+            compiler-id: Clang
+            compiler-major: 22
+          - name: macOS arm64 / Homebrew clang
+            os: macos-26
+            preset: default
+            configure-args: >-
+              -DCMAKE_C_COMPILER="$(brew --prefix llvm@20)/bin/clang"
+              -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@20)/bin/clang++"
+            compiler-id: Clang
+            compiler-major: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # The runner image has a standalone LLVM on PATH that would shadow the Clang bundled with Visual Studio
+      - name: Remove standalone LLVM from PATH
+        if: matrix.msvc-arch
+        shell: pwsh
+        run: |
+          $path = ($env:PATH -split ';' | Where-Object { $_ -notmatch '\\LLVM\\bin\\?$' }) -join ';'
+          "PATH=$path" >> $env:GITHUB_ENV
+
+      - name: Activate Developer Command Prompt
+        if: matrix.msvc-arch
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: ${{ matrix.msvc-arch }}
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} ${{ matrix.configure-args }}
+
+      - name: Check compiler version
+        shell: bash
+        run: |
+          compiler_file=$(ls build/CMakeFiles/*/CMakeCXXCompiler.cmake)
+          id=$(sed -n 's/^set(CMAKE_CXX_COMPILER_ID "\(.*\)")$/\1/p' "$compiler_file")
+          version=$(sed -n 's/^set(CMAKE_CXX_COMPILER_VERSION "\(.*\)")$/\1/p' "$compiler_file")
+          path=$(sed -n 's/^set(CMAKE_CXX_COMPILER "\(.*\)")$/\1/p' "$compiler_file")
+          echo "::notice::Compiler: $id $version ($path)"
+          if [ "$id" != "${{ matrix.compiler-id }}" ] || [ "${version%%.*}" != "${{ matrix.compiler-major }}" ]; then
+            echo "::error::Expected ${{ matrix.compiler-id }} ${{ matrix.compiler-major }}, got $id $version"
+            exit 1
+          fi
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ./build/charge

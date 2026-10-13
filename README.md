@@ -1,5 +1,7 @@
 # Charge Language
 
+[![CI](https://github.com/Torbenx/charge/actions/workflows/ci.yml/badge.svg)](https://github.com/Torbenx/charge/actions/workflows/ci.yml)
+
 Charge is an experimental memory-safe systems programming language, most similar to C++ and Rust. It is a personal research project in early development. The primary goals of the language are:
 
 * **Proven memory safety ... :** rigorous and semi-automatic proofs, enabled by formalizing reference guarantees, object invariants and more in the project's own intermediate representation Chiral.
