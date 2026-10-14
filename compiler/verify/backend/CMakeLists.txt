@@ -51,3 +51,5 @@ target_sources(${PROJECT_NAME}
     Value.cpp
     Value.h
 )
+
+add_subdirectory(integer)
