@@ -75,6 +75,14 @@ jobs:
               -DCMAKE_CXX_COMPILER="$(brew --prefix llvm@20)/bin/clang++"
             compiler-id: Clang
             compiler-major: 20
+          # Test with force _BitInt impls so they don't go stale
+          - name: Linux x64 / clang with _BitInt
+            os: ubuntu-26.04
+            preset: clang
+            configure-args: >-
+              -DCMAKE_CXX_FLAGS="-DCHARGE_FORCE_BITINT_FIXEDPOINT_IMPLS=1"
+            compiler-id: Clang
+            compiler-major: 21
 
     steps:
       - uses: actions/checkout@v7

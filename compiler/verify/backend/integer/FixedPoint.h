@@ -16,6 +16,12 @@
 #include <type_traits>
 #include <utility>
 
+#if CHARGE_FORCE_BITINT_FIXEDPOINT_IMPLS
+#define CHARGE_BITINT_CONDITION(cond) true
+#else
+#define CHARGE_BITINT_CONDITION(cond) (cond)
+#endif
+
 namespace verify::backend::integer {
 
 //! Layout of a fixed-point number in 32-bit words
@@ -166,9 +172,13 @@ constexpr bool shiftOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
     return overflow;
 }
 
+//! Whether every number of layout L can be sign extended to layout D without scaling
+template<FixedPointLayout D, FixedPointLayout L>
+concept SignExtendable = D.contains(L) && D.fractionWords == L.fractionWords;
+
 //! Adds x to acc with sign extension and wraps around on overflow
 template<FixedPointLayout D, FixedPointLayout L>
-    requires(D.contains(L) && D.fractionWords == L.fractionWords)
+    requires SignExtendable<D, L>
 void addSignExtended(FixedPoint<D>& acc, const FixedPoint<L>& x) {
     constexpr auto limbCount = FixedPoint<D>::limbCount;
     uint64_t carry = 0;
@@ -179,7 +189,7 @@ void addSignExtended(FixedPoint<D>& acc, const FixedPoint<L>& x) {
 
 //! Subtracts x from acc with sign extension and wraps around on overflow
 template<FixedPointLayout D, FixedPointLayout L>
-    requires(D.contains(L) && D.fractionWords == L.fractionWords)
+    requires SignExtendable<D, L>
 void subSignExtended(FixedPoint<D>& acc, const FixedPoint<L>& x) {
     constexpr auto limbCount = FixedPoint<D>::limbCount;
     uint64_t borrow = 0;
@@ -187,6 +197,82 @@ void subSignExtended(FixedPoint<D>& acc, const FixedPoint<L>& x) {
         acc.setLimb(i, subBorrow(acc.getLimb(i), extendedLimb(x, i), borrow));
     acc.setTop(static_cast<typename FixedPoint<D>::Top>(topLimb(acc) - extendedLimb(x, limbCount) - borrow));
 }
+
+#ifdef __BITINT_MAXWIDTH__
+
+//! Returns whether a _BitInt with the given number of words is supported
+constexpr bool fitsInMaxBitIntWidth(int_t words) {
+    return words * 32 <= __BITINT_MAXWIDTH__;
+}
+
+template<int_t words>
+using SignedBitInt = signed _BitInt(words * 32);
+
+template<int_t words>
+using UnsignedBitInt = unsigned _BitInt(words * 32);
+
+//! Returns the value scaled by 2^(32 * fractionWords)
+/*!
+A _BitInt can be larger than the words, for example a 96-bit _BitInt occupies 16 bytes. Some ABIs require the
+padding bits of a signed _BitInt to be the sign extension, so the words are copied into an unsigned _BitInt whose
+zero padding bits are valid on every ABI.
+*/
+template<FixedPointLayout L>
+SignedBitInt<L.totalWords()> toBitInt(const FixedPoint<L>& x) {
+    UnsignedBitInt<L.totalWords()> bits = 0;
+    __builtin_memcpy(&bits, &x, sizeof(x));
+    return static_cast<SignedBitInt<L.totalWords()>>(bits);
+}
+
+//! Stores the two's complement of the scaled value into out
+template<FixedPointLayout L>
+void fromBitInt(FixedPoint<L>& out, UnsignedBitInt<L.totalWords()> bits) {
+    __builtin_memcpy(&out, &bits, sizeof(out));
+}
+
+//! Number of words which hold both the input and the output of shiftOverflow
+template<int_t shift, FixedPointLayout From, FixedPointLayout To>
+constexpr int_t shiftWords = std::max<int_t>(From.totalWords() + std::max<int_t>(shift, 0), To.totalWords());
+
+// Disabled, because the _BitInt version is longer for most layouts and makes every rounding mode of
+// convertOverflow longer. It is only shorter for narrowing {2, 0} to {1, 0} and widening {3, 2} or {3, 3}.
+template<int_t shift, FixedPointLayout From, FixedPointLayout To>
+    requires(CHARGE_BITINT_CONDITION(false) && fitsInMaxBitIntWidth(shiftWords<shift, From, To>))
+bool shiftOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
+    using Wide = SignedBitInt<shiftWords<shift, From, To>>;
+    using UWide = UnsignedBitInt<shiftWords<shift, From, To>>;
+    Wide shifted = toBitInt(in);
+    if constexpr (shift >= 0) {
+        // Shifting the unsigned bits avoids undefined behavior for negative numbers, the wide type holds the result
+        shifted = static_cast<Wide>(static_cast<UWide>(shifted) << (32 * shift));
+    } else {
+        // The arithmetic shift rounds down, shifting by all bits but the sign bit leaves only the sign
+        shifted >>= std::min(32 * -shift, 32 * (int_t)From.totalWords() - 1);
+    }
+    auto result = static_cast<SignedBitInt<To.totalWords()>>(shifted);
+    fromBitInt(out, result);
+    return result != shifted;
+}
+
+// Disabled, because the _BitInt versions of addSignExtended and subSignExtended were 1 to 3 instructions longer
+// for every measured layout
+template<FixedPointLayout D, FixedPointLayout L>
+    requires(CHARGE_BITINT_CONDITION(false) && SignExtendable<D, L> && fitsInMaxBitIntWidth(D.totalWords()))
+void addSignExtended(FixedPoint<D>& acc, const FixedPoint<L>& x) {
+    // Converting to unsigned sign extends and the unsigned sum wraps around
+    using Unsigned = UnsignedBitInt<D.totalWords()>;
+    fromBitInt(acc, static_cast<Unsigned>(toBitInt(acc)) + static_cast<Unsigned>(toBitInt(x)));
+}
+
+template<FixedPointLayout D, FixedPointLayout L>
+    requires(CHARGE_BITINT_CONDITION(false) && SignExtendable<D, L> && fitsInMaxBitIntWidth(D.totalWords()))
+void subSignExtended(FixedPoint<D>& acc, const FixedPoint<L>& x) {
+    // Converting to unsigned sign extends and the unsigned difference wraps around
+    using Unsigned = UnsignedBitInt<D.totalWords()>;
+    fromBitInt(acc, static_cast<Unsigned>(toBitInt(acc)) - static_cast<Unsigned>(toBitInt(x)));
+}
+
+#endif
 
 //! Returns -x and wraps around on overflow
 template<FixedPointLayout L>
@@ -210,11 +296,8 @@ namespace verify::backend::integer {
 
 //! Signed fixed-point number with a layout fixed at compile time
 /*!
-The storage consists only of 32-bit words, so the alignment is 4 and a value with layout {2, 1} can share
-16 bytes with a 32-bit index in a sparse matrix entry.
-
-Computations access the words as unsigned 64-bit limbs through getLimb() and setLimb(), except for the signed
-top. It consists of the one or two words above the limbs and is accessed through getTop() and setTop().
+The storage consists only of 32-bit words, so the alignment is 4 and composes well with a 32-bit
+index in a sparse matrix entry.
 
 Operations which can overflow return whether they overflowed, in which case the result is wrapped
 around. Operations returning a wider layout are exact and never overflow.
@@ -362,6 +445,16 @@ public:
         return std::strong_ordering::equal;
     }
 
+#ifdef __BITINT_MAXWIDTH__
+    friend std::strong_ordering operator<=>(const FixedPoint& a, const FixedPoint& b)
+        requires(CHARGE_BITINT_CONDITION(true) && fixed_point_detail::fitsInMaxBitIntWidth(wordCount))
+    {
+        // Compiles to a branchless subtraction instead of comparing the words one by one
+        using namespace fixed_point_detail;
+        return toBitInt(a) <=> toBitInt(b);
+    }
+#endif
+
 private:
     // Copying the words compiles to a single 64-bit access, while compilers do not merge separate stores of the
     // words. This requires that the words are stored in little endian order.
@@ -420,6 +513,20 @@ template<FixedPointLayout L>
     return overflow;
 }
 
+#ifdef __BITINT_MAXWIDTH__
+// The _BitInt version ties for powers of two and is worse everywhere else, because the overflow
+// check is implemented manually instead of using the overflow flag.
+template<FixedPointLayout L>
+    requires(CHARGE_BITINT_CONDITION(false) && fixed_point_detail::fitsInMaxBitIntWidth(L.totalWords()))
+[[nodiscard]] bool addOverflow(const FixedPoint<L>& a, const FixedPoint<L>& b, FixedPoint<L>& out) {
+    using namespace fixed_point_detail;
+    SignedBitInt<L.totalWords()> result;
+    bool overflow = __builtin_add_overflow(toBitInt(a), toBitInt(b), &result);
+    fromBitInt(out, result);
+    return overflow;
+}
+#endif
+
 //! Computes out = a - b and returns whether the result overflowed
 template<FixedPointLayout L>
 [[nodiscard]] bool subOverflow(const FixedPoint<L>& a, const FixedPoint<L>& b, FixedPoint<L>& out) {
@@ -438,6 +545,20 @@ template<FixedPointLayout L>
     out = result;
     return overflow;
 }
+
+#ifdef __BITINT_MAXWIDTH__
+// The _BitInt version ties for powers of two and is worse everywhere else, because the overflow
+// check is implemented manually instead of using the overflow flag.
+template<FixedPointLayout L>
+    requires(CHARGE_BITINT_CONDITION(false) && fixed_point_detail::fitsInMaxBitIntWidth(L.totalWords()))
+[[nodiscard]] bool subOverflow(const FixedPoint<L>& a, const FixedPoint<L>& b, FixedPoint<L>& out) {
+    using namespace fixed_point_detail;
+    SignedBitInt<L.totalWords()> result;
+    bool overflow = __builtin_sub_overflow(toBitInt(a), toBitInt(b), &result);
+    fromBitInt(out, result);
+    return overflow;
+}
+#endif
 
 //! Computes out = -a and returns whether the result overflowed, which only happens for the minimum value
 template<FixedPointLayout L>
@@ -492,6 +613,21 @@ FixedPoint<productLayout(A, B)> multiply(const FixedPoint<A>& a, const FixedPoin
     return result;
 }
 
+#ifdef __BITINT_MAXWIDTH__
+// Disabled, because the _BitInt version is longer for all products of more than two words. The sign extended
+// operands are multiplied in the full product width.
+template<FixedPointLayout A, FixedPointLayout B>
+    requires(CHARGE_BITINT_CONDITION(false) && fixed_point_detail::fitsInMaxBitIntWidth(productLayout(A, B).totalWords()))
+FixedPoint<productLayout(A, B)> multiply(const FixedPoint<A>& a, const FixedPoint<B>& b) {
+    using namespace fixed_point_detail;
+    using Signed = SignedBitInt<productLayout(A, B).totalWords()>;
+    FixedPoint<productLayout(A, B)> result;
+    // The product is exact, so the signed multiplication cannot overflow
+    fromBitInt(result, static_cast<Signed>(toBitInt(a)) * static_cast<Signed>(toBitInt(b)));
+    return result;
+}
+#endif
+
 //! Converts between arbitrary layouts and returns whether the result overflowed
 template<RoundingMode mode, FixedPointLayout From, FixedPointLayout To>
 [[nodiscard]] bool convertOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
@@ -534,6 +670,46 @@ template<RoundingMode mode, FixedPointLayout From, FixedPointLayout To>
     }
 }
 
+#ifdef __BITINT_MAXWIDTH__
+// Disabled, because the _BitInt version is longer for all rounding modes and layouts except rounding {1, 1} down.
+// The overflow check is turned into an addition and an unsigned comparison over all words of the wide value,
+// while the word-wise version only compares the words above the result with its sign.
+template<RoundingMode mode, FixedPointLayout From, FixedPointLayout To>
+    requires(CHARGE_BITINT_CONDITION(false) && fixed_point_detail::fitsInMaxBitIntWidth(std::max(From.totalWords() + 1, To.totalWords())))
+[[nodiscard]] bool convertOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
+    using namespace fixed_point_detail;
+    constexpr int_t shift = int_t(To.fractionWords) - int_t(From.fractionWords);
+    if constexpr (shift >= 0) {
+        return shiftOverflow<shift>(in, out);
+    } else {
+        // Like the word-wise version, a bias is added before the arithmetic shift rounds down, and the
+        // additional integer word keeps the sum from overflowing
+        using Wide = SignedBitInt<std::max(From.totalWords() + 1, To.totalWords())>;
+        constexpr int_t droppedBits = 32 * -shift;
+        Wide value = toBitInt(in);
+        Wide inexact = (Wide(1) << droppedBits) - 1;
+        Wide bias = 0;
+        switch (mode) {
+        case RoundingMode::Floor:
+            break;
+        case RoundingMode::Ceil:
+            bias = inexact;
+            break;
+        case RoundingMode::TowardZero:
+            bias = value < 0 ? inexact : 0;
+            break;
+        case RoundingMode::Nearest:
+            bias = (inexact >> 1) + ((value >> droppedBits) & 1);
+            break;
+        }
+        Wide rounded = (value + bias) >> droppedBits;
+        auto result = static_cast<SignedBitInt<To.totalWords()>>(rounded);
+        fromBitInt(out, result);
+        return result != rounded;
+    }
+}
+#endif
+
 //! Exact accumulator for sums of products, such as dot products
 /*!
 Holds the exact sum of up to 2^32 terms, where each term is a product of numbers with layouts A and B or a
@@ -557,6 +733,26 @@ public:
         using namespace fixed_point_detail;
         subSignExtended(m_value, multiply(a, b));
     }
+
+#ifdef __BITINT_MAXWIDTH__
+    // Disabled, because the _BitInt versions are longer for the same reason as the _BitInt version of multiply
+    void addProduct(const FixedPoint<A>& a, const FixedPoint<B>& b)
+        requires(CHARGE_BITINT_CONDITION(false) && fixed_point_detail::fitsInMaxBitIntWidth(layout.totalWords()))
+    {
+        using namespace fixed_point_detail;
+        // Converting the product to unsigned sign extends it and the unsigned sum wraps around
+        using Unsigned = UnsignedBitInt<layout.totalWords()>;
+        fromBitInt(m_value, static_cast<Unsigned>(toBitInt(m_value)) + static_cast<Unsigned>(bitIntProduct(a, b)));
+    }
+
+    void subProduct(const FixedPoint<A>& a, const FixedPoint<B>& b)
+        requires(CHARGE_BITINT_CONDITION(false) && fixed_point_detail::fitsInMaxBitIntWidth(layout.totalWords()))
+    {
+        using namespace fixed_point_detail;
+        using Unsigned = UnsignedBitInt<layout.totalWords()>;
+        fromBitInt(m_value, static_cast<Unsigned>(toBitInt(m_value)) - static_cast<Unsigned>(bitIntProduct(a, b)));
+    }
+#endif
 
     template<FixedPointLayout L>
         requires(productLayout(A, B).contains(L))
@@ -587,6 +783,15 @@ public:
 
 private:
     FixedPoint<layout> m_value;
+
+#ifdef __BITINT_MAXWIDTH__
+    //! Returns the exact product in its own width, which keeps the multiplication narrower than the accumulator
+    static auto bitIntProduct(const FixedPoint<A>& a, const FixedPoint<B>& b) {
+        using namespace fixed_point_detail;
+        using Signed = SignedBitInt<productLayout(A, B).totalWords()>;
+        return static_cast<Signed>(toBitInt(a)) * static_cast<Signed>(toBitInt(b));
+    }
+#endif
 };
 
 template<FixedPointLayout L>

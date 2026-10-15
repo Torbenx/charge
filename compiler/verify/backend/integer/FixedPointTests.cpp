@@ -262,6 +262,7 @@ TEST(VerifyBackendInteger, FixedPointAddSub) {
     checkAddSub<FixedPointLayout { 2, 1 }>(rng, 2000);
     checkAddSub<FixedPointLayout { 2, 2 }>(rng, 2000);
     checkAddSub<FixedPointLayout { 3, 2 }>(rng, 2000);
+    checkAddSub<FixedPointLayout { 4, 4 }>(rng, 2000);
 }
 
 TEST(VerifyBackendInteger, FixedPointCarryIntoTopLimb) {
@@ -322,6 +323,21 @@ void fixedPointConvertModes(Rng& rng) {
 TEST(VerifyBackendInteger, FixedPointConvert) {
     Rng rng(4);
     fixedPointConvertModes<RoundingMode::Floor, RoundingMode::Ceil, RoundingMode::TowardZero, RoundingMode::Nearest>(rng);
+}
+
+TEST(VerifyBackendInteger, BitIntSize) {
+    // Test that _BitInt size is large enough for the the above tests
+    // Also serves as an indicator in the test log if _BitInt operations are actually enabled.
+    #ifdef __BITINT_MAXWIDTH__
+        if constexpr (CHARGE_BITINT_CONDITION(false)) {
+            dbgln("__BITINT_MAXWIDTH__ is: {}", __BITINT_MAXWIDTH__);
+            EXPECT_TRUE(fixed_point_detail::fitsInMaxBitIntWidth(16));
+        } else {
+            GTEST_SKIP() << "_BitInt operations are not enabled";
+        }
+    #else
+        GTEST_SKIP() << "_BitInt is not available.";
+    #endif
 }
 
 }
