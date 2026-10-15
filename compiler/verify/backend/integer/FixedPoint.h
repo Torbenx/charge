@@ -31,10 +31,10 @@ scaled by 2^(-32 * fractionWords). The integer part includes the sign bit, so th
 [-2^(32 * integerWords - 1), 2^(32 * integerWords - 1)) with a resolution of 2^(-32 * fractionWords).
 */
 struct FixedPointLayout {
-    uint32_t integerWords;
-    uint32_t fractionWords;
+    int_t integerWords;
+    int_t fractionWords;
 
-    constexpr uint32_t totalWords() const { return integerWords + fractionWords; }
+    constexpr int_t totalWords() const { return integerWords + fractionWords; }
 
     //! Returns whether every number of the other layout is exactly representable in this layout
     constexpr bool contains(FixedPointLayout other) const {
@@ -45,7 +45,7 @@ struct FixedPointLayout {
 };
 
 constexpr bool validLayout(FixedPointLayout layout) {
-    return layout.integerWords >= 1;
+    return layout.integerWords >= 1 && layout.fractionWords >= 0;
 }
 
 //! Layout which holds the exact product of numbers with layouts a and b
@@ -70,7 +70,7 @@ constexpr FixedPointLayout dotLayout(FixedPointLayout a, FixedPointLayout b) {
 template<std::integral T>
 constexpr FixedPointLayout integerLayoutFor() {
     // The digits exclude the sign bit
-    return { static_cast<uint32_t>((std::numeric_limits<T>::digits + 32) / 32), 0 };
+    return { (std::numeric_limits<T>::digits + 32) / 32, 0 };
 }
 
 enum class RoundingMode : uint8_t {
@@ -166,7 +166,7 @@ constexpr bool shiftOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
     // The words of the input above the result have to be the sign extension of the result
     uint64_t sign = signLimb(topLimb(result));
     bool overflow = false;
-    for (int_t word = int_t(To.totalWords()) - shift; word < int_t(From.totalWords()); word += 2)
+    for (int_t word = To.totalWords() - shift; word < From.totalWords(); word += 2)
         overflow |= wordsAt(in, word) != sign;
     out = result;
     return overflow;
@@ -232,7 +232,7 @@ void fromBitInt(FixedPoint<L>& out, UnsignedBitInt<L.totalWords()> bits) {
 
 //! Number of words which hold both the input and the output of shiftOverflow
 template<int_t shift, FixedPointLayout From, FixedPointLayout To>
-constexpr int_t shiftWords = std::max<int_t>(From.totalWords() + std::max<int_t>(shift, 0), To.totalWords());
+constexpr int_t shiftWords = std::max(From.totalWords() + std::max<int_t>(shift, 0), To.totalWords());
 
 // Disabled, because the _BitInt version is longer for most layouts and makes every rounding mode of
 // convertOverflow longer. It is only shorter for narrowing {2, 0} to {1, 0} and widening {3, 2} or {3, 3}.
@@ -247,7 +247,7 @@ bool shiftOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
         shifted = static_cast<Wide>(static_cast<UWide>(shifted) << (32 * shift));
     } else {
         // The arithmetic shift rounds down, shifting by all bits but the sign bit leaves only the sign
-        shifted >>= std::min(32 * -shift, 32 * (int_t)From.totalWords() - 1);
+        shifted >>= std::min(32 * -shift, 32 * From.totalWords() - 1);
     }
     auto result = static_cast<SignedBitInt<To.totalWords()>>(shifted);
     fromBitInt(out, result);
@@ -632,7 +632,7 @@ FixedPoint<productLayout(A, B)> multiply(const FixedPoint<A>& a, const FixedPoin
 template<RoundingMode mode, FixedPointLayout From, FixedPointLayout To>
 [[nodiscard]] bool convertOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
     using namespace fixed_point_detail;
-    constexpr int_t shift = int_t(To.fractionWords) - int_t(From.fractionWords);
+    constexpr int_t shift = To.fractionWords - From.fractionWords;
     if constexpr (shift >= 0) {
         // Exact apart from overflow
         return shiftOverflow<shift>(in, out);
@@ -678,7 +678,7 @@ template<RoundingMode mode, FixedPointLayout From, FixedPointLayout To>
     requires(CHARGE_BITINT_CONDITION(false) && fixed_point_detail::fitsInMaxBitIntWidth(std::max(From.totalWords() + 1, To.totalWords())))
 [[nodiscard]] bool convertOverflow(const FixedPoint<From>& in, FixedPoint<To>& out) {
     using namespace fixed_point_detail;
-    constexpr int_t shift = int_t(To.fractionWords) - int_t(From.fractionWords);
+    constexpr int_t shift = To.fractionWords - From.fractionWords;
     if constexpr (shift >= 0) {
         return shiftOverflow<shift>(in, out);
     } else {

@@ -10,16 +10,16 @@ namespace {
 
     using Rng = std::mt19937_64;
 
-    BigInt pow2(uint32_t exponent) {
+    BigInt pow2(int_t exponent) {
         BigInt result = int64_t(1) << (exponent % 32);
         BigInt base = int64_t(1) << 32;
-        for (uint32_t i = 0; i < exponent / 32; i++)
+        for (int_t i = 0; i < exponent / 32; i++)
             result = result * base;
         return result;
     }
 
     //! Returns whether the scaled value fits into the given number of words
-    bool fitsWords(const BigInt& scaled, uint32_t words) {
+    bool fitsWords(const BigInt& scaled, int_t words) {
         BigInt limit = pow2(32 * words - 1);
         return scaled >= -limit && scaled < limit;
     }
